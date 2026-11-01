@@ -89,41 +89,39 @@ class Palette extends ThemeExtension<Palette> {
   }
 
   static const light = Palette(
-    bg: Color(0xFFFFFFFF),
-    surface: Color(0xFFF5F5F7),
-    raised: Color(0xFFECECF0),
-    border: Color(0xFFE9E9ED),
-    text: Color(0xFF111113),
-    muted: Color(0xFF5F5F67),
-    faint: Color(0xFF6A6A73),
+    bg: Color(0xFFF6F6F8),
+    surface: Color(0xFFFFFFFF),
+    raised: Color(0xFFEFEFF2),
+    border: Color(0xFFE4E4E9),
+    text: Color(0xFF0F0F12),
+    muted: Color(0xFF64646E),
+    faint: Color(0xFFA1A1AA),
     inverse: Color(0xFFFFFFFF),
-    // Deep enough to read as small text on white and on the grey cards (4.4–5.4:1); the brighter ones (2.5–3.9:1)
-    // only worked as fills.
-    danger: Color(0xFFCE2C31),
-    success: Color(0xFF18794E),
-    warning: Color(0xFFC2410C),
-    accent: Color(0xFF6E56CF),
+    danger: Color(0xFFE5484D),
+    success: Color(0xFF2F9E6B),
+    warning: Color(0xFFE5700F),
+    accent: Color(0xFF3F8F1C),
     accentAlt: Color(0xFF3E63DD),
     glass: Color(0xEBFFFFFF),
-    nav: Color(0xFF111113),
+    nav: Color(0xFFFFFFFF),
   );
 
   static const dark = Palette(
-    bg: Color(0xFF0B0B0D),
-    surface: Color(0xFF17171A),
-    raised: Color(0xFF212125),
-    border: Color(0xFF26262B),
-    text: Color(0xFFF5F5F7),
-    muted: Color(0xFF9E9EA6),
-    faint: Color(0xFF8E8E98),
-    inverse: Color(0xFF0B0B0D),
+    bg: Color(0xFF09090B),
+    surface: Color(0xFF131316),
+    raised: Color(0xFF1C1C21),
+    border: Color(0xFF27272D),
+    text: Color(0xFFF4F4F6),
+    muted: Color(0xFFA0A0AB),
+    faint: Color(0xFF63636D),
+    inverse: Color(0xFF09090B),
     danger: Color(0xFFFF6369),
     success: Color(0xFF3DD68C),
     warning: Color(0xFFFF8B3E),
-    accent: Color(0xFF9E8CFC),
+    accent: Color(0xFFA3E635),
     accentAlt: Color(0xFF7B93FF),
-    glass: Color(0xE617171A),
-    nav: Color(0xFF232328),
+    glass: Color(0xE6131316),
+    nav: Color(0xFF131316),
   );
 
   @override
@@ -157,26 +155,29 @@ extension PaletteX on BuildContext {
 
 const mono = 'GeistMono';
 
-/// Accent colours the user can pick, as (light, dark) pairs. The first is the default violet.
+/// Accent colours the user can pick, as (light, dark) pairs. The first is the default Rynex lime.
 /// What each accent is called, in [accentChoices]' order (read out by a screen reader).
-const accentNames = ['Violet', 'Blue', 'Green', 'Orange', 'Pink', 'Teal'];
+const accentNames = ['Lime', 'Blue', 'Green', 'Orange', 'Pink', 'Teal', 'Violet', 'Indigo'];
 
 const accentChoices = <(Color, Color)>[
-  (Color(0xFF6E56CF), Color(0xFF9E8CFC)),
+  (Color(0xFF3F8F1C), Color(0xFFA3E635)),
   (Color(0xFF3E63DD), Color(0xFF7B93FF)),
   (Color(0xFF30A46C), Color(0xFF3DD68C)),
   (Color(0xFFF76B15), Color(0xFFFF8B3E)),
   (Color(0xFFD6409F), Color(0xFFF07CC0)),
   (Color(0xFF12A594), Color(0xFF3BD3C0)),
+  // Appended, so saved indexes keep pointing at the same colours.
+  (Color(0xFF7C5CFC), Color(0xFFA48CFF)),
+  (Color(0xFF5B5BD6), Color(0xFF8B8DFF)),
 ];
 
 /// UI preferences remembered on the device: theme, text size, density, accent, language, app lock, and
 /// whether the welcome screen was seen.
 class Appearance extends ValueNotifier<ThemeMode> {
-  Appearance._() : super(ThemeMode.light) {
+  Appearance._() : super(ThemeMode.system) {
     try {
       final saved = jsonDecode(_file.readAsStringSync()) as Map<String, dynamic>;
-      value = ThemeMode.values.firstWhere((m) => m.name == saved['theme'], orElse: () => ThemeMode.light);
+      value = ThemeMode.values.firstWhere((m) => m.name == saved['theme'], orElse: () => ThemeMode.system);
       onboarded = saved['onboarded'] == true;
       textScale = (saved['textScale'] as num?)?.toDouble() ?? 1;
       compact = saved['compact'] == true;
