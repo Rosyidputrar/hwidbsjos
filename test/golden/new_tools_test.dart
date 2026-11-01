@@ -182,8 +182,8 @@ void main() {
     });
 
     test('the file name says which chat and when', () {
-      expect(chatExportName('Fix the login!', DateTime(2026, 10, 30, 9, 5)), 'griphub-fix-the-login-20261030-0905.md');
-      expect(chatExportName('Перевод', DateTime(2026, 1, 2, 3, 4)), 'griphub-chat-20260102-0304.md');
+      expect(chatExportName('Fix the login!', DateTime(2026, 10, 30, 9, 5)), 'rynex-fix-the-login-20261030-0905.md');
+      expect(chatExportName('Перевод', DateTime(2026, 1, 2, 3, 4)), 'rynex-chat-20260102-0304.md');
     });
 
     testWidgets('from Project tools: share as text, as a file, copy or save; copy puts the Markdown on the clipboard', (tester) async {

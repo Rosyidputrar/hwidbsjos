@@ -5,7 +5,7 @@ description: Work with GitHub from the phone - clone, commit, push, branches, pu
 
 # GitHub
 
-When the user has connected GitHub in GripHub AI Agent, `$GITHUB_TOKEN` is set and git
+When the user has connected GitHub in Rynex AI Agent, `$GITHUB_TOKEN` is set and git
 is already authenticated for https://github.com (clone, pull and push just
 work; commits use their name and email). There is no `gh` CLI; use curl.
 

@@ -113,7 +113,7 @@ void main() {
       await settle(tester);
       expect(find.text('demo-skill'), findsOneWidget);
 
-      // GripHub lists the installed skills below the recommendations.
+      // Rynex lists the installed skills below the recommendations.
       await tester.ensureVisible(find.text('demo-skill'));
       await tester.pump();
       await tester.tap(find.text('demo-skill'));

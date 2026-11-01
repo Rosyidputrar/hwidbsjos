@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# GripHub server setup. Run once, as root, on the machine the agent will live on (Ubuntu or Debian):
+# Rynex server setup. Run once, as root, on the machine the agent will live on (Ubuntu or Debian):
 #
-#   sudo ./bootstrap.sh --pubkey "ssh-ed25519 AAAA... griphub-app" --address agent.example.com
+#   sudo ./bootstrap.sh --pubkey "ssh-ed25519 AAAA... rynex-app" --address agent.example.com
 #
-# It creates an unprivileged user (griphub) with no sudo, installs what the host needs, sets up the rootless container
+# It creates an unprivileged user (rynex) with no sudo, installs what the host needs, sets up the rootless container
 # the agent's shell runs in, installs the systemd user service, and lets the app's key in over ssh. It prints a setup code
 # at the end; paste that into the app (Settings > Agent on a VPS / server) and the app takes it from there, copying the host over
 # and starting it.
 #
 # Safe to run again: existing users, keys and settings are kept, the rest is brought up to date.
 #
-# Each GripHub user runs this on their own server; one server can hold several agents as separate accounts (--user),
+# Each Rynex user runs this on their own server; one server can hold several agents as separate accounts (--user),
 # next to CoderRa's if that is installed too. Adapted from CoderRa's server mode (seseegy/coderra server/bootstrap.sh).
 #
 # Options
 #   --pubkey KEY        the app's ssh public key (required; the app shows it)
 #   --address HOST      name or IP the app should connect to (default: this machine's first address)
-#   --user NAME         the account to create (default: griphub)
+#   --user NAME         the account to create (default: rynex)
 #   --node-version X.Y.Z  Node.js to install if the system has none that is new enough (default: 24.22.0)
 #   --no-box            do not set up Podman and the container (the agent's shell then runs directly on the server)
 #   --harden-ssh        turn off password logins and root login. Needs --admin-user, so you cannot lock yourself out.
@@ -27,12 +27,12 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-USER_NAME=griphub
+USER_NAME=rynex
 NODE_VERSION=24.22.0
 NODE_MIN_MAJOR=22
 NODE_MIN_MINOR=19
 # Where the service (and anything else of ours that says `node`) finds Node. A test can point it elsewhere.
-NODE_LINK=${GRIPHUB_TEST_NODE_LINK:-/usr/local/bin/node}
+NODE_LINK=${RYNEX_TEST_NODE_LINK:-/usr/local/bin/node}
 PUBKEY=""
 ADDRESS=""
 INSTALL_BOX=1
@@ -127,9 +127,9 @@ case "$(uname -m)" in
 esac
 
 # Room for the agent: say so up front rather than fail halfway (a box build, or the agent killed for memory later).
-# GRIPHUB_TEST_MEM_KB / GRIPHUB_TEST_DISK_KB stand in for the machine in the tests.
-mem_kb=${GRIPHUB_TEST_MEM_KB:-$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)}
-disk_kb=${GRIPHUB_TEST_DISK_KB:-$(df -Pk / 2>/dev/null | awk 'NR == 2 {print $4}' || true)}
+# RYNEX_TEST_MEM_KB / RYNEX_TEST_DISK_KB stand in for the machine in the tests.
+mem_kb=${RYNEX_TEST_MEM_KB:-$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)}
+disk_kb=${RYNEX_TEST_DISK_KB:-$(df -Pk / 2>/dev/null | awk 'NR == 2 {print $4}' || true)}
 if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 1900000 ]; then
 	warn "this machine has $((mem_kb / 1024)) MB of memory; the agent wants at least 2 GB (4 GB with the box is comfortable)"
 fi
@@ -137,7 +137,7 @@ if [ -n "$disk_kb" ] && [ "$disk_kb" -lt 5242880 ]; then
 	warn "only $((disk_kb / 1024)) MB free on /; packages, Node and the box image need about 5 GB"
 fi
 
-for f in griphub-attach griphub-hostd.service box/box box/Containerfile; do
+for f in rynex-attach rynex-hostd.service box/box box/Containerfile; do
 	[ -f "$HERE/$f" ] || die "$HERE/$f is missing: run this from a complete copy of the server/ folder"
 done
 
@@ -146,7 +146,7 @@ if getent passwd "$USER_NAME" >/dev/null; then
 else
 	HOME_DIR=/home/$USER_NAME
 fi
-GRIPHUB_DIR=$HOME_DIR/.griphub
+RYNEX_DIR=$HOME_DIR/.rynex
 
 # ---------------------------------------------------------------------------
 # Packages and Node.js
@@ -179,7 +179,7 @@ node_ok() {
 
 node_is_new_enough() { node_ok node; }
 
-# The service file runs /usr/local/bin/node, and griphub-attach is `env node`, found on an ssh session's PATH. This script
+# The service file runs /usr/local/bin/node, and rynex-attach is `env node`, found on an ssh session's PATH. This script
 # puts the link there when it installs Node itself. A Node that was already on the server (apt, NodeSource, `n`: so
 # /usr/bin/node) was "kept" with no link, and the service could not start (status 203/EXEC) on exactly those servers.
 # Nothing that is there is replaced: a link or file already at NODE_LINK has to be a Node the host can run, or this stops
@@ -279,30 +279,30 @@ wait_for_user_manager() {
 # Files
 
 install_files() {
-	say "installing files into $GRIPHUB_DIR"
+	say "installing files into $RYNEX_DIR"
 	local d
-	for d in "$GRIPHUB_DIR" "$GRIPHUB_DIR/bin" "$GRIPHUB_DIR/box" "$HOME_DIR/.pi" "$HOME_DIR/.pi/agent" "$HOME_DIR/.ssh"; do
+	for d in "$RYNEX_DIR" "$RYNEX_DIR/bin" "$RYNEX_DIR/box" "$HOME_DIR/.pi" "$HOME_DIR/.pi/agent" "$HOME_DIR/.ssh"; do
 		run install -d -o "$USER_NAME" -g "$USER_NAME" -m 700 "$d"
 	done
 	run install -d -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HOME_DIR/workspace"
 	run install -d -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HOME_DIR/.config" "$HOME_DIR/.config/systemd" "$HOME_DIR/.config/systemd/user"
 
-	run install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HERE/griphub-attach" "$GRIPHUB_DIR/bin/griphub-attach"
-	run install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HERE/box/box" "$GRIPHUB_DIR/bin/box"
-	run install -o "$USER_NAME" -g "$USER_NAME" -m 644 "$HERE/box/Containerfile" "$GRIPHUB_DIR/box/Containerfile"
-	run install -o "$USER_NAME" -g "$USER_NAME" -m 644 "$HERE/griphub-hostd.service" "$HOME_DIR/.config/systemd/user/griphub-hostd.service"
+	run install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HERE/rynex-attach" "$RYNEX_DIR/bin/rynex-attach"
+	run install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HERE/box/box" "$RYNEX_DIR/bin/box"
+	run install -o "$USER_NAME" -g "$USER_NAME" -m 644 "$HERE/box/Containerfile" "$RYNEX_DIR/box/Containerfile"
+	run install -o "$USER_NAME" -g "$USER_NAME" -m 644 "$HERE/rynex-hostd.service" "$HOME_DIR/.config/systemd/user/rynex-hostd.service"
 
 	# The key that encrypts tokens at rest (agent/src/secure.ts). Created once and never replaced: a new key would
 	# make everything already stored unreadable.
-	local env_file=$GRIPHUB_DIR/env
-	if [ -f "$env_file" ] && grep -q '^GRIPHUB_STORE_KEY=[0-9a-f]\{64\}$' "$env_file"; then
+	local env_file=$RYNEX_DIR/env
+	if [ -f "$env_file" ] && grep -q '^RYNEX_STORE_KEY=[0-9a-f]\{64\}$' "$env_file"; then
 		say "keeping the existing encryption key"
 	else
 		say "creating the encryption key for stored tokens"
 		if [ "$DRY_RUN" = 1 ]; then
-			echo "+ (write $env_file with a new random GRIPHUB_STORE_KEY, mode 600)"
+			echo "+ (write $env_file with a new random RYNEX_STORE_KEY, mode 600)"
 		else
-			(umask 077 && printf 'GRIPHUB_STORE_KEY=%s\n' "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$env_file")
+			(umask 077 && printf 'RYNEX_STORE_KEY=%s\n' "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$env_file")
 			chown "$USER_NAME:$USER_NAME" "$env_file"
 		fi
 	fi
@@ -335,7 +335,7 @@ authorize_key() {
 enable_service() {
 	say "enabling the host service (it starts once the app has copied the host over)"
 	as_user systemctl --user daemon-reload
-	as_user systemctl --user enable griphub-hostd.service
+	as_user systemctl --user enable rynex-hostd.service
 }
 
 # Rootless podman that does not start is most often Ubuntu 24.04+ AppArmor refusing unprivileged user namespaces to
@@ -348,7 +348,7 @@ repair_podman() {
 		if [ ! -f "$profile" ]; then
 			say "AppArmor restricts user namespaces here; adding a profile that lets podman use them"
 			printf '%s\n' \
-				'# Added by the GripHub setup script: lets rootless podman use user namespaces (Ubuntu 24.04+).' \
+				'# Added by the Rynex setup script: lets rootless podman use user namespaces (Ubuntu 24.04+).' \
 				'abi <abi/4.0>,' \
 				'include <tunables/global>' \
 				"profile podman $podman_bin flags=(unconfined) {" \
@@ -365,8 +365,8 @@ repair_podman() {
 setup_box() {
 	say "setting up the rootless container"
 	if [ "$DRY_RUN" = 1 ]; then
-		as_user podman build -t localhost/griphub-box -f "$GRIPHUB_DIR/box/Containerfile" "$GRIPHUB_DIR/box"
-		as_user podman run --rm localhost/griphub-box true
+		as_user podman build -t localhost/rynex-box -f "$RYNEX_DIR/box/Containerfile" "$RYNEX_DIR/box"
+		as_user podman run --rm localhost/rynex-box true
 		return
 	fi
 	if ! as_user podman info >/dev/null 2>&1; then
@@ -380,11 +380,11 @@ setup_box() {
 		return
 	fi
 	# A build that fails (no network, a mirror down) must not stop the setup: the app can build the box later.
-	if ! as_user podman build -t localhost/griphub-box -f "$GRIPHUB_DIR/box/Containerfile" "$GRIPHUB_DIR/box"; then
+	if ! as_user podman build -t localhost/rynex-box -f "$RYNEX_DIR/box/Containerfile" "$RYNEX_DIR/box"; then
 		warn "building the box failed (see above). Build it later from the app: Settings > The agent's box > Build the box."
 		return
 	fi
-	if as_user podman run --rm localhost/griphub-box true; then
+	if as_user podman run --rm localhost/rynex-box true; then
 		say "the container works"
 	else
 		warn "the container image was built but would not run; see the message above"
@@ -394,7 +394,7 @@ setup_box() {
 harden_ssh() {
 	say "turning off password logins and root login over ssh"
 	local allow="$USER_NAME ${ADMIN_USERS[*]}"
-	local conf=/etc/ssh/sshd_config.d/10-griphub.conf
+	local conf=/etc/ssh/sshd_config.d/10-rynex.conf
 	if [ "$DRY_RUN" = 1 ]; then
 		echo "+ (write $conf: PasswordAuthentication no, PermitRootLogin no, AllowUsers $allow; check with sshd -t; reload ssh)"
 		return
@@ -440,7 +440,7 @@ setup_code() {
 	[ -n "$host" ] || host="(unknown: re-run with --address)"
 	local json code
 	json=$(printf '{"v":1,"host":"%s","port":%s,"user":"%s","hostKey":"%s"}' "$host" "$port" "$USER_NAME" "$host_key")
-	code=griphub1:$(printf '%s' "$json" | base64 -w0)
+	code=rynex1:$(printf '%s' "$json" | base64 -w0)
 
 	echo
 	echo "Done. In the app, open Settings > Agent on a VPS / server and paste this setup code:"

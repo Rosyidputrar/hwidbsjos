@@ -27,7 +27,7 @@ class TestSshd {
   static String? get skip {
     final why = unavailable;
     if (why == null) return null;
-    if (Platform.environment['GRIPHUB_REQUIRE_NODE_SIDE'] != null) throw StateError(why);
+    if (Platform.environment['RYNEX_REQUIRE_NODE_SIDE'] != null) throw StateError(why);
     return why;
   }
 

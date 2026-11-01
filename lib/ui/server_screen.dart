@@ -693,10 +693,10 @@ class _ServerScreenState extends State<ServerScreen> {
   /// What server/README.md ("Menghapus") says to run as root to take the agent off the server: everything of it goes,
   /// chats and the workspace too.
   static const removeCommands =
-      '# Removes the GripHub agent and everything of it (chats, ~/workspace, the box). Make a backup first.\n'
-      'runuser -u griphub -- env XDG_RUNTIME_DIR=/run/user/\$(id -u griphub) systemctl --user disable --now griphub-hostd\n'
-      'loginctl disable-linger griphub\n'
-      'userdel -r griphub\n';
+      '# Removes the Rynex agent and everything of it (chats, ~/workspace, the box). Make a backup first.\n'
+      'runuser -u rynex -- env XDG_RUNTIME_DIR=/run/user/\$(id -u rynex) systemctl --user disable --now rynex-hostd\n'
+      'loginctl disable-linger rynex\n'
+      'userdel -r rynex\n';
 
   bool _testingNotify = false;
 
@@ -739,7 +739,7 @@ class _ServerScreenState extends State<ServerScreen> {
 
   static String _newTopic() {
     final r = Random.secure();
-    return 'griphub-${List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
+    return 'rynex-${List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
   }
 
   /// Sends the setup script to another app (an SFTP client, say), to put it on the server that way.
@@ -984,7 +984,7 @@ class _ServerScreenState extends State<ServerScreen> {
         tr(
           agent.remote.setupScript != null
               ? 'On the server (Ubuntu or Debian), as root or an account with sudo: paste the setup command into its terminal. It carries the setup files and this app\'s key; nothing has to be downloaded.'
-              : 'On the server (Ubuntu or Debian) run bootstrap.sh from the server/ folder of the GripHub repository, as root, with this app\'s key:',
+              : 'On the server (Ubuntu or Debian) run bootstrap.sh from the server/ folder of the Rynex repository, as root, with this app\'s key:',
         ),
         style: text.bodySmall,
       ),
@@ -1081,7 +1081,7 @@ class _ServerScreenState extends State<ServerScreen> {
         style: const TextStyle(fontFamily: mono, fontSize: 12.5),
         decoration: InputDecoration(
           labelText: tr('Setup code'),
-          hintText: 'griphub1:…',
+          hintText: 'rynex1:…',
           errorText: codeError,
           errorMaxLines: 4,
         ),

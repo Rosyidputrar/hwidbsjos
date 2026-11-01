@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GripHub box: runs commands inside a rootless Podman container, so the agent can `apt-get install` anything it
+# Rynex box: runs commands inside a rootless Podman container, so the agent can `apt-get install` anything it
 # needs without any power over the server itself. Adapted from CoderRa's server mode (seseegy/coderra server/box/box).
 #
 #   box -c 'apt-get install -y python3 && python3 x.py'   run one command (this is how the host's bash tool calls it)
@@ -10,11 +10,11 @@
 #
 # What the container sees:
 #   - the workspace, at the same path as outside (read-write), so files are shared both ways;
-#   - its own home folder at the same path as the real home (~/.griphub/box-home, kept between runs), with copies of
+#   - its own home folder at the same path as the real home (~/.rynex/box-home, kept between runs), with copies of
 #     the git and ssh settings the app configured. authorized_keys is never copied: it would let a command in the box
 #     plant access to the server. The copies go in through `podman exec` and the host never writes into that folder
 #     itself: a command in the box can put links there, and a host that follows them writes the server's own files.
-# Memory and CPU are capped (BOX_MEMORY, BOX_SWAP, BOX_CPUS in the environment or in ~/.griphub/box.conf).
+# Memory and CPU are capped (BOX_MEMORY, BOX_SWAP, BOX_CPUS in the environment or in ~/.rynex/box.conf).
 #
 # The container shares the server's network (--network=host) so a dev server started in it is reachable on
 # localhost:<port> for the app's tunnel. That also means it can reach everything the server can: use this on a
@@ -22,12 +22,12 @@
 set -eu
 
 HOME_DIR=${HOME:?box: HOME is not set}
-GRIPHUB_DIR=${GRIPHUB_DIR:-$HOME_DIR/.griphub}
-NAME=${GRIPHUB_BOX_NAME:-griphub-box}
-IMAGE=${GRIPHUB_BOX_IMAGE:-localhost/griphub-box}
-WS=${GRIPHUB_WORKSPACE:-$HOME_DIR/workspace}
-BOXHOME=${GRIPHUB_BOX_HOME:-$GRIPHUB_DIR/box-home}
-CONF=${GRIPHUB_BOX_CONF:-$GRIPHUB_DIR/box.conf}
+RYNEX_DIR=${RYNEX_DIR:-$HOME_DIR/.rynex}
+NAME=${RYNEX_BOX_NAME:-rynex-box}
+IMAGE=${RYNEX_BOX_IMAGE:-localhost/rynex-box}
+WS=${RYNEX_WORKSPACE:-$HOME_DIR/workspace}
+BOXHOME=${RYNEX_BOX_HOME:-$RYNEX_DIR/box-home}
+CONF=${RYNEX_BOX_CONF:-$RYNEX_DIR/box.conf}
 # shellcheck disable=SC1090
 [ -f "$CONF" ] && . "$CONF"
 MEMORY=${BOX_MEMORY:-2g}
@@ -40,9 +40,9 @@ PROBE_SECS=${BOX_PROBE_SECS:-30}
 START_SECS=${BOX_START_SECS:-120}
 # How long an answer to the probe counts, so a burst of commands does not probe each time.
 ALIVE_SECS=${BOX_ALIVE_SECS:-30}
-ALIVE="$GRIPHUB_DIR/box.alive"
+ALIVE="$RYNEX_DIR/box.alive"
 # When the git and ssh settings were last put in the box, and what they looked like then.
-SYNCED="$GRIPHUB_DIR/box.synced"
+SYNCED="$RYNEX_DIR/box.synced"
 
 if [ "${1:-}" = "--reset" ]; then
 	podman rm -f "$NAME" >/dev/null 2>&1 || true
@@ -73,12 +73,12 @@ state() {
 }
 
 # Starts podman for a container that outlives this call. conmon, the process podman leaves behind to watch the container,
-# stays in the cgroup of whoever started it. When that is griphub-hostd.service, restarting the host (every app update
+# stays in the cgroup of whoever started it. When that is rynex-hostd.service, restarting the host (every app update
 # does) stops conmon, and conmon takes the container and everything running in it down. A scope of its own keeps the
 # box apart from the host. Without a user session bus there is no scope to make, and podman runs as it always did.
 detached() {
 	if command -v systemd-run >/dev/null 2>&1 && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ]; then
-		systemd-run --user --scope --quiet --collect --description="GripHub box" -- "$@"
+		systemd-run --user --scope --quiet --collect --description="Rynex box" -- "$@"
 	else
 		"$@"
 	fi
@@ -92,7 +92,7 @@ create() {
 		# The agent reads this (it is the output of its command) and passes it on, so it says what the user can do.
 		echo "box: the agent's box (the container its commands run in) has not been built on this server yet, so no" >&2
 		echo "     command can run. Build it in the app: Settings > The agent's box > Build the box. Or on the server:" >&2
-		echo "     podman build -t $IMAGE -f ~/.griphub/box/Containerfile ~/.griphub/box" >&2
+		echo "     podman build -t $IMAGE -f ~/.rynex/box/Containerfile ~/.rynex/box" >&2
 		exit 127
 	fi
 	rc=0
@@ -113,9 +113,9 @@ start_box() {
 
 # Two calls arriving together on first use must not both try to create the container.
 ensure_running() {
-	mkdir -p "$GRIPHUB_DIR" "$WS"
+	mkdir -p "$RYNEX_DIR" "$WS"
 	( umask 077; mkdir -p "$BOXHOME" )
-	exec 9>"$GRIPHUB_DIR/box.lock"
+	exec 9>"$RYNEX_DIR/box.lock"
 	flock -w 60 9 || { echo "box: another box operation is still running; try again in a minute" >&2; exit 75; }
 	local status rc=0
 	status=$(state) || rc=$?

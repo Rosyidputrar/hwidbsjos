@@ -1,6 +1,6 @@
 // The host's transport (transport.ts): the stdio pass-through the phone uses, and the daemon hub a server agent uses
 // (seq numbers, replay buffer, resume, kick, ping, restart when idle, unix socket). Ported from CoderRa's
-// agent/test/transport.test.ts with its cases unchanged; the GripHub-specific replay rules are at the end.
+// agent/test/transport.test.ts with its cases unchanged; the Rynex-specific replay rules are at the end.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -514,9 +514,9 @@ test("a socket left behind by a crashed daemon is replaced; a live one or a plai
 });
 
 // ---------------------------------------------------------------------------
-// GripHub: what is replayed (server_agent.md 4.1)
+// Rynex: what is replayed (server_agent.md 4.1)
 
-test("subagent lifecycle and GripHub records are replayed; subagent deltas and auth prompts are live-only", () => {
+test("subagent lifecycle and Rynex records are replayed; subagent deltas and auth prompts are live-only", () => {
   const { hub } = daemon();
   const away = connect(hub);
   away.client.detach();

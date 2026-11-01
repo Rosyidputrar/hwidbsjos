@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:rynex/agent/remote_profile.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-String code(Map<String, Object?> json) => 'griphub1:${base64.encode(utf8.encode(jsonEncode(json)))}';
+String code(Map<String, Object?> json) => 'rynex1:${base64.encode(utf8.encode(jsonEncode(json)))}';
 
 const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIABn0o4m7AzJb8wgXq1z+8+KtuqK5nyX6AX9nOQI2zVG';
 
@@ -12,7 +12,7 @@ Map<String, Object?> valid([Map<String, Object?> over = const {}]) => {
   'v': 1,
   'host': 'agent.example.com',
   'port': 22,
-  'user': 'griphub',
+  'user': 'rynex',
   'hostKey': key,
   ...over,
 };
@@ -21,7 +21,7 @@ void main() {
   group('setup code', () {
     test('reads what the server script prints', () {
       final c = SetupCode.parse(code(valid()));
-      expect([c.host, c.port, c.user, c.hostKey], ['agent.example.com', 22, 'griphub', key]);
+      expect([c.host, c.port, c.user, c.hostKey], ['agent.example.com', 22, 'rynex', key]);
     });
 
     test('reads the very code the real script prints', () {
@@ -43,7 +43,7 @@ void main() {
         return;
       }
       final c = SetupCode.parse(output);
-      expect([c.host, c.port, c.user], ['agent.example.com', 22, 'griphub']);
+      expect([c.host, c.port, c.user], ['agent.example.com', 22, 'rynex']);
       expect(c.hostKey, startsWith('ssh-'));
     });
 
@@ -52,7 +52,7 @@ void main() {
       expect(SetupCode.parse('\n   $text   \n\n  address: agent.example.com:22\n').host, 'agent.example.com');
       expect(SetupCode.parse('Done. Paste this:\n\n  $text\n\n  host key: $key\n').host, 'agent.example.com');
       final wrapped = '${text.substring(0, 40)}\n${text.substring(40, 90)}\n${text.substring(90)}\n\n  address: x';
-      expect(SetupCode.parse(wrapped).user, 'griphub');
+      expect(SetupCode.parse(wrapped).user, 'rynex');
     });
 
     test('says what is wrong in words', () {
@@ -76,8 +76,8 @@ void main() {
       );
       expect(why(''), contains('not a setup code'));
       expect(why('hello'), contains('not a setup code'));
-      expect(why('griphub1:%%%'), contains('damaged'));
-      expect(why('griphub1:${base64.encode(utf8.encode('not json'))}'), contains('damaged'));
+      expect(why('rynex1:%%%'), contains('damaged'));
+      expect(why('rynex1:${base64.encode(utf8.encode('not json'))}'), contains('damaged'));
       expect(why(code(valid({'v': 2}))), contains('different version'));
       expect(why(code(valid({'host': '(unknown: re-run with --address)'}))), contains('--address'));
       expect(why(code(valid({'hostKey': '(host key not found)'}))), contains('no host key'));
@@ -116,7 +116,7 @@ void main() {
     test('the key is made once, is ed25519, is private to the app, and is the same on the next call', () async {
       final pub = await setup.ensureKey();
       expect(pub, startsWith('ssh-ed25519 '));
-      expect(pub, endsWith(' griphub-app'));
+      expect(pub, endsWith(' rynex-app'));
       expect(pub.contains('\n'), isFalse);
       expect(File(setup.keyPath).statSync().mode & 0x1ff, 0x180, reason: 'readable by the owner only (0600)');
       expect(await setup.ensureKey(), pub);
@@ -130,11 +130,11 @@ void main() {
 
     test('the ssh config insists on this server, this key, and this host key', () {
       final text = setup.configText(profile);
-      expect(text, contains('Host griphub-vps'));
+      expect(text, contains('Host rynex-vps'));
       for (final line in [
         'HostName agent.example.com',
         'Port 2222',
-        'User griphub',
+        'User rynex',
         'IdentitiesOnly yes',
         'StrictHostKeyChecking yes',
         'GlobalKnownHostsFile /dev/null',
@@ -147,9 +147,9 @@ void main() {
       ]) {
         expect(text, contains('  $line\n'), reason: line);
       }
-      expect(text, contains('IdentityFile "${home.path}/.ssh/griphub_vps"'));
-      expect(text, contains('UserKnownHostsFile "${home.path}/.ssh/griphub_known_hosts"'));
-      expect(text.split('\n').where((l) => l.startsWith('Host ')), ['Host griphub-vps']);
+      expect(text, contains('IdentityFile "${home.path}/.ssh/rynex_vps"'));
+      expect(text, contains('UserKnownHostsFile "${home.path}/.ssh/rynex_known_hosts"'));
+      expect(text.split('\n').where((l) => l.startsWith('Host ')), ['Host rynex-vps']);
     });
 
     test('the pinned host key is written the way ssh reads it, with the port when it is not 22', () {
@@ -158,7 +158,7 @@ void main() {
       expect(setup.knownHostsLine(standard), 'agent.example.com $key\n');
       setup.write(profile);
       expect(File(setup.knownHostsPath).readAsStringSync(), '[agent.example.com]:2222 $key\n');
-      expect(File(setup.configPath).readAsStringSync(), contains('Host griphub-vps'));
+      expect(File(setup.configPath).readAsStringSync(), contains('Host rynex-vps'));
       setup.remove();
       expect(File(setup.configPath).existsSync(), isFalse);
     });
@@ -175,46 +175,46 @@ void main() {
       expect(spec.argv, [
         '/bin/ssh',
         '-F',
-        '/h/.ssh/griphub_config',
+        '/h/.ssh/rynex_config',
         '-T',
-        'griphub-vps',
-        '.griphub/bin/griphub-attach',
+        'rynex-vps',
+        '.rynex/bin/rynex-attach',
       ]);
       expect(spec.env, {'A': 'b'});
     });
 
     test('the command shown for the server is safe to paste', () {
       expect(
-        setup.bootstrapCommand('ssh-ed25519 AAAA griphub-app', address: 'agent.example.com'),
-        "sh griphub-setup.sh --pubkey 'ssh-ed25519 AAAA griphub-app' --address 'agent.example.com'",
+        setup.bootstrapCommand('ssh-ed25519 AAAA rynex-app', address: 'agent.example.com'),
+        "sh rynex-setup.sh --pubkey 'ssh-ed25519 AAAA rynex-app' --address 'agent.example.com'",
       );
       expect(
         setup.bootstrapCommand("ssh-ed25519 AAAA it's"),
-        "sh griphub-setup.sh --pubkey 'ssh-ed25519 AAAA it'\\''s'",
+        "sh rynex-setup.sh --pubkey 'ssh-ed25519 AAAA it'\\''s'",
       );
     });
 
     test(
       'the setup paste writes the script the app carries, then runs it; a script that could end it early is refused',
       () {
-        final paste = RemoteSetup.setupPaste('#!/bin/sh\necho hi\n', "sh griphub-setup.sh --pubkey 'k'");
+        final paste = RemoteSetup.setupPaste('#!/bin/sh\necho hi\n', "sh rynex-setup.sh --pubkey 'k'");
         expect(
           paste,
-          "cat > griphub-setup.sh <<'GRIPHUB_SETUP'\n#!/bin/sh\necho hi\nGRIPHUB_SETUP\nsh griphub-setup.sh --pubkey 'k'\n",
+          "cat > rynex-setup.sh <<'RYNEX_SETUP'\n#!/bin/sh\necho hi\nRYNEX_SETUP\nsh rynex-setup.sh --pubkey 'k'\n",
         );
-        expect(RemoteSetup.setupPaste('no newline', 'x'), contains('no newline\nGRIPHUB_SETUP\n'));
-        expect(() => RemoteSetup.setupPaste('a\nGRIPHUB_SETUP\nrm -rf /\n', 'x'), throwsArgumentError);
+        expect(RemoteSetup.setupPaste('no newline', 'x'), contains('no newline\nRYNEX_SETUP\n'));
+        expect(() => RemoteSetup.setupPaste('a\nRYNEX_SETUP\nrm -rf /\n', 'x'), throwsArgumentError);
       },
     );
 
     test('the profile survives a restart, and a damaged file is ignored', () {
-      final store = RemoteProfileStore(File('${home.path}/.griphub/remote.json'));
+      final store = RemoteProfileStore(File('${home.path}/.rynex/remote.json'));
       expect(store.load(), isNull);
       store.save(profile.copyWith(active: true));
       final back = store.load()!;
       expect(
         [back.host, back.port, back.user, back.hostKey, back.active],
-        ['agent.example.com', 2222, 'griphub', key, true],
+        ['agent.example.com', 2222, 'rynex', key, true],
       );
       expect(profile.address, 'agent.example.com:2222');
       File(store.file.path).writeAsStringSync('{ not json');
@@ -225,14 +225,14 @@ void main() {
 
     test('what ssh complains about becomes something to do', () {
       ServerCheck c(int code, [String out = '', String err = '']) => setup.classify(profile, code, out, err);
-      expect(c(0, 'GRIPHUB:ok\n').problem, ServerProblem.none);
-      expect(c(0, 'GRIPHUB:daemon-down').problem, ServerProblem.daemonDown);
-      expect(c(0, 'GRIPHUB:host-missing').problem, ServerProblem.hostMissing);
-      expect(c(0, 'GRIPHUB:attach-missing').problem, ServerProblem.notInstalled);
+      expect(c(0, 'RYNEX:ok\n').problem, ServerProblem.none);
+      expect(c(0, 'RYNEX:daemon-down').problem, ServerProblem.daemonDown);
+      expect(c(0, 'RYNEX:host-missing').problem, ServerProblem.hostMissing);
+      expect(c(0, 'RYNEX:attach-missing').problem, ServerProblem.notInstalled);
       expect(c(0, 'welcome banner').problem, ServerProblem.other);
       expect(c(255, '', 'Host key verification failed.').problem, ServerProblem.hostKeyChanged);
       expect(c(255, '', '@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @').problem, ServerProblem.hostKeyChanged);
-      expect(c(255, '', 'griphub@x: Permission denied (publickey).').problem, ServerProblem.authRejected);
+      expect(c(255, '', 'rynex@x: Permission denied (publickey).').problem, ServerProblem.authRejected);
       expect(c(255, '', 'ssh: connect to host x port 22: Connection refused').problem, ServerProblem.unreachable);
       expect(c(255, '', 'ssh: Could not resolve hostname x').problem, ServerProblem.unreachable);
       expect(c(255, '', 'ssh: connect to host x port 22: Connection timed out').problem, ServerProblem.unreachable);

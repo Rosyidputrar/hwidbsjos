@@ -7,5 +7,5 @@
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 image=${1:-debian:stable-slim}
-exec docker run --rm --memory 1g --cpus 2 --name "griphub-bootstrap-test-$$" \
+exec docker run --rm --memory 1g --cpus 2 --name "rynex-bootstrap-test-$$" \
 	-v "$here:/server:ro" "$image" bash /server/test/bootstrap-inner.sh

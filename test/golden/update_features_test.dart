@@ -252,7 +252,7 @@ void main() {
               {'type': 'text', 'text': 'Setengah jalan membuat halaman.'},
             ],
             'stopReason': 'aborted',
-            'griphubTurnMs': 902,
+            'rynexTurnMs': 902,
           });
         // A turn that died on a model error.
         final failed = AssistantEntry()
@@ -262,7 +262,7 @@ void main() {
             ],
             'stopReason': 'error',
             'errorMessage': 'HTTP 500',
-            'griphubTurnMs': 14174,
+            'rynexTurnMs': 14174,
           });
         final entries = [UserEntry('Buat halaman'), stopped, UserEntry('Coba lagi'), failed];
         final footers = turnFooters(entries, busy: false);
@@ -345,7 +345,7 @@ void main() {
       });
       agent.addHistoryMessage({
         'role': 'custom',
-        'customType': 'griphub_job',
+        'customType': 'rynex_job',
         'content': '[Background job j1] ...',
         'details': {
           'job': {'id': 'j1', 'label': 'Build', 'status': 'done', 'exitCode': 0, 'elapsedMs': 151000, 'tail': 'built'},
@@ -576,13 +576,13 @@ void main() {
     Future<dynamic> agentWith({required bool active}) async {
       FakeHost();
       final agent = newAgent();
-      final store = RemoteProfileStore(File('${home.path}/.griphub/remote.json'))
+      final store = RemoteProfileStore(File('${home.path}/.rynex/remote.json'))
         ..save(
-          RemoteProfile(host: 'vps.example.com', port: 22, user: 'griphub', hostKey: 'ssh-ed25519 AAAA', active: active, backupKey: 'ab' * 32),
+          RemoteProfile(host: 'vps.example.com', port: 22, user: 'rynex', hostKey: 'ssh-ed25519 AAAA', active: active, backupKey: 'ab' * 32),
         );
       agent.remote.configure(setup: RemoteSetup(home: home.path), store: store);
       final at = goldenNow.subtract(const Duration(minutes: 40)).millisecondsSinceEpoch;
-      File('${agent.remote.backupsDir.path}/auto-$at.ghb')
+      File('${agent.remote.backupsDir.path}/auto-$at.ryb')
         ..createSync(recursive: true)
         ..writeAsBytesSync([71, 72, 66, 49]);
       return (agent, at);
@@ -597,7 +597,7 @@ void main() {
         agent.remote.autoBackup = {
           'enabled': true,
           'backups': [
-            {'name': 'auto-$at.ghb', 'path': '/srv/auto-$at.ghb', 'at': at, 'size': 48 * 1024 * 1024},
+            {'name': 'auto-$at.ryb', 'path': '/srv/auto-$at.ryb', 'at': at, 'size': 48 * 1024 * 1024},
           ],
         };
         agent.remote.notifyListeners();
@@ -620,8 +620,8 @@ void main() {
       final agent = newAgent();
       agent.remote.configure(
         setup: RemoteSetup(home: home.path),
-        store: RemoteProfileStore(File('${home.path}/.griphub/remote.json'))
-          ..save(RemoteProfile(host: 'vps.example.com', port: 22, user: 'griphub', hostKey: 'ssh-ed25519 AAAA', active: true, backupKey: 'ab' * 32)),
+        store: RemoteProfileStore(File('${home.path}/.rynex/remote.json'))
+          ..save(RemoteProfile(host: 'vps.example.com', port: 22, user: 'rynex', hostKey: 'ssh-ed25519 AAAA', active: true, backupKey: 'ab' * 32)),
       );
       await pumpLook(tester, const Look(), Scaffold(body: ListView(padding: const EdgeInsets.all(16), children: [ServerBackupCard(agent: agent)])), height: 560);
       await frames(tester, 4);

@@ -19,7 +19,7 @@ async function bundle(name) {
 	return import(pathToFileURL(outfile).href);
 }
 // secure.ts refuses to write tokens in plaintext; it reads the key once, at import.
-process.env.GRIPHUB_STORE_KEY = "ab".repeat(32);
+process.env.RYNEX_STORE_KEY = "ab".repeat(32);
 const { Integrations, GithubAuthError } = await bundle("integrations");
 
 const HOUR = 3600_000;

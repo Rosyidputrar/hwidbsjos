@@ -245,7 +245,7 @@ class AgentClient {
   /// lock is on. Fire-and-forget safe: the native side ignores unknown calls.
   Future<void> setSecure(bool secure) => _method.invokeMethod('setSecure', secure);
 
-  /// Copies a file into the phone's Download/GripHub folder; returns where it landed.
+  /// Copies a file into the phone's Download/Rynex folder; returns where it landed.
   Future<String> saveToDownloads(String path) async =>
       (await _method.invokeMethod<String>('saveToDownloads', {'path': path}))!;
 
@@ -316,7 +316,7 @@ class AgentClient {
     try {
       await _ready!.future.timeout(readyTimeout);
       final hello = serverHello;
-      if (hello == null) throw AgentError('This is not a GripHub server agent (it did not introduce itself).');
+      if (hello == null) throw AgentError('This is not a Rynex server agent (it did not introduce itself).');
       final protocol = (hello['protocol'] as num?)?.toInt() ?? 0;
       if (protocol > supportedProtocol) {
         throw AgentError(

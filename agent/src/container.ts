@@ -47,7 +47,7 @@ export class Container {
 
 	constructor(filesDir: string) {
 		this.root = join(filesDir, "linux");
-		this.rootfs = process.env.GRIPHUB_ROOTFS ?? join(this.root, "rootfs");
+		this.rootfs = process.env.RYNEX_ROOTFS ?? join(this.root, "rootfs");
 		this.metaFile = join(this.root, "container.json");
 	}
 
@@ -248,7 +248,7 @@ export class Container {
 			// apt drops privileges to _apt for downloads; under proot that user can't write.
 			mkdirSync(join(etc, "apt/apt.conf.d"), { recursive: true });
 			writeFileSync(
-				join(etc, "apt/apt.conf.d/99griphub"),
+				join(etc, "apt/apt.conf.d/99rynex"),
 				'APT::Sandbox::User "root";\nAcquire::Retries "3";\nAPT::Install-Recommends "false";\n',
 			);
 		}

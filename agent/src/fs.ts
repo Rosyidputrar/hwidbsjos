@@ -43,7 +43,7 @@ const DEFAULT_LIMITS: FsLimits = {
 	uploadTtlMs: 15 * 60_000,
 };
 
-const STAGING_PREFIX = ".griphub-up-";
+const STAGING_PREFIX = ".rynex-up-";
 
 /** An error with a stable `code` the app can act on (Node's own errors already carry ENOENT, EEXIST, ...). */
 export class FsError extends Error {

@@ -135,7 +135,7 @@ class _BackupScreenState extends State<BackupScreen> {
     final path = _path.text.trim();
     if (path.isEmpty) return;
     // A phone agent's automatic backup (encrypted): its own flow, asking for the recovery code.
-    if (!_server && path.endsWith('.ghb')) {
+    if (!_server && (path.endsWith('.ghb') || path.endsWith('.ryb'))) {
       await restorePhoneBackup(context, agent, path);
       return;
     }
@@ -311,7 +311,7 @@ class _BackupScreenState extends State<BackupScreen> {
                   autocorrect: false,
                   onChanged: (_) => setState(() {}),
                   style: const TextStyle(fontFamily: mono, fontSize: 13),
-                  decoration: InputDecoration(labelText: tr('Backup file'), hintText: '/…/griphub-backup.zip'),
+                  decoration: InputDecoration(labelText: tr('Backup file'), hintText: '/…/rynex-backup.zip'),
                 ),
                 const SizedBox(height: 10),
                 Align(

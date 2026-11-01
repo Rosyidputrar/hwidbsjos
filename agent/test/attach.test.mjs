@@ -1,4 +1,4 @@
-// server/griphub-attach: the little program the app runs over ssh to reach the daemon's socket. Ported from CoderRa's
+// server/rynex-attach: the little program the app runs over ssh to reach the daemon's socket. Ported from CoderRa's
 // agent/test/attach.test.ts with its cases unchanged (types stripped); server_agent.md, phase 3.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -10,7 +10,7 @@ import { bundle, tempDir } from "./helpers.mjs";
 
 const { Hub, LineBuffer, listenOnSocket } = await bundle("transport");
 
-const ATTACH = fileURLToPath(new URL("../../server/griphub-attach", import.meta.url));
+const ATTACH = fileURLToPath(new URL("../../server/rynex-attach", import.meta.url));
 
 function startAttach(t, env) {
 	const child = spawn(process.execPath, [ATTACH], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
@@ -49,7 +49,7 @@ async function daemon(t) {
 
 test("relays the protocol both ways", async (t) => {
 	const d = await daemon(t);
-	const a = startAttach(t, { GRIPHUB_SOCK: d.sock });
+	const a = startAttach(t, { RYNEX_SOCK: d.sock });
 	await a.until(() => a.records.length >= 2);
 	assert.deepEqual(a.records.map((r) => r.type), ["hello_server", "ready"]);
 	a.send({ id: 1, type: "resume", since: null });
@@ -62,7 +62,7 @@ test("relays the protocol both ways", async (t) => {
 
 test("megabytes in both directions arrive intact", async (t) => {
 	const d = await daemon(t);
-	const a = startAttach(t, { GRIPHUB_SOCK: d.sock });
+	const a = startAttach(t, { RYNEX_SOCK: d.sock });
 	await a.until(() => a.records.length >= 2);
 	a.send({ id: 1, type: "resume", since: null });
 	const text = "x✓日本 \u2028🎉".repeat(300_000);
@@ -73,7 +73,7 @@ test("megabytes in both directions arrive intact", async (t) => {
 
 test("when ssh closes stdin the daemon sees the client leave, and attach exits cleanly", async (t) => {
 	const d = await daemon(t);
-	const a = startAttach(t, { GRIPHUB_SOCK: d.sock });
+	const a = startAttach(t, { RYNEX_SOCK: d.sock });
 	await a.until(() => a.records.length >= 2);
 	assert.equal(d.hub.hasClient(), true);
 	a.child.stdin .end();
@@ -84,10 +84,10 @@ test("when ssh closes stdin the daemon sees the client leave, and attach exits c
 
 test("when the daemon drops the client (kicked) attach delivers the last words and exits cleanly", async (t) => {
 	const d = await daemon(t);
-	const a = startAttach(t, { GRIPHUB_SOCK: d.sock });
+	const a = startAttach(t, { RYNEX_SOCK: d.sock });
 	await a.until(() => a.records.length >= 2);
 	// A newer connection takes over.
-	const b = startAttach(t, { GRIPHUB_SOCK: d.sock });
+	const b = startAttach(t, { RYNEX_SOCK: d.sock });
 	await b.until(() => b.records.length >= 2);
 	assert.equal(await a.exited, 0);
 	assert.ok(a.records.some((r) => r.type === "kicked"), "the kicked notice was not cut off");
@@ -97,23 +97,23 @@ test("when the daemon drops the client (kicked) attach delivers the last words a
 
 test("when the daemon is not running it says so on stderr and exits with 3", async (t) => {
 	const dir = tempDir(t);
-	const a = startAttach(t, { GRIPHUB_SOCK: join(dir, "nope.sock") });
+	const a = startAttach(t, { RYNEX_SOCK: join(dir, "nope.sock") });
 	assert.equal(await a.exited, 3);
 	assert.match(a.stderr(), /the host is not running/);
 	assert.match(a.stderr(), /nope\.sock/);
 	assert.deepEqual(a.records, []);
 });
 
-test("without GRIPHUB_SOCK it uses ~/.griphub/host.sock", async (t) => {
+test("without RYNEX_SOCK it uses ~/.rynex/host.sock", async (t) => {
 	const home = tempDir(t);
-	mkdirSync(join(home, ".griphub"));
+	mkdirSync(join(home, ".rynex"));
 	const hub = new Hub({ replay: true, pingIntervalMs: 0, handle: async () => ({}) });
-	const server = await listenOnSocket(hub, join(home, ".griphub", "host.sock"));
+	const server = await listenOnSocket(hub, join(home, ".rynex", "host.sock"));
 	t.after(async () => {
 		hub.close();
 		await server.close();
 	});
-	const a = startAttach(t, { HOME: home, GRIPHUB_SOCK: "" });
+	const a = startAttach(t, { HOME: home, RYNEX_SOCK: "" });
 	await a.until(() => a.records.length >= 1);
 	assert.equal(a.records[0].type, "hello_server");
 	a.child.stdin .end();

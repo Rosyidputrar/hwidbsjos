@@ -15,7 +15,7 @@ void main() {
     if (why != null) return TestSshd.skip;
     for (final tool in ['tmux', 'script']) {
       if (Process.runSync('which', [tool]).exitCode != 0) {
-        if (Platform.environment['GRIPHUB_REQUIRE_NODE_SIDE'] != null) throw StateError('$tool is not installed');
+        if (Platform.environment['RYNEX_REQUIRE_NODE_SIDE'] != null) throw StateError('$tool is not installed');
         return '$tool is not installed';
       }
     }
@@ -33,7 +33,7 @@ void main() {
   final running = <_Term>[];
 
   String newSession() {
-    final name = 'griphub-t-${Random().nextInt(1 << 30).toRadixString(36)}';
+    final name = 'rynex-t-${Random().nextInt(1 << 30).toRadixString(36)}';
     sessions.add(name);
     return name;
   }
@@ -42,7 +42,7 @@ void main() {
     sshd = await TestSshd.start();
     app = Directory.systemTemp.createTempSync('gh-app-');
     remote = Directory.systemTemp.createTempSync('gh-remote-');
-    setup = RemoteSetup(home: app.path, remoteDir: '${remote.path}/.griphub');
+    setup = RemoteSetup(home: app.path, remoteDir: '${remote.path}/.rynex');
     profile = RemoteProfile(host: '127.0.0.1', port: sshd.port, user: sshd.user, hostKey: sshd.hostKey, active: true);
     sshd.authorize(await setup.ensureKey());
     setup.write(profile);
@@ -166,10 +166,10 @@ void main() {
 
   test('the Linux tab is the agent\'s container shell: the box program, not a plain shell', () async {
     final name = newSession();
-    File('${remote.path}/.griphub/bin/box')
+    File('${remote.path}/.rynex/bin/box')
       ..createSync(recursive: true)
       ..writeAsStringSync('#!/bin/sh\necho "IN-THE-BOX-\$((20+1))"\nexec bash -l\n');
-    Process.runSync('chmod', ['755', '${remote.path}/.griphub/bin/box']);
+    Process.runSync('chmod', ['755', '${remote.path}/.rynex/bin/box']);
     final t = await open(setup.terminalArgv(cwd: remote.path, session: name, box: true));
     await t.until('IN-THE-BOX-21');
     t.send('echo still-a-shell-\$((3*3))\n');

@@ -16,13 +16,13 @@ void main() {
 
   late TestSshd sshd;
   late Directory app; // the phone's home
-  late Directory server; // the server's .griphub parent
+  late Directory server; // the server's .rynex parent
   late RemoteSetup setup;
   late RemoteProfile profile;
   late String restartMarker;
   final cleanup = <Future<void> Function()>[];
 
-  String remoteDir() => '${server.path}/.griphub';
+  String remoteDir() => '${server.path}/.rynex';
 
   String absoluteNode() {
     final n = TestDaemon.node;
@@ -30,9 +30,9 @@ void main() {
   }
 
   void installAttachWrapper(String sock) {
-    final f = File('${remoteDir()}/bin/griphub-attach')..createSync(recursive: true);
+    final f = File('${remoteDir()}/bin/rynex-attach')..createSync(recursive: true);
     f.writeAsStringSync(
-      "#!/bin/sh\nexec env GRIPHUB_SOCK='$sock' '${absoluteNode()}' '${Directory.current.path}/server/griphub-attach'\n",
+      "#!/bin/sh\nexec env RYNEX_SOCK='$sock' '${absoluteNode()}' '${Directory.current.path}/server/rynex-attach'\n",
     );
     Process.runSync('chmod', ['755', f.path]);
   }
@@ -231,7 +231,7 @@ void main() {
       '-o',
       'ExitOnForwardFailure=yes',
       '-T',
-      'griphub-vps',
+      'rynex-vps',
       'true',
     ]);
     expect(r.exitCode, isNot(0), reason: 'a remote forward must be refused by the key\'s restrictions');

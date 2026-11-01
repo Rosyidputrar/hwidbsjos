@@ -1,7 +1,7 @@
 /**
- * Accounts, repositories, SSH and deploy targets for the GripHub AI Agent app.
+ * Accounts, repositories, SSH and deploy targets for the Rynex AI Agent app.
  *
- * Credentials live in <agentDir>/griphub/integrations.json (app-private
+ * Credentials live in <agentDir>/rynex/integrations.json (app-private
  * storage) and are exported into the host's environment, so the agent's own
  * shell can use them too (git push, curl the GitHub API, deploy).
  */
@@ -92,7 +92,7 @@ export interface AppSettings {
 	tinyfishKey?: string;
 	/** Whether the agent uses TinyFish Search; unset means on. */
 	tinyfishSearch?: boolean;
-	/** GripHub Router search backends (OpenAI Responses + Anthropic Messages); unset means on. */
+	/** Search through the gateway provider (the first custom provider; OpenAI Responses + Anthropic Messages legs); unset means on. */
 	openaiSearch?: boolean;
 	anthropicSearch?: boolean;
 	/** Dedicated search models for the router backends; unset means the defaults below. */
@@ -184,7 +184,7 @@ export interface IntegrationsOptions {
 }
 
 /** Optional build-time override for the GitHub OAuth App Client ID (device flow enabled). Public by design; no secret is used. Empty means not configured. */
-const GITHUB_CLIENT_ID = process.env.GRIPHUB_GITHUB_CLIENT_ID ?? "";
+const GITHUB_CLIENT_ID = process.env.RYNEX_GITHUB_CLIENT_ID ?? "";
 
 /** Line output, plus an optional channel for structured CI progress. */
 export type Log = ((line: string) => void) & { ci?: (snapshot: CiSnapshot) => void };
@@ -256,7 +256,7 @@ export class Integrations {
 		private readonly workspace: string,
 		private readonly options: IntegrationsOptions = {},
 	) {
-		const dir = join(agentDir, "griphub");
+		const dir = join(agentDir, "rynex");
 		mkdirSync(dir, { recursive: true });
 		this.file = join(dir, "integrations.json");
 		this.home = process.env.HOME ?? agentDir;
@@ -785,7 +785,7 @@ export class Integrations {
 		const res = await fetch(`https://github.com${path}`, {
 			method: "POST",
 			signal: AbortSignal.timeout(30_000),
-			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "GripHub AI Agent" },
+			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Rynex AI Agent" },
 			body: JSON.stringify(body),
 		});
 		const text = await res.text();
@@ -943,7 +943,7 @@ export class Integrations {
 		const key = join(this.home, ".ssh", "id_ed25519");
 		mkdirSync(join(this.home, ".ssh"), { recursive: true, mode: 0o700 });
 		if (!existsSync(key)) {
-			await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "griphub", "-f", key], { cwd: this.home });
+			await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "rynex", "-f", key], { cwd: this.home });
 		}
 		return readFileSync(`${key}.pub`, "utf8").trim();
 	}
@@ -976,8 +976,8 @@ export class Integrations {
 	/** Saved hosts become aliases in ~/.ssh/config so `ssh <name>` just works. */
 	private writeSshConfig() {
 		const file = join(this.home, ".ssh", "config");
-		const begin = "# >>> griphub hosts (managed) >>>";
-		const end = "# <<< griphub hosts <<<";
+		const begin = "# >>> rynex hosts (managed) >>>";
+		const end = "# <<< rynex hosts <<<";
 		let current = existsSync(file) ? readFileSync(file, "utf8") : "";
 		const a = current.indexOf(begin);
 		const b = current.indexOf(end);
@@ -1071,7 +1071,7 @@ export class Integrations {
 	/** Commands in the Linux container (wrangler and npm live there), when it is installed. */
 	private containerRunner() {
 		if (this.options.server) return this.serverRunner();
-		const rootfs = process.env.GRIPHUB_ROOTFS;
+		const rootfs = process.env.RYNEX_ROOTFS;
 		const available = !!rootfs && existsSync(join(rootfs, "etc"));
 		return {
 			available,
@@ -1446,7 +1446,7 @@ export class Integrations {
 			log(`Creating GitHub repository ${gh.login}/${name}…`);
 			const repo = await this.github("/user/repos", {
 				method: "POST",
-				body: JSON.stringify({ name, private: false, description: "Deployed from GripHub AI Agent" }),
+				body: JSON.stringify({ name, private: false, description: "Deployed from Rynex AI Agent" }),
 			}).catch(async (e) => {
 				if ((e as any).status === 422) return this.github(`/repos/${gh.login}/${name}`);
 				throw e;
@@ -1460,7 +1460,7 @@ export class Integrations {
 		const files = walk(dir);
 		if (files.length === 0) throw new Error("Nothing to deploy: the folder is empty");
 		log(`Deploying ${files.length} files from ${basename(dir)} to ${slug} (${branch})…`);
-		const tmp = mkdtempSync(join(tmpdir(), "griphub-deploy-"));
+		const tmp = mkdtempSync(join(tmpdir(), "rynex-deploy-"));
 		try {
 			for (const rel of files) {
 				const target = join(tmp, rel);
@@ -1471,7 +1471,7 @@ export class Integrations {
 			const quiet = (args: string[]) => run("git", args, { cwd: tmp });
 			await git(["init", "-b", branch]);
 			await git(["add", "-A"]);
-			await git(["commit", "-m", options.message || "Deploy from GripHub AI Agent"]);
+			await git(["commit", "-m", options.message || "Deploy from Rynex AI Agent"]);
 			await quiet(["remote", "add", "origin", `https://github.com/${slug}.git`]);
 			// Push with a lease when the branch already exists, so a
 			// concurrent change to the deploy branch is refused, not clobbered.
@@ -1522,7 +1522,7 @@ export class Integrations {
 			cwd: dir,
 			log,
 		});
-		const tmp = mkdtempSync(join(tmpdir(), "griphub-ssh-"));
+		const tmp = mkdtempSync(join(tmpdir(), "rynex-ssh-"));
 		try {
 			const list = join(tmp, "files.txt");
 			writeFileSync(list, `${files.join("\n")}\n`);

@@ -34,7 +34,7 @@ async function outcome(p) {
 
 const b64 = (s) => Buffer.from(s).toString("base64");
 const unb64 = (s) => Buffer.from(s, "base64");
-const stagingFiles = (dir) => readdirSync(dir).filter((f) => f.startsWith(".griphub-up-"));
+const stagingFiles = (dir) => readdirSync(dir).filter((f) => f.startsWith(".rynex-up-"));
 
 // ---------------------------------------------------------------------------
 // Which paths are allowed at all
@@ -384,7 +384,7 @@ test("write refuses folders, read-only roots and missing parents", async (t) => 
 
 test("a leftover staging name, even a planted link, is never written through", async (t) => {
 	const { fs, ws, outside } = setup(t);
-	symlinkSync(join(outside, "secret.txt"), join(ws, ".griphub-up-trap"));
+	symlinkSync(join(outside, "secret.txt"), join(ws, ".rynex-up-trap"));
 	await fs.write({ path: join(ws, "f"), data: b64("fine"), uploadId: "trap" });
 	assert.equal(readFileSync(join(outside, "secret.txt"), "utf8"), "TOP SECRET");
 	assert.equal(readFileSync(join(ws, "f"), "utf8"), "fine");

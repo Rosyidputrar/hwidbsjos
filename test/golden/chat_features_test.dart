@@ -57,7 +57,7 @@ void main() {
     }
 
     testWidgets('a link in the user bubble asks first; Always trust skips the question next time', (tester) async {
-      await pumpText(tester, const UserBubble('cek https://github.com/Rosyidputrar/griphub ya'));
+      await pumpText(tester, const UserBubble('cek https://github.com/Rosyidputrar/rynex ya'));
       await tester.tapAt(tester.getTopLeft(find.byType(UserBubble)) + const Offset(80, 22));
       await frames(tester);
       expect(find.byType(LinkConfirmDialog), findsOneWidget);
@@ -66,7 +66,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Open'));
       await frames(tester);
-      expect(opened, ['https://github.com/Rosyidputrar/griphub']);
+      expect(opened, ['https://github.com/Rosyidputrar/rynex']);
       expect(Appearance.instance.trustedDomains, ['github.com']);
       await tester.tapAt(tester.getTopLeft(find.byType(UserBubble)) + const Offset(80, 22));
       await frames(tester);
@@ -103,12 +103,12 @@ void main() {
         await pumpLook(
           tester,
           look,
-          const Scaffold(body: Center(child: LinkConfirmDialog(url: 'https://griphubrouter.web.id/portal?ref=app', host: 'griphubrouter.web.id'))),
+          const Scaffold(body: Center(child: LinkConfirmDialog(url: 'https://some-provider.example.com/portal?ref=app', host: 'some-provider.example.com'))),
         );
         await frames(tester);
         expect(layoutErrors, isEmpty);
         // A long domain wraps at its dots, never mid-word.
-        final para = tester.renderObject<RenderParagraph>(find.text('griphubrouter.\u200Bweb.\u200Bid'));
+        final para = tester.renderObject<RenderParagraph>(find.text('some-provider.\u200Bexample.\u200Bcom'));
         final t = para.text.toPlainText();
         final lines = para.getBoxesForSelection(TextSelection(baseOffset: 0, extentOffset: t.length));
         // Each new line starts right after a break opportunity.

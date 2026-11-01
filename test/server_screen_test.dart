@@ -17,10 +17,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/fake_backend.dart';
 
 const hostKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIABn0o4m7AzJb8wgXq1z+8+KtuqK5nyX6AX9nOQI2zVG';
-const pubKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyOnlyForTests griphub-app';
+const pubKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyOnlyForTests rynex-app';
 
 String setupCode([Map<String, Object?> over = const {}]) =>
-    'griphub1:${base64.encode(utf8.encode(jsonEncode({'v': 1, 'host': 'agent.example.com', 'port': 22, 'user': 'griphub', 'hostKey': hostKey, ...over})))}';
+    'rynex1:${base64.encode(utf8.encode(jsonEncode({'v': 1, 'host': 'agent.example.com', 'port': 22, 'user': 'rynex', 'hostKey': hostKey, ...over})))}';
 
 /// RemoteSetup without the processes: a fixed key, and answers for the server checks the test chooses.
 class StubSetup extends RemoteSetup {
@@ -88,7 +88,7 @@ void main() {
     backend = FakeBackend();
     agent = AgentController(AgentClient(backend: backend)..backoff = ((_) => const Duration(milliseconds: 20)));
     setup = StubSetup('${tmp.path}/home');
-    store = RemoteProfileStore(File('${tmp.path}/home/.griphub/remote.json'));
+    store = RemoteProfileStore(File('${tmp.path}/home/.rynex/remote.json'));
   });
 
   /// [saved]: a server already set up; [active]: and in use.
@@ -276,7 +276,7 @@ void main() {
       configure();
       await open(tester);
       expect(find.text('This phone runs the agent'), findsOneWidget);
-      expect(find.textContaining("sh griphub-setup.sh --pubkey '$pubKey'"), findsOneWidget);
+      expect(find.textContaining("sh rynex-setup.sh --pubkey '$pubKey'"), findsOneWidget);
       expect(find.text('Setup code'), findsOneWidget);
 
       await tester.enterText(find.widgetWithText(TextField, 'Server address (name or IP)'), 'agent.example.com');
@@ -287,7 +287,7 @@ void main() {
     testWidgets('the setup files come with the app: one paste for the server\'s terminal, or the file to share', (
       tester,
     ) async {
-      final script = File('${tmp.path}/host/server/griphub-setup.sh')
+      final script = File('${tmp.path}/host/server/rynex-setup.sh')
         ..createSync(recursive: true)
         ..writeAsStringSync('#!/bin/sh\necho the server files\n');
       final platform = <MethodCall>[];
@@ -316,8 +316,8 @@ void main() {
       }
       expect(
         clipboard,
-        "cat > griphub-setup.sh <<'GRIPHUB_SETUP'\n#!/bin/sh\necho the server files\nGRIPHUB_SETUP\n"
-        "sh griphub-setup.sh --pubkey '$pubKey' --address '85.9.194.68'\n",
+        "cat > rynex-setup.sh <<'RYNEX_SETUP'\n#!/bin/sh\necho the server files\nRYNEX_SETUP\n"
+        "sh rynex-setup.sh --pubkey '$pubKey' --address '85.9.194.68'\n",
       );
 
       await tester.tap(find.text('Share the setup file instead'));
@@ -330,7 +330,7 @@ void main() {
     ) async {
       configure();
       await open(tester);
-      expect(find.textContaining('server/ folder of the GripHub repository'), findsOneWidget);
+      expect(find.textContaining('server/ folder of the Rynex repository'), findsOneWidget);
       expect(find.text('Copy setup command'), findsNothing);
       expect(find.text('Share the setup file instead'), findsNothing);
     });
@@ -351,7 +351,7 @@ void main() {
       await tester.pump();
       expect(find.textContaining('not a setup code'), findsNothing);
       expect(find.text('agent.example.com'), findsOneWidget);
-      expect(find.text('user griphub'), findsOneWidget);
+      expect(find.text('user rynex'), findsOneWidget);
       final saved = store.load()!;
       expect([saved.host, saved.active], ['agent.example.com', false]);
       expect(File(setup.configPath).readAsStringSync(), contains('HostName agent.example.com'));
@@ -550,7 +550,7 @@ void main() {
     testWidgets('the setup line has no copy of its own when the app carries the file: only the full paste', (
       tester,
     ) async {
-      File('${tmp.path}/host/server/griphub-setup.sh')
+      File('${tmp.path}/host/server/rynex-setup.sh')
         ..createSync(recursive: true)
         ..writeAsStringSync('#!/bin/sh\n');
       configure();
@@ -758,7 +758,7 @@ void main() {
     testWidgets('a topic is ready before anything is set up, and a saved one can be tested', (tester) async {
       await openConnected(tester);
       final field = tester.widget<TextField>(find.widgetWithText(TextField, 'Topic (keep it secret)'));
-      expect(field.controller!.text, matches(RegExp(r'^griphub-[0-9a-f]{32}$')), reason: 'Save is the only step');
+      expect(field.controller!.text, matches(RegExp(r'^rynex-[0-9a-f]{32}$')), reason: 'Save is the only step');
       expect(find.text('Send a test notification'), findsNothing, reason: 'nothing saved yet');
 
       await tester.ensureVisible(find.text('Save'));
@@ -795,8 +795,8 @@ void main() {
       expect(find.textContaining('keeps running, with its schedules and notifications'), findsOneWidget);
       await tester.tap(find.text('Copy the commands that remove it from the server'));
       await tester.pump();
-      expect(clipboard, contains('userdel -r griphub'));
-      expect(clipboard, contains('systemctl --user disable --now griphub-hostd'));
+      expect(clipboard, contains('userdel -r rynex'));
+      expect(clipboard, contains('systemctl --user disable --now rynex-hostd'));
       await tester.tap(find.text('Cancel'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(store.load(), isNotNull);
@@ -839,7 +839,7 @@ void main() {
       await tester.pump();
       final field = tester.widget<TextField>(find.widgetWithText(TextField, 'Topic (keep it secret)'));
       final topic = field.controller!.text;
-      expect(topic, matches(RegExp(r'^griphub-[0-9a-f]{32}$')), reason: '128 bits, so nobody can guess it');
+      expect(topic, matches(RegExp(r'^rynex-[0-9a-f]{32}$')), reason: '128 bits, so nobody can guess it');
 
       await tester.ensureVisible(find.text('Save'));
       await tester.tap(find.text('Save'));
@@ -868,7 +868,7 @@ void main() {
       expect(agent.remote.active, isTrue);
       expect(store.load()!.active, isTrue, reason: 'remembered for the next start');
       expect(agent.client.isRemote, isTrue);
-      expect(agent.client.remote!.argv, containsAllInOrder(['ssh', '-F', setup.configPath, '-T', 'griphub-vps']));
+      expect(agent.client.remote!.argv, containsAllInOrder(['ssh', '-F', setup.configPath, '-T', 'rynex-vps']));
       expect(agent.status, BootStatus.ready, reason: agent.bootError);
       expect(backend.sent.where((c) => c['type'] == 'resume'), hasLength(1), reason: 'it connected as a server agent');
 

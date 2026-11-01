@@ -73,9 +73,9 @@ const RISKY_BASH = [
  */
 function secretPlaces(): { dirs: string[]; files: string[] } {
 	const home = process.env.HOME ?? "";
-	const dirs = [process.env.GRIPHUB_DIR, process.env.PI_CODING_AGENT_DIR && join(process.env.PI_CODING_AGENT_DIR, "griphub")].filter((d): d is string => !!d);
+	const dirs = [process.env.RYNEX_DIR, process.env.PI_CODING_AGENT_DIR && join(process.env.PI_CODING_AGENT_DIR, "rynex")].filter((d): d is string => !!d);
 	if (home) {
-		dirs.push(join(home, ".griphub"), join(home, ".ssh"), join(home, ".gnupg"), join(home, ".aws"), join(home, ".config", "gh"), join(home, ".pi", "agent", "griphub"));
+		dirs.push(join(home, ".rynex"), join(home, ".ssh"), join(home, ".gnupg"), join(home, ".aws"), join(home, ".config", "gh"), join(home, ".pi", "agent", "rynex"));
 	}
 	const files = home ? [".gitconfig", ".git-credentials", ".netrc", ".npmrc", ".pypirc"].map((f) => join(home, f)) : [];
 	return { dirs, files };
@@ -100,7 +100,7 @@ export function secretReadRisk(toolName: string, input: Record<string, unknown>,
 
 /** Commands that name where the secrets are, or print the environment the tokens are in. A list, so a speed bump, not a wall. */
 const SECRET_BASH = [
-	/\.griphub\b|GRIPHUB_STORE_KEY|integrations\.json|custom-providers\.json/i,
+	/\.rynex\b|RYNEX_STORE_KEY|integrations\.json|custom-providers\.json/i,
 	/\/proc\/[^\s]*\/(environ|cmdline|mem)\b/i,
 	/\.git-credentials|\.netrc\b|\.gitconfig\b|\.config\/gh\b/i,
 	/\$\{?(GITHUB_TOKEN|GH_TOKEN|VERCEL_TOKEN|CLOUDFLARE_API_TOKEN)\b/,
@@ -284,8 +284,8 @@ function describe(toolName: string, input: Record<string, unknown>) {
 	return JSON.stringify(input).slice(0, 400);
 }
 
-/** Why the first subagent of a chat is asked about: it works on its own and spends credits and time while it does. */
-export const SUBAGENT_RISK = "This starts a subagent that works on its own and spends credits";
+/** Why the first subagent of a chat is asked about: it works on its own and spends money and time while it does. */
+export const SUBAGENT_RISK = "This starts a subagent that works on its own and spends money";
 
 export class Guard {
 	mode: ApprovalMode = "ask_risky";

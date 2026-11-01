@@ -45,7 +45,7 @@ void main() {
     final turn = <ChatEntry>[
       UserEntry('pahami codebase'),
       assistant('Direktori saat ini adalah home.', tool: true),
-      assistant('Proyek utamanya adalah griphub. Mari saya telusuri.', tool: true),
+      assistant('Proyek utamanya adalah rynex. Mari saya telusuri.', tool: true),
       assistant(null, tool: true),
       assistant('Ini ringkasannya: aplikasi Flutter dengan host Node.', model: 'claude-sonnet-5'),
       UserEntry('lanjut'),

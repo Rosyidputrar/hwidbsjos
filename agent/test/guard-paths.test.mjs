@@ -77,7 +77,7 @@ test("a leading @ no longer hides where a file is written", () => {
 		"@../x",
 		"@../../.bashrc",
 		"@/etc/passwd",
-		"@/home/griphub/.ssh/authorized_keys",
+		"@/home/rynex/.ssh/authorized_keys",
 	]) {
 		assert.equal(ask("write", p), ASKS, `write ${p}`);
 		assert.equal(ask("edit", p), ASKS, `edit ${p}`);

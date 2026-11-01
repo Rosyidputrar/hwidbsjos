@@ -189,7 +189,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
                                 const SizedBox(height: 2),
                                 Text(
                                   tr(
-                                    'The agent has web_search and web_fetch tools. GripHub search below runs first '
+                                    'The agent has web_search and web_fetch tools. Rynex search below runs first '
                                     'with the search models below, then the keys below, then DuckDuckGo.',
                                   ),
                                   style: text.bodySmall,
@@ -306,7 +306,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
                         _FeatureSwitch(
                           icon: LucideIcons.search,
                           title: tr('OpenAI search'),
-                          subtitle: tr('Responses API · GPT models · uses the saved GripHub key'),
+                          subtitle: tr('Responses API · GPT models · uses the saved Rynex key'),
                           value: s.openaiSearch,
                           onChanged: (v) => _save({'openaiSearch': v}),
                         ),
@@ -325,7 +325,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
                         _FeatureSwitch(
                           icon: LucideIcons.globe,
                           title: tr('Anthropic search'),
-                          subtitle: tr('Messages API · Claude models · uses the saved GripHub key'),
+                          subtitle: tr('Messages API · Claude models · uses the saved Rynex key'),
                           value: s.anthropicSearch,
                           onChanged: (v) => _save({'anthropicSearch': v}),
                         ),

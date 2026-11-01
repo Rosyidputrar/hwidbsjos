@@ -807,7 +807,7 @@ class AgentController extends ChangeNotifier {
     final name = sessionName?.trim();
     if (name != null && name.isNotEmpty) return name;
     final first = entries.whereType<UserEntry>().firstOrNull?.text.trim().split('\n').first ?? '';
-    return first.length > 48 ? '${first.substring(0, 47)}…' : (first.isEmpty ? 'GripHub AI Agent' : first);
+    return first.length > 48 ? '${first.substring(0, 47)}…' : (first.isEmpty ? 'Rynex AI Agent' : first);
   }
 
   /// The message an edit or fork is working on (its entry id, or `''` for a fork of the whole chat), while one runs.
@@ -948,7 +948,7 @@ class AgentController extends ChangeNotifier {
         if (last is AssistantEntry) last.turnMs = (record['turnMs'] as num).toInt();
         turnStartedAt = null;
         _scheduleNotify();
-      // GripHub's model list changed on its daily refresh: reload the picker.
+      // Rynex's model list changed on its daily refresh: reload the picker.
       case 'models_changed':
         unawaited(refreshProviders().catchError((_) {}));
       case 'notice':
@@ -1127,7 +1127,7 @@ class AgentController extends ChangeNotifier {
             ..cost = (m['cost'] as num?)?.toDouble(),
         );
       // A background job's result: the host's message to the agent, shown as a notice of the job's end.
-      case 'custom' when m['customType'] == 'griphub_job':
+      case 'custom' when m['customType'] == 'rynex_job':
         final job = (m['details'] as Map?)?['job'];
         if (job is Map) entries.add(JobEntry(job.cast<String, dynamic>()));
     }

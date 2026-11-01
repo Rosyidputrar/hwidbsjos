@@ -217,7 +217,7 @@ class AssistantEntry extends ChatEntry {
     streaming = false;
     model = message['model'] as String?;
     usage = RequestUsage.fromMessage(message);
-    turnMs = (message['griphubTurnMs'] as num?)?.toInt() ?? turnMs;
+    turnMs = (message['rynexTurnMs'] as num?)?.toInt() ?? turnMs;
     final stop = message['stopReason'];
     aborted = stop == 'aborted';
     if (stop == 'error') error = readableError(message['errorMessage'] as String? ?? 'The model returned an error.');
@@ -348,7 +348,7 @@ String toolSummary(String? name, Map<String, dynamic>? args) {
 
   final value = switch (name) {
     'bash' => pick(['command'])?.replaceAllMapped(
-      RegExp(r'''(?:/data/(?:data|user/\d+)/id\.griphub\.agent|/storage/emulated/\d+|/sdcard)(?:/[^\s'"/;|&>]+)+'''),
+      RegExp(r'''(?:/data/(?:data|user/\d+)/id\.rynex\.agent|/storage/emulated/\d+|/sdcard)(?:/[^\s'"/;|&>]+)+'''),
       (m) => _shortPath(m[0]) ?? m[0]!,
     ),
     'read' || 'write' || 'edit' || 'ls' => _shortPath(pick(['path', 'file_path'])),

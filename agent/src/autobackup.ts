@@ -107,7 +107,7 @@ interface Item {
 }
 
 export interface AutoBackupOptions {
-	/** Where the backups go (~/.griphub/backups). */
+	/** Where the backups go (~/.rynex/backups). */
 	dir: string;
 	/** Where the key and the last fingerprint are kept (encrypted with the server's store key). */
 	configFile: string;
@@ -188,7 +188,7 @@ export class AutoBackup {
 	list(): BackupInfo[] {
 		if (!existsSync(this.o.dir)) return [];
 		return readdirSync(this.o.dir)
-			.filter((n) => /^auto-\d+\.ghb$/.test(n))
+			.filter((n) => /^auto-\d+\.(?:ghb|ryb)$/.test(n))
 			.map((name) => {
 				const path = join(this.o.dir, name);
 				const st = statSync(path);
@@ -265,7 +265,7 @@ export class AutoBackup {
 			return;
 		}
 		for (const name of names) {
-			if (!/^\.auto-\d+\.ghb\.tmp$/.test(name)) continue;
+			if (!/^\.auto-\d+\.(?:ghb|ryb)\.tmp$/.test(name)) continue;
 			const path = join(this.o.dir, name);
 			if (path === this.writing) continue;
 			try {
@@ -281,7 +281,7 @@ export class AutoBackup {
 	/** What goes in: the agent's data, the workspace, and the deploy key; never the backups themselves. */
 	items(): Item[] {
 		const out: Item[] = [];
-		const skip = new Set([this.o.dir, join(this.o.agentDir, "bin"), join(this.o.agentDir, "griphub", "checkpoints"), this.o.configFile]);
+		const skip = new Set([this.o.dir, join(this.o.agentDir, "bin"), join(this.o.agentDir, "rynex", "checkpoints"), this.o.configFile]);
 		// Neither tree is walked twice when one sits inside the other.
 		const agentSkip = new Set([...skip, this.o.workspace]);
 		const wsSkip = new Set([...skip, this.o.agentDir]);
@@ -317,7 +317,7 @@ export class AutoBackup {
 		const key = Buffer.from(this.config.key!, "hex");
 		mkdirSync(this.o.dir, { recursive: true, mode: 0o700 });
 		const at = this.now();
-		const name = `auto-${at}.ghb`;
+		const name = `auto-${at}.ryb`;
 		const final = join(this.o.dir, name);
 		const tmp = join(this.o.dir, `.${name}.tmp`);
 		const fd = openSync(tmp, "w", 0o600);
@@ -510,7 +510,7 @@ export function decryptBackup(src: string, keyHex: string, out: string) {
 	try {
 		const head = Buffer.alloc(16);
 		readSync(fd, head, 0, 16, 0);
-		if (size < 32 || !head.subarray(0, 4).equals(MAGIC)) throw new Error("This is not a GripHub server backup");
+		if (size < 32 || !head.subarray(0, 4).equals(MAGIC)) throw new Error("This is not a Rynex server backup");
 		const tag = Buffer.alloc(16);
 		readSync(fd, tag, 0, 16, size - 16);
 		const decipher = createDecipheriv("aes-256-gcm", Buffer.from(keyHex, "hex"), head.subarray(4, 16));
@@ -586,11 +586,11 @@ const RESTORE_AGENT = [
 	(rel: string) => rel.startsWith("sessions/"),
 	(rel: string) => rel.startsWith("skills/"),
 	(rel: string) => rel.startsWith("prompts/"),
-	(rel: string) => rel === "griphub/runs.json",
+	(rel: string) => rel === "rynex/runs.json",
 ];
 
 /** The secret files a phone takes over: providers and keys, accounts and tokens, MCP servers. */
-const RESTORE_SECURE = new Set(["griphub/custom-providers.json", "griphub/integrations.json", "griphub/mcp.json"]);
+const RESTORE_SECURE = new Set(["rynex/custom-providers.json", "rynex/integrations.json", "rynex/mcp.json"]);
 
 /** Settings that belong to the machine, not the user: the phone keeps its own. */
 const MACHINE_SETTINGS = ["dns", "dnsUrl", "containerShell", "timeZone", "notify"];
@@ -631,13 +631,13 @@ export function restoreBackup(zipPath: string, to: RestoreTarget) {
 				const text = data.toString("utf8");
 				const nl = text.indexOf("\n");
 				data = Buffer.from(nl < 0 ? rebase(text) : rebase(text.slice(0, nl)) + text.slice(nl));
-			} else if (rel === "griphub/runs.json") data = Buffer.from(rebase(data.toString("utf8")));
+			} else if (rel === "rynex/runs.json") data = Buffer.from(rebase(data.toString("utf8")));
 		} else if (root === "secure" && RESTORE_SECURE.has(rel)) {
 			const file = join(to.agentDir, rel);
 			let value = JSON.parse(data.toString("utf8"));
 			// A backup made by an older version holds `null` for a store it could not read: writing that would wipe the real one.
 			if (value === null || typeof value !== "object") continue;
-			if (rel === "griphub/integrations.json" && value && typeof value === "object") {
+			if (rel === "rynex/integrations.json" && value && typeof value === "object") {
 				const mine = readSecureJson<{ settings?: Record<string, unknown> }>(file, {}, isObject);
 				const settings = { ...(value.settings ?? {}) };
 				for (const k of MACHINE_SETTINGS) {

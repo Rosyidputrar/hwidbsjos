@@ -68,7 +68,7 @@ void editorUiSuite(FsVariant variant) {
     await settle(tester);
   }
 
-  // GripHub's editor keeps the bytes it read or wrote last and compares the file with them before saving (its own
+  // Rynex's editor keeps the bytes it read or wrote last and compares the file with them before saving (its own
   // design, kept over CoderRa's modification-time check): a file changed underneath is never overwritten silently.
   group('EditorScreen', () {
     testWidgets('opens a file, saves an edit, and saves again without quarrelling with its own earlier save', (

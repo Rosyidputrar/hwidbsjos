@@ -200,7 +200,7 @@ class _DeploySheetState extends State<_DeploySheet> {
 
   final folder = TextEditingController();
   late final name = TextEditingController(text: _base(widget.agent.cwd));
-  final message = TextEditingController(text: 'Deploy from GripHub AI Agent');
+  final message = TextEditingController(text: 'Deploy from Rynex AI Agent');
   late final remotePath = TextEditingController(text: it.hosts.firstOrNull?.path ?? '');
   late String? hostId = it.hosts.firstOrNull?.id;
   bool production = true;

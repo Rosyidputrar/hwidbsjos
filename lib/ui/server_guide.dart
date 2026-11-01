@@ -39,7 +39,7 @@ List<(String, String)> serverTroubleshooting() => [
   (
     tr('This phone was lost'),
     tr(
-      'On the server, remove the line ending in griphub-app from /home/griphub/.ssh/authorized_keys. Then set up the new phone with the setup command.',
+      'On the server, remove the line ending in rynex-app from /home/rynex/.ssh/authorized_keys. Then set up the new phone with the setup command.',
     ),
   ),
   (
@@ -147,7 +147,7 @@ class _ServerGuideScreenState extends State<ServerGuideScreen> {
                 tr('In the app: Settings, the Agent row. Enter the server\'s address.'),
                 tr('Tap "Copy setup command". It holds the setup files and this phone\'s key.'),
                 tr(
-                  'On the server, as root, paste it into the terminal. It takes a few minutes and prints a setup code (griphub1:…). Run it again any time: it only repairs and updates.',
+                  'On the server, as root, paste it into the terminal. It takes a few minutes and prints a setup code (rynex1:…). Run it again any time: it only repairs and updates.',
                 ),
                 tr('Paste the setup code in the app, then tap "Install / update agent".'),
                 tr('Build the box on its screen, so the agent\'s commands run inside it.'),
@@ -159,14 +159,14 @@ class _ServerGuideScreenState extends State<ServerGuideScreen> {
               title: tr('The box'),
               paragraphs: [
                 tr(
-                  'The box is a container (rootless Podman) on your server where the agent\'s commands run. Root inside it is only the griphub account outside, so a command cannot touch the rest of the server.',
+                  'The box is a container (rootless Podman) on your server where the agent\'s commands run. Root inside it is only the rynex account outside, so a command cannot touch the rest of the server.',
                 ),
               ],
               items: [
                 (
                   tr('Run the agent\'s commands in the box'),
                   tr(
-                    'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the griphub account, without the box\'s walls. Leave it on unless the box cannot be built, or its commands hang (see When something goes wrong).',
+                    'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the rynex account, without the box\'s walls. Leave it on unless the box cannot be built, or its commands hang (see When something goes wrong).',
                   ),
                 ),
                 (tr('Stop the box'), tr('Frees its memory. Nothing is lost; the next command starts it again.')),
@@ -184,7 +184,7 @@ class _ServerGuideScreenState extends State<ServerGuideScreen> {
                   tr('Empty the box\'s home folder'),
                   tr('Deletes its ssh and git settings, shell history and caches. Projects in the workspace stay.'),
                 ),
-                (tr('Limits'), tr('Memory, swap and CPUs for the box are set in ~/.griphub/box.conf on the server.')),
+                (tr('Limits'), tr('Memory, swap and CPUs for the box are set in ~/.rynex/box.conf on the server.')),
               ],
             ),
             _Section(

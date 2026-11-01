@@ -12,21 +12,21 @@ void main() {
   });
 
   test('follows starring order, not catalog order', () {
-    final models = [model('griphub', 'a'), model('griphub', 'b'), model('griphub', 'c')];
-    final favs = favoriteModelsInOrder(models, ['griphub/c', 'griphub/a']);
-    expect(favs.map((m) => m.key).toList(), ['griphub/c', 'griphub/a']);
+    final models = [model('rynex', 'a'), model('rynex', 'b'), model('rynex', 'c')];
+    final favs = favoriteModelsInOrder(models, ['rynex/c', 'rynex/a']);
+    expect(favs.map((m) => m.key).toList(), ['rynex/c', 'rynex/a']);
   });
 
   test('skips keys missing from the catalog', () {
-    final models = [model('griphub', 'a')];
-    final favs = favoriteModelsInOrder(models, ['griphub/gone', 'griphub/a']);
-    expect(favs.map((m) => m.key).toList(), ['griphub/a']);
+    final models = [model('rynex', 'a')];
+    final favs = favoriteModelsInOrder(models, ['rynex/gone', 'rynex/a']);
+    expect(favs.map((m) => m.key).toList(), ['rynex/a']);
   });
 
   test('dedupes repeated keys and handles empty input', () {
-    final models = [model('griphub', 'a')];
-    expect(favoriteModelsInOrder(models, ['griphub/a', 'griphub/a']).length, 1);
+    final models = [model('rynex', 'a')];
+    expect(favoriteModelsInOrder(models, ['rynex/a', 'rynex/a']).length, 1);
     expect(favoriteModelsInOrder(models, []), isEmpty);
-    expect(favoriteModelsInOrder([], ['griphub/a']), isEmpty);
+    expect(favoriteModelsInOrder([], ['rynex/a']), isEmpty);
   });
 }

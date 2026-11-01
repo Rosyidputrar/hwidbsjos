@@ -7,11 +7,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync,
 import { dirname, join } from "node:path";
 import { bundle, tempDir } from "./helpers.mjs";
 
-// The store key secure.ts reads at import (the server's, from ~/.griphub/env).
-process.env.GRIPHUB_STORE_KEY = "11".repeat(32);
+// The store key secure.ts reads at import (the server's, from ~/.rynex/env).
+process.env.RYNEX_STORE_KEY = "11".repeat(32);
 const { AutoBackup, backupFiles, decryptBackup, restoreBackup, readManifest } = await bundle("autobackup");
 // secure.ts takes the key out of the environment at import; this second copy of it needs it again.
-process.env.GRIPHUB_STORE_KEY = "11".repeat(32);
+process.env.RYNEX_STORE_KEY = "11".repeat(32);
 const { writeSecureJson, readSecureJson } = await bundle("secure");
 
 const KEY = "ab".repeat(32);
@@ -30,16 +30,16 @@ function server(t) {
 	const workspace = join(home, "workspace");
 	write(agentDir, "sessions/--w--/chat.jsonl", `{"type":"session","cwd":"${workspace}/site"}\n{"type":"message","text":"halo ${workspace}/site"}\n`);
 	write(agentDir, "skills/web/SKILL.md", "# web");
-	write(agentDir, "settings.json", '{"shellPath":"/home/griphub/.griphub/bin/box"}');
-	write(agentDir, "griphub/runs.json", JSON.stringify({ schedules: [{ id: "s1", cwd: `${workspace}/site` }] }));
-	write(agentDir, "griphub/checkpoints/x/objects/aa", "undo history");
-	mkdirSync(join(agentDir, "griphub"), { recursive: true });
-	writeSecureJson(join(agentDir, "griphub", "integrations.json"), {
+	write(agentDir, "settings.json", '{"shellPath":"/home/rynex/.rynex/bin/box"}');
+	write(agentDir, "rynex/runs.json", JSON.stringify({ schedules: [{ id: "s1", cwd: `${workspace}/site` }] }));
+	write(agentDir, "rynex/checkpoints/x/objects/aa", "undo history");
+	mkdirSync(join(agentDir, "rynex"), { recursive: true });
+	writeSecureJson(join(agentDir, "rynex", "integrations.json"), {
 		github: { token: SECRET, login: "rosyid" },
 		sshHosts: [],
 		settings: { dns: "system", approvalMode: "ask_all", dailyBudget: 25, timeZone: "Etc/GMT-7", projectSearch: { [`${workspace}/site`]: false } },
 	});
-	writeSecureJson(join(agentDir, "griphub", "custom-providers.json"), [{ id: "griphub", apiKey: "sk-router-key" }]);
+	writeSecureJson(join(agentDir, "rynex", "custom-providers.json"), [{ id: "rynex", apiKey: "sk-router-key" }]);
 	write(workspace, "site/index.html", "<h1>hi</h1>");
 	write(workspace, "site/.env", "API=1");
 	write(workspace, "site/.git/HEAD", "ref: refs/heads/main\n");
@@ -47,14 +47,14 @@ function server(t) {
 	write(workspace, "site/.venv/bin/python", "dependency");
 	write(home, ".ssh/id_ed25519", "PRIVATE KEY");
 	write(home, ".ssh/id_ed25519.pub", "ssh-ed25519 AAAA deploy");
-	write(home, ".ssh/authorized_keys", "ssh-ed25519 AAAA griphub-app");
+	write(home, ".ssh/authorized_keys", "ssh-ed25519 AAAA rynex-app");
 	return { root, home, agentDir, workspace };
 }
 
 function backups(t, s, extra = {}) {
 	return new AutoBackup({
-		dir: join(s.home, ".griphub", "backups"),
-		configFile: join(s.agentDir, "griphub", "auto-backup.json"),
+		dir: join(s.home, ".rynex", "backups"),
+		configFile: join(s.agentDir, "rynex", "auto-backup.json"),
 		agentDir: s.agentDir,
 		workspace: s.workspace,
 		home: s.home,
@@ -84,10 +84,10 @@ test("a backup has the data, the secrets, .git and the deploy key; no dependenci
 		assert.ok(!/node_modules|\.venv|authorized_keys|checkpoints|backups\//.test(n), `${n} is left out`);
 	}
 	// Secrets: decrypted with the server's key, inside the encrypted zip.
-	const integrations = JSON.parse(files.get("secure/griphub/integrations.json").toString());
+	const integrations = JSON.parse(files.get("secure/rynex/integrations.json").toString());
 	assert.equal(integrations.github.token, SECRET);
-	assert.equal(JSON.parse(files.get("secure/griphub/custom-providers.json").toString())[0].apiKey, "sk-router-key");
-	assert.ok(!names.includes("agent/griphub/integrations.json"), "never the server-encrypted copy");
+	assert.equal(JSON.parse(files.get("secure/rynex/custom-providers.json").toString())[0].apiKey, "sk-router-key");
+	assert.ok(!names.includes("agent/rynex/integrations.json"), "never the server-encrypted copy");
 	assert.ok(!names.some((n) => n.includes("auto-backup.json")), "never the backup key itself");
 	const manifest = JSON.parse(files.get("manifest.json").toString());
 	assert.equal(manifest.workspace, s.workspace);
@@ -122,10 +122,10 @@ test("another key, or a changed byte, is refused", async (t) => {
 	assert.equal(existsSync(join(s.root, "x.zip")), false, "nothing half-decrypted is left");
 	const raw = readFileSync(made.path);
 	raw[100] ^= 1;
-	writeFileSync(join(s.root, "bad.ghb"), raw);
-	assert.throws(() => decryptBackup(join(s.root, "bad.ghb"), KEY, join(s.root, "y.zip")), /damaged/);
+	writeFileSync(join(s.root, "bad.ryb"), raw);
+	assert.throws(() => decryptBackup(join(s.root, "bad.ryb"), KEY, join(s.root, "y.zip")), /damaged/);
 	writeFileSync(join(s.root, "other.bin"), "not a backup at all, just text");
-	assert.throws(() => decryptBackup(join(s.root, "other.bin"), KEY, join(s.root, "z.zip")), /not a GripHub server backup/);
+	assert.throws(() => decryptBackup(join(s.root, "other.bin"), KEY, join(s.root, "z.zip")), /not a Rynex server backup/);
 });
 
 test("a phone's backups: no secrets in them, the key comes back as a recovery code, and they restore without it all", async (t) => {
@@ -139,7 +139,7 @@ test("a phone's backups: no secrets in them, the key comes back as a recovery co
 	const files = backupFiles(made.path, KEY, join(s.root, "phone-plain.zip"));
 	const names = [...files.keys()];
 	assert.ok(!names.some((n) => n.startsWith("secure/")), "API keys, tokens and MCP servers stay out");
-	assert.ok(!names.includes("agent/griphub/integrations.json"), "nor the machine-encrypted copies");
+	assert.ok(!names.includes("agent/rynex/integrations.json"), "nor the machine-encrypted copies");
 	for (const n of ["agent/sessions/--w--/chat.jsonl", "agent/skills/web/SKILL.md", "workspace/site/index.html", "home/.ssh/id_ed25519"]) {
 		assert.ok(names.includes(n), `${n} is in it`);
 	}
@@ -153,7 +153,7 @@ test("a phone's backups: no secrets in them, the key comes back as a recovery co
 	const r = restoreBackup(zip, to);
 	assert.ok(r.restored > 0);
 	assert.equal(JSON.parse(readFileSync(join(to.agentDir, "sessions/--w--/chat.jsonl"), "utf8").split("\n")[0]).cwd, `${to.workspace}/site`);
-	assert.equal(existsSync(join(to.agentDir, "griphub", "integrations.json")), false, "no keys appeared out of nowhere");
+	assert.equal(existsSync(join(to.agentDir, "rynex", "integrations.json")), false, "no keys appeared out of nowhere");
 });
 
 test("restored on the phone: chats moved to its workspace, secrets kept encrypted, its own settings and SSH key stay", async (t) => {
@@ -167,8 +167,8 @@ test("restored on the phone: chats moved to its workspace, secrets kept encrypte
 
 	const phone = tempDir(t, "phone-");
 	const to = { agentDir: join(phone, "agent"), workspace: join(phone, "workspace"), home: join(phone, "home") };
-	mkdirSync(join(to.agentDir, "griphub"), { recursive: true });
-	writeSecureJson(join(to.agentDir, "griphub", "integrations.json"), { sshHosts: [], settings: { dns: "cloudflare" } });
+	mkdirSync(join(to.agentDir, "rynex"), { recursive: true });
+	writeSecureJson(join(to.agentDir, "rynex", "integrations.json"), { sshHosts: [], settings: { dns: "cloudflare" } });
 	write(to.agentDir, "settings.json", '{"shellPath":"/data/linux/shell"}');
 	const r = restoreBackup(zip, to);
 	assert.ok(r.restored > 0);
@@ -177,11 +177,11 @@ test("restored on the phone: chats moved to its workspace, secrets kept encrypte
 	const chat = readFileSync(join(to.agentDir, "sessions/--w--/chat.jsonl"), "utf8").split("\n");
 	assert.equal(JSON.parse(chat[0]).cwd, `${to.workspace}/site`, "the chat's folder is this phone's");
 	assert.match(chat[1], new RegExp(s.workspace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "what was said stays as it was");
-	assert.equal(JSON.parse(readFileSync(join(to.agentDir, "griphub/runs.json"), "utf8")).schedules[0].cwd, `${to.workspace}/site`);
+	assert.equal(JSON.parse(readFileSync(join(to.agentDir, "rynex/runs.json"), "utf8")).schedules[0].cwd, `${to.workspace}/site`);
 	assert.equal(readFileSync(join(to.workspace, "site/.git/HEAD"), "utf8"), "ref: refs/heads/main\n");
 	assert.equal(readFileSync(join(to.agentDir, "settings.json"), "utf8"), '{"shellPath":"/data/linux/shell"}', "the phone keeps its shell");
 
-	const file = join(to.agentDir, "griphub", "integrations.json");
+	const file = join(to.agentDir, "rynex", "integrations.json");
 	assert.ok(readFileSync(file, "utf8").startsWith("enc1:"), "encrypted again on the phone");
 	const store = readSecureJson(file, {});
 	assert.equal(store.github.token, SECRET);
@@ -190,7 +190,7 @@ test("restored on the phone: chats moved to its workspace, secrets kept encrypte
 	assert.equal(store.settings.dns, "cloudflare", "the machine's own settings stay");
 	assert.equal("timeZone" in store.settings, false);
 	assert.deepEqual(store.settings.projectSearch, { [`${to.workspace}/site`]: false });
-	assert.equal(readSecureJson(join(to.agentDir, "griphub", "custom-providers.json"), [])[0].apiKey, "sk-router-key");
+	assert.equal(readSecureJson(join(to.agentDir, "rynex", "custom-providers.json"), [])[0].apiKey, "sk-router-key");
 
 	assert.equal(readFileSync(join(to.home, ".ssh/id_ed25519"), "utf8"), "PRIVATE KEY");
 	assert.equal((statSync(join(to.home, ".ssh/id_ed25519")).mode & 0o777).toString(8), "600");
@@ -204,28 +204,28 @@ test("restored on the phone: chats moved to its workspace, secrets kept encrypte
 
 test("a store that cannot be read is left out of a backup (it used to be saved as `null`), and restoring a `null` store writes nothing", async (t) => {
 	const s = server(t);
-	const damaged = join(s.agentDir, "griphub", "custom-providers.json");
+	const damaged = join(s.agentDir, "rynex", "custom-providers.json");
 	writeFileSync(damaged, readFileSync(damaged).subarray(0, 30)); // cut short
 	const b = backups(t, s);
 	b.configure(KEY);
 	const made = await b.tick();
 	const files = backupFiles(made.path, KEY, join(s.root, "plain.zip"));
-	assert.ok(!files.has("secure/griphub/custom-providers.json"), "not stored as null");
-	assert.ok(files.has("secure/griphub/integrations.json"), "the readable one is");
+	assert.ok(!files.has("secure/rynex/custom-providers.json"), "not stored as null");
+	assert.ok(files.has("secure/rynex/integrations.json"), "the readable one is");
 	const zipPath = join(s.root, "again.zip");
 	decryptBackup(made.path, KEY, zipPath);
 	const skipped = readManifest(zipPath).skipped;
-	assert.ok(skipped.some((x) => x.name === "secure/griphub/custom-providers.json" && /could not be read/.test(x.why)), JSON.stringify(skipped));
+	assert.ok(skipped.some((x) => x.name === "secure/rynex/custom-providers.json" && /could not be read/.test(x.why)), JSON.stringify(skipped));
 
 	// A backup made before this fix holds `null` for it; restoring must leave the phone's own store alone.
 	const phone = tempDir(t, "phone-");
 	const to = { agentDir: join(phone, "agent"), workspace: join(phone, "workspace"), home: join(phone, "home") };
-	mkdirSync(join(to.agentDir, "griphub"), { recursive: true });
-	const mine = join(to.agentDir, "griphub", "custom-providers.json");
-	writeSecureJson(mine, [{ id: "griphub", apiKey: "sk-phone" }]);
+	mkdirSync(join(to.agentDir, "rynex"), { recursive: true });
+	const mine = join(to.agentDir, "rynex", "custom-providers.json");
+	writeSecureJson(mine, [{ id: "rynex", apiKey: "sk-phone" }]);
 	const { writeZip } = await bundle("workbench");
 	const zip = join(s.root, "nulls.zip");
-	writeFileSync(zip, writeZip([{ name: "secure/griphub/custom-providers.json", data: Buffer.from("null") }, { name: "manifest.json", data: Buffer.from("{}") }]));
+	writeFileSync(zip, writeZip([{ name: "secure/rynex/custom-providers.json", data: Buffer.from("null") }, { name: "manifest.json", data: Buffer.from("{}") }]));
 	restoreBackup(zip, to);
 	assert.equal(readSecureJson(mine, [])[0].apiKey, "sk-phone", "the phone's store is untouched");
 });
@@ -237,8 +237,8 @@ test("the workspace's dot folders and build output stay out of a backup; project
 	write(s.workspace, ".toolchains/android-tools.zip", "z");
 	write(s.workspace, "site/.next/cache/x.js", "cache");
 	write(s.workspace, "site/.idea/workspace.xml", "ide");
-	write(s.workspace, "griphub/build/test_cache/cache.dill", "dill");
-	write(s.workspace, "griphub/android/app/build/outputs/app.apk", "apk");
+	write(s.workspace, "rynex/build/test_cache/cache.dill", "dill");
+	write(s.workspace, "rynex/android/app/build/outputs/app.apk", "apk");
 	write(s.workspace, "tiksave/target/debug/deps/a.rlib", "rust");
 	write(s.workspace, "site/dist/bundle.js", "bundle");
 	// What belongs in it, including look-alikes: a file called build, a folder that only contains the word.
@@ -278,7 +278,7 @@ test("a backup that was cut short is cleaned away once it is old, never one bein
 	const s = server(t);
 	const b = backups(t, s);
 	b.configure(KEY);
-	const dir = join(s.home, ".griphub", "backups");
+	const dir = join(s.home, ".rynex", "backups");
 	const hourAgo = (Date.now() - 3_600_000) / 1000;
 	const old = join(dir, ".auto-111.ghb.tmp");
 	const busy = join(dir, ".auto-222.ghb.tmp");
@@ -300,7 +300,7 @@ test("a backup that was cut short is cleaned away once it is old, never one bein
 	assert.equal(existsSync(busy), false, "once nothing is writing it, an old one goes too");
 	assert.equal(existsSync(fresh), true, "one written to a moment ago may be another process's");
 	assert.equal(existsSync(other), true, "only unfinished backups, not any .tmp");
-	assert.equal(readdirSync(dir).filter((n) => /^auto-\d+\.ghb$/.test(n)).length, 1, "the backup itself is untouched");
+	assert.equal(readdirSync(dir).filter((n) => /^auto-\d+\.ryb$/.test(n)).length, 1, "the backup itself is untouched");
 
 	// And at start, so a host that was killed mid-backup does not carry the leftover until its next backup.
 	write(dir, ".auto-444.ghb.tmp", "x");

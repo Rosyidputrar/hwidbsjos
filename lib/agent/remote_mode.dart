@@ -80,9 +80,9 @@ class RemoteMode extends ChangeNotifier {
     final bin = '${env['PI_CODING_AGENT_DIR']}/bin';
     configure(
       setup: RemoteSetup(home: home, ssh: '$bin/ssh', sshKeygen: '$bin/ssh-keygen', rsync: '$bin/rsync'),
-      store: RemoteProfileStore(File('$home/.griphub/remote.json')),
-      hostDir: env['GRIPHUB_FILES'] == null ? null : '${env['GRIPHUB_FILES']}/agent',
-      phoneCache: Directory('$home/.cache/griphub-remote'),
+      store: RemoteProfileStore(File('$home/.rynex/remote.json')),
+      hostDir: env['RYNEX_FILES'] == null ? null : '${env['RYNEX_FILES']}/agent',
+      phoneCache: Directory('$home/.cache/rynex-remote'),
     );
   }
 
@@ -96,7 +96,7 @@ class RemoteMode extends ChangeNotifier {
     this.setup = setup;
     this.store = store;
     this.hostDir = hostDir;
-    this.phoneCache = phoneCache ?? Directory('${setup.home}/.cache/griphub-remote');
+    this.phoneCache = phoneCache ?? Directory('${setup.home}/.cache/rynex-remote');
     profile = store.load();
     _apply();
     notifyListeners();
@@ -255,7 +255,7 @@ class RemoteMode extends ChangeNotifier {
   Timer? _pullTimer;
 
   /// Where this phone keeps the server's backups (private to the app; they hold API keys).
-  Directory get backupsDir => Directory('${setup!.home}/.griphub/server-backups');
+  Directory get backupsDir => Directory('${setup!.home}/.rynex/server-backups');
 
   /// How many fetched backups the phone keeps.
   static const keepBackups = 3;
@@ -263,14 +263,14 @@ class RemoteMode extends ChangeNotifier {
   /// The server's backups on this phone, newest first.
   List<File> localBackups() {
     if (setup == null || !backupsDir.existsSync()) return const [];
-    final files = backupsDir.listSync().whereType<File>().where((f) => RegExp(r'/auto-\d+\.ghb$').hasMatch(f.path)).toList()
+    final files = backupsDir.listSync().whereType<File>().where((f) => RegExp(r'/auto-\d+\.(?:ghb|ryb)$').hasMatch(f.path)).toList()
       ..sort((a, b) => b.path.compareTo(a.path));
     return files;
   }
 
   /// When a backup on this phone was made on the server, from its name.
   static DateTime backupTime(File f) =>
-      DateTime.fromMillisecondsSinceEpoch(int.tryParse(RegExp(r'auto-(\d+)\.ghb$').firstMatch(f.path)?[1] ?? '') ?? 0);
+      DateTime.fromMillisecondsSinceEpoch(int.tryParse(RegExp(r'auto-(\d+)\.(?:ghb|ryb)$').firstMatch(f.path)?[1] ?? '') ?? 0);
 
   /// Asks the server how its backups stand (only with the server in use).
   Future<Map<String, dynamic>?> refreshAutoBackup() async {

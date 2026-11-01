@@ -77,7 +77,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
         setState(() => locked = false);
         return;
       }
-      final ok = await auth.authenticate(localizedReason: tr('Unlock GripHub AI Agent'));
+      final ok = await auth.authenticate(localizedReason: tr('Unlock Rynex AI Agent'));
       if (mounted && ok) setState(() => locked = false);
     } catch (e) {
       if (mounted) setState(() => error = friendlyError(e));
@@ -106,7 +106,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
                     children: [
                       const LogoMark(size: 56),
                       const SizedBox(height: 22),
-                      Text(tr('GripHub AI Agent is locked'), style: text.titleLarge),
+                      Text(tr('Rynex AI Agent is locked'), style: text.titleLarge),
                       if (error != null) ...[
                         const SizedBox(height: 8),
                         Text(

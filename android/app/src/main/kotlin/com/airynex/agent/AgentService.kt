@@ -74,7 +74,7 @@ class AgentService : Service() {
             Notifications.ensureChannels(context)
             val builder = Notification.Builder(context, Notifications.ACTIVITY)
                 .setSmallIcon(R.drawable.ic_stat_agent)
-                .setContentTitle(title ?: "GripHub AI Agent")
+                .setContentTitle(title ?: "Rynex AI Agent")
                 .setContentText(text ?: Notifications.t(context, "Agent is working", "Agent sedang bekerja"))
                 .setContentIntent(Notifications.openIntent(context, 0, mapOf("action" to "open_chat")))
                 .setOngoing(true)

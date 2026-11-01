@@ -15,7 +15,7 @@
 # serialized. The base comes from pubspec.yaml (version: X.Y.Z+B), so bump X.Y there for a bigger release.
 #   release = X.Y.(Z + run_number), versionCode = B + run_number
 # A floor also applies: the release patch is never below the latest public
-# release's patch + 1 (fetched from seseegy/griphub-releases), so a release
+# release's patch + 1 (fetched from seseegy/rynex-releases), so a release
 # can never come out older than what updaters already offer. If the floor
 # cannot be fetched, the pubspec math stands on its own.
 # Pull request builds use run numbers too, so release numbers can skip; they still only go up.
@@ -57,7 +57,7 @@ permissions:
   contents: read
 
 env:
-  RELEASES_REPO: seseegy/griphub-releases
+  RELEASES_REPO: seseegy/rynex-releases
 
 jobs:
   release:
@@ -94,7 +94,7 @@ jobs:
           # update. Unauthenticated public API; any failure falls back to
           # pubspec math instead of failing the build.
           floor_patch=""
-          tag=$(curl -fsSL --max-time 20 "https://api.github.com/repos/seseegy/griphub-releases/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"v\?\([0-9][0-9.]*\)".*/\1/p' | head -1 || true)
+          tag=$(curl -fsSL --max-time 20 "https://api.github.com/repos/seseegy/rynex-releases/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"v\?\([0-9][0-9.]*\)".*/\1/p' | head -1 || true)
           if [ -n "$tag" ]; then
             latest_patch=${tag##*.}
             case "$latest_patch" in
@@ -196,7 +196,7 @@ jobs:
             # app-<abi>-full-release.apk; matched loosely since the flavor's place in the name varies.
             apks=(build/app/outputs/flutter-apk/*-"$abi"-*release.apk build/app/outputs/flutter-apk/*-"$abi"-release.apk)
             if [ ${#apks[@]} -eq 0 ]; then echo "::error::No APK for $abi"; ls build/app/outputs/flutter-apk; exit 1; fi
-            cp "${apks[0]}" "release/griphub-${{ steps.version.outputs.name }}-$abi.apk"
+            cp "${apks[0]}" "release/rynex-${{ steps.version.outputs.name }}-$abi.apk"
           done
           (cd release && sha256sum *.apk > SHA256SUMS.txt)
           ls -lh release
@@ -205,7 +205,7 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: griphub-pr-${{ github.event.number }}
+          name: rynex-pr-${{ github.event.number }}
           path: release/
           retention-days: 7
 
@@ -222,13 +222,13 @@ jobs:
           # Never generate notes from pushed commits: that would publish the           
           # source repository and branch names on the public releases page           
           # (e.g. "Merge pull request #N from ...").
-          if [ -f RELEASE_NOTES.md ]; then cp RELEASE_NOTES.md notes.md; else echo "GripHub ${{ steps.version.outputs.name }}" > notes.md; fi
+          if [ -f RELEASE_NOTES.md ]; then cp RELEASE_NOTES.md notes.md; else echo "Rynex ${{ steps.version.outputs.name }}" > notes.md; fi
           # A re-run of the same run number replaces the files of its own release.
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
           else
             gh release create "$TAG" release/* \
-              --title "GripHub ${{ steps.version.outputs.name }}" \
+              --title "Rynex ${{ steps.version.outputs.name }}" \
               --notes-file notes.md \
               --latest
           fi

@@ -60,7 +60,7 @@ export class Checkpoints {
 
 	private repo(cwd: string) {
 		const dir = join(this.root, createHash("sha1").update(cwd).digest("hex").slice(0, 16));
-		return { dir, env: { GIT_DIR: dir, GIT_WORK_TREE: cwd, GIT_AUTHOR_NAME: "GripHub AI Agent", GIT_AUTHOR_EMAIL: "griphub@local", GIT_COMMITTER_NAME: "GripHub AI Agent", GIT_COMMITTER_EMAIL: "griphub@local" } };
+		return { dir, env: { GIT_DIR: dir, GIT_WORK_TREE: cwd, GIT_AUTHOR_NAME: "Rynex AI Agent", GIT_AUTHOR_EMAIL: "rynex@local", GIT_COMMITTER_NAME: "Rynex AI Agent", GIT_COMMITTER_EMAIL: "rynex@local" } };
 	}
 
 	/** Drops a folder's snapshots, e.g. when the folder itself is deleted. */

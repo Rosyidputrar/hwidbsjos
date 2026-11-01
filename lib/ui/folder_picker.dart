@@ -217,7 +217,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
               child: Text(
                 widget.agent.fs.isLocal
                     ? tr(
-                        'Projects live in the GripHub AI Agent workspace. To bring in files from your phone, open a project and use '
+                        'Projects live in the Rynex AI Agent workspace. To bring in files from your phone, open a project and use '
                         'Files → Import from phone.',
                       )
                     : tr(
@@ -286,8 +286,8 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                             const SizedBox(height: 6),
                             Text(
                               tr(
-                                'To work in Download, Documents or any other folder on your phone, GripHub AI Agent needs '
-                                '"All files access". Turn it on for GripHub AI Agent on the next screen, then come back.',
+                                'To work in Download, Documents or any other folder on your phone, Rynex AI Agent needs '
+                                '"All files access". Turn it on for Rynex AI Agent on the next screen, then come back.',
                               ),
                               style: text.bodySmall,
                             ),

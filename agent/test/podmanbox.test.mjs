@@ -18,7 +18,7 @@ const { defaultExec, PodmanBox } = await bundle("podmanbox");
 // with the answers it is given.
 
 const ORIGINAL_ENV = Object.fromEntries(
-	["PATH", "HOME", "GRIPHUB_WORKSPACE", "STUB_DIR", "GRIPHUB_DIR", "GRIPHUB_BOX_HOME", "GRIPHUB_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL", "STUB_HOLD", "STUB_EXEC_HANG", "STUB_PROBE_EXIT", "STUB_SYNC_RUN", "STUB_SYNC_HANG", "STUB_BASE64_FAIL", "STUB_INSPECT_HANG", "STUB_START_HANG", "BOX_PROBE_SECS", "BOX_START_SECS", "BOX_ALIVE_SECS", "XDG_RUNTIME_DIR"].map((k) => [k, process.env[k]]),
+	["PATH", "HOME", "RYNEX_WORKSPACE", "STUB_DIR", "RYNEX_DIR", "RYNEX_BOX_HOME", "RYNEX_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL", "STUB_HOLD", "STUB_EXEC_HANG", "STUB_PROBE_EXIT", "STUB_SYNC_RUN", "STUB_SYNC_HANG", "STUB_BASE64_FAIL", "STUB_INSPECT_HANG", "STUB_START_HANG", "BOX_PROBE_SECS", "BOX_START_SECS", "BOX_ALIVE_SECS", "XDG_RUNTIME_DIR"].map((k) => [k, process.env[k]]),
 );
 
 const BOX = fileURLToPath(new URL("../../server/box/box", import.meta.url));
@@ -41,12 +41,12 @@ case "$cmd" in
   image) [ -f "$dir/image" ] ;;
   container)
     [ -n "\${STUB_INSPECT_HANG:-}" ] && exec sleep 30
-    [ -f "$dir/state" ] || { echo "Error: no such container griphub-box" >&2; exit 125; }
+    [ -f "$dir/state" ] || { echo "Error: no such container rynex-box" >&2; exit 125; }
     s=$(cat "$dir/state")
     case "$*" in *"|"*) echo "$s|2026-10-18T09:00:00.123456Z" ;; *) echo "$s" ;; esac ;;
   exec)
     [ -n "\${STUB_EXEC_HANG:-}" ] && exec sleep 30
-    if [ -n "\${STUB_PROBE_EXIT:-}" ] && [ "$*" = "griphub-box true" ]; then echo "Error: crun: cannot start" >&2; exit "$STUB_PROBE_EXIT"; fi
+    if [ -n "\${STUB_PROBE_EXIT:-}" ] && [ "$*" = "rynex-box true" ]; then echo "Error: crun: cannot start" >&2; exit "$STUB_PROBE_EXIT"; fi
     case "$*" in
       *"/bin/sh -c"*)
         # The launcher putting the git and ssh settings in: what it sent is kept. STUB_SYNC_RUN also runs the script it
@@ -57,13 +57,13 @@ case "$cmd" in
         cat > "$dir/sync.in"
         if [ -n "\${STUB_SYNC_RUN:-}" ]; then
           script="\${@: -1}"
-          ( cd / && HOME="$GRIPHUB_DIR/box-home" sh -c "$script" < "$dir/sync.in" ) || exit $?
+          ( cd / && HOME="$RYNEX_DIR/box-home" sh -c "$script" < "$dir/sync.in" ) || exit $?
         fi ;;
       *box-works*) [ "\${STUB_EXEC_EXIT:-0}" = 0 ] || { echo "Error: crun: cannot start" >&2; exit "$STUB_EXEC_EXIT"; }; echo box-works ;;
       *memory.current*) [ -n "\${STUB_USAGE_FAIL:-}" ] && exit 1; cat "$dir/usage" 2>/dev/null ;;
     esac ;;
   stop)
-    if [ -f "$dir/state" ]; then echo exited > "$dir/state"; else echo "Error: no container with name or ID \\"griphub-box\\" found: no such container" >&2; exit 125; fi ;;
+    if [ -f "$dir/state" ]; then echo exited > "$dir/state"; else echo "Error: no container with name or ID \\"rynex-box\\" found: no such container" >&2; exit 125; fi ;;
   rm) rm -f "$dir/state" ;;
   run) echo running > "$dir/state"; echo id
     if [ -n "\${STUB_HOLD:-}" ]; then sleep 60 >/dev/null 2>&1 & echo $! >> "$dir/holders"; fi ;;
@@ -73,7 +73,7 @@ case "$cmd" in
   build)
     echo "STEP 1/3: FROM ubuntu"; echo "STEP 2/3: RUN apt-get install"; sleep "\${STUB_BUILD_DELAY:-0}"
     [ "\${STUB_BUILD_EXIT:-0}" = 0 ] || { echo "Error: building at STEP 2/3" >&2; exit "$STUB_BUILD_EXIT"; }
-    touch "$dir/image"; echo "Successfully tagged localhost/griphub-box" ;;
+    touch "$dir/image"; echo "Successfully tagged localhost/rynex-box" ;;
   unshare) chmod -R u+rwx "\${@: -1}"; rm -rf "\${@: -1}" ;;
 esac
 `;
@@ -89,16 +89,16 @@ function rig(t, o = {}) {
 	if (o.image !== false) writeFileSync(join(stub, "image"), "");
 	if (o.state) writeFileSync(join(stub, "state"), `${o.state}\n`);
 	if (o.usage !== undefined) writeFileSync(join(stub, "usage"), o.usage);
-	const griphubDir = join(home, ".griphub");
-	mkdirSync(join(griphubDir, "box"), { recursive: true });
-	if (o.containerfile !== false) writeFileSync(join(griphubDir, "box", "Containerfile"), "FROM ubuntu\n");
+	const rynexDir = join(home, ".rynex");
+	mkdirSync(join(rynexDir, "box"), { recursive: true });
+	if (o.containerfile !== false) writeFileSync(join(rynexDir, "box", "Containerfile"), "FROM ubuntu\n");
 	mkdirSync(join(home, "workspace"), { recursive: true });
 	// No user session bus here, so the launcher runs podman directly; a test that wants the bus makes one (see "scope").
 	mkdirSync(join(home, "run"));
-	const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, GRIPHUB_WORKSPACE: join(home, "workspace"), STUB_DIR: stub, GRIPHUB_DIR: griphubDir, XDG_RUNTIME_DIR: join(home, "run") };
+	const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, RYNEX_WORKSPACE: join(home, "workspace"), STUB_DIR: stub, RYNEX_DIR: rynexDir, XDG_RUNTIME_DIR: join(home, "run") };
 	for (const k of Object.keys(env)) process.env[k] = (env)[k];
-	delete process.env.GRIPHUB_BOX_HOME;
-	delete process.env.GRIPHUB_BOX_CONF;
+	delete process.env.RYNEX_BOX_HOME;
+	delete process.env.RYNEX_BOX_CONF;
 	// Child processes inherit the environment, so it is put back as it was when the file was loaded (a test may make
 	// several rigs, and each would otherwise "restore" what the one before it set).
 	t.after(() => {
@@ -112,9 +112,9 @@ function rig(t, o = {}) {
 		if (existsSync(holders)) for (const pid of readFileSync(holders, "utf8").split("\n").filter(Boolean)) spawnSync("kill", [pid]);
 	});
 	const script = o.script === false ? join(home, "no-such-box") : BOX;
-	const box = new PodmanBox({ script, griphubDir, exec: (f, a, x) => defaultExec(f, a, { timeoutMs: Math.min(x?.timeoutMs ?? 5000, 5000) }), checkTimeoutMs: 5000 });
+	const box = new PodmanBox({ script, rynexDir, exec: (f, a, x) => defaultExec(f, a, { timeoutMs: Math.min(x?.timeoutMs ?? 5000, 5000) }), checkTimeoutMs: 5000 });
 	const calls = () => (existsSync(join(stub, "calls.log")) ? readFileSync(join(stub, "calls.log"), "utf8").trim().split("\n").map((l) => l.split("\t")) : []);
-	return { home, stub, griphubDir, box, calls, script, env };
+	return { home, stub, rynexDir, box, calls, script, env };
 }
 
 test("with no launcher there is no box, and podman is not even asked", async (t) => {
@@ -131,7 +131,7 @@ test("with no launcher there is no box, and podman is not even asked", async (t)
 
 test("podman that is not there is a problem to read, not a crash", async (t) => {
 	const r = rig(t);
-	const box = new PodmanBox({ script: BOX, griphubDir: r.griphubDir, podman: join(r.home, "nowhere", "podman") });
+	const box = new PodmanBox({ script: BOX, rynexDir: r.rynexDir, podman: join(r.home, "nowhere", "podman") });
 	const s = await box.status(undefined);
 	assert.deepEqual([s.available, s.state], [true, "unknown"]);
 	assert.match(s.problem , /Podman is not installed/);
@@ -188,18 +188,18 @@ test("usage that cannot be read is absent, not wrong", async (t) => {
 test("limits come from box.conf, as the launcher reads them, and junk is ignored", async (t) => {
 	const r = rig(t);
 	writeFileSync(
-		join(r.griphubDir, "box.conf"),
+		join(r.rynexDir, "box.conf"),
 		['# limits', 'BOX_MEMORY=3g', "BOX_SWAP='4G'  # more", 'BOX_CPUS="0.5"', "BOX_EXTRA=ignored"].join("\n"),
 	);
 	assert.deepEqual(r.box.limits(), { memory: "3g", swap: "4G", cpus: "0.5" });
-	writeFileSync(join(r.griphubDir, "box.conf"), "BOX_MEMORY=$(rm -rf /)\nBOX_CPUS=lots\nBOX_SWAP=\n");
+	writeFileSync(join(r.rynexDir, "box.conf"), "BOX_MEMORY=$(rm -rf /)\nBOX_CPUS=lots\nBOX_SWAP=\n");
 	assert.deepEqual(r.box.limits(), { memory: "2g", swap: "3g", cpus: "1.5" }, "only plain numbers are believed");
 });
 
 test("a podman that does not answer is reported as such", async (t) => {
 	const r = rig(t, { state: "running" });
 	writeFileSync(join(r.home, "bin", "podman"), "#!/bin/bash\nsleep 5\n");
-	const box = new PodmanBox({ script: BOX, griphubDir: r.griphubDir, exec: (f, a) => defaultExec(f, a, { timeoutMs: 300 }) });
+	const box = new PodmanBox({ script: BOX, rynexDir: r.rynexDir, exec: (f, a) => defaultExec(f, a, { timeoutMs: 300 }) });
 	const s = await box.status(undefined);
 	assert.equal(s.state, "unknown");
 	assert.ok(s.problem);
@@ -224,7 +224,7 @@ test("what podman leaves running does not keep the launcher's lock, so the next 
 	const first = spawnSync(BOX, ["-c", "echo first"], { cwd: r.home, encoding: "utf8", env: process.env, timeout: 15_000 });
 	assert.equal(first.status, 0, first.stderr);
 	assert.ok(existsSync(join(r.stub, "holders")), "the stand-in for conmon is running");
-	const lock = spawnSync("flock", ["-n", join(r.griphubDir, "box.lock"), "-c", "true"], { encoding: "utf8", timeout: 5000 });
+	const lock = spawnSync("flock", ["-n", join(r.rynexDir, "box.lock"), "-c", "true"], { encoding: "utf8", timeout: 5000 });
 	assert.equal(lock.status, 0, "the lock is free while the container lives on");
 	// A stopped container is started again by podman start, which leaves a process behind in the same way.
 	writeFileSync(join(r.stub, "state"), "exited\n");
@@ -236,7 +236,7 @@ test("what podman leaves running does not keep the launcher's lock, so the next 
 
 test("a call that cannot get the lock in time says so and fails, instead of waiting for ever", (t) => {
 	const r = rig(t, { state: "running" });
-	const held = spawn("flock", [join(r.griphubDir, "box.lock"), "sleep", "30"], { stdio: "ignore" });
+	const held = spawn("flock", [join(r.rynexDir, "box.lock"), "sleep", "30"], { stdio: "ignore" });
 	t.after(() => held.kill());
 	// flock needs a moment to take the lock before the launcher asks for it
 	spawnSync("sleep", ["0.5"]);
@@ -310,7 +310,7 @@ test("a box that is Running but does not answer refuses the command, quickly and
 	assert.match(ran.stderr, /Reset the box/);
 	assert.match(ran.stderr, /Run the agent's commands in the box/);
 	assert.ok(!existsSync(join(r.home, "ran-outside")), "not run anywhere, the server itself included");
-	assert.ok(!existsSync(join(r.griphubDir, "box.alive")), "a box that did not answer is not remembered as alive");
+	assert.ok(!existsSync(join(r.rynexDir, "box.alive")), "a box that did not answer is not remembered as alive");
 	// The host's own test says the same, through the same launcher.
 	process.env.BOX_PROBE_SECS = "1";
 	const c = await r.box.check();
@@ -340,9 +340,9 @@ test("a healthy box is probed once, not before every command, and again after a 
 	assert.equal(runBox(r, "echo one").status, 0);
 	assert.equal(runBox(r, "echo two").status, 0);
 	assert.equal(probes(r), 1, "the second command went in on the first one's answer");
-	assert.ok(existsSync(join(r.griphubDir, "box.alive")));
+	assert.ok(existsSync(join(r.rynexDir, "box.alive")));
 	assert.equal(spawnSync(BOX, ["--reset"], { cwd: r.home, env: process.env }).status, 0);
-	assert.ok(!existsSync(join(r.griphubDir, "box.alive")), "a reset forgets it");
+	assert.ok(!existsSync(join(r.rynexDir, "box.alive")), "a reset forgets it");
 	assert.equal(runBox(r, "echo three").status, 0);
 	assert.equal(probes(r), 2);
 	// And with no memory of it (BOX_ALIVE_SECS=0) every command probes.
@@ -357,7 +357,7 @@ test("a probe that fails some other way does not refuse: the command meets podma
 	assert.equal(ran.status, 0, ran.stderr);
 	assert.doesNotMatch(ran.stderr, /did not answer/);
 	assert.equal(probes(r), 1, "it did probe");
-	assert.ok(!existsSync(join(r.griphubDir, "box.alive")), "an error is not an answer to remember");
+	assert.ok(!existsSync(join(r.rynexDir, "box.alive")), "an error is not an answer to remember");
 });
 
 // What the host puts in the box's home (git's identity, the ssh key) used to be copied there from the host, as the service
@@ -366,7 +366,7 @@ test("a probe that fails some other way does not refuse: the command meets podma
 // replaced by the box's own, the store key replaced by git's config. Now the host writes nothing in the box's home;
 // the files go in through `podman exec` and are installed by a script that runs in the container.
 const SOURCES = { ".gitconfig": "[user]\n\tname = Agent\n", ".ssh/config": "Host x\n  User y\n", ".ssh/id_ed25519": "PRIVATE-KEY\n", ".ssh/id_ed25519.pub": "ssh-ed25519 AAAA app\n", ".ssh/known_hosts": "example.org ssh-ed25519 BBBB\n" };
-const boxHomeOf = (r) => join(r.griphubDir, "box-home");
+const boxHomeOf = (r) => join(r.rynexDir, "box-home");
 const putSources = (r, files = SOURCES) => {
 	mkdirSync(join(r.home, ".ssh"), { recursive: true });
 	for (const [name, text] of Object.entries(files)) writeFileSync(join(r.home, name), text);
@@ -375,10 +375,10 @@ const sentLines = (r) => readFileSync(join(r.stub, "sync.in"), "utf8").trim().sp
 const syncRuns = (r) => (existsSync(join(r.stub, "sync.count")) ? readFileSync(join(r.stub, "sync.count"), "utf8").trim().split("\n").length : 0);
 // The server's own files a command in the box must not be able to reach from there.
 const victimsOf = (r) => {
-	const v = { authorizedKeys: join(r.home, ".ssh", "authorized_keys"), storeKey: join(r.griphubDir, "env"), dir: join(r.home, "victim-dir") };
+	const v = { authorizedKeys: join(r.home, ".ssh", "authorized_keys"), storeKey: join(r.rynexDir, "env"), dir: join(r.home, "victim-dir") };
 	mkdirSync(join(r.home, ".ssh"), { recursive: true });
 	writeFileSync(v.authorizedKeys, "ssh-ed25519 PHONEKEY phone\n");
-	writeFileSync(v.storeKey, "GRIPHUB_STORE_KEY=abab\n");
+	writeFileSync(v.storeKey, "RYNEX_STORE_KEY=abab\n");
 	mkdirSync(v.dir);
 	writeFileSync(join(v.dir, "config"), "keep\n");
 	return v;
@@ -396,7 +396,7 @@ test("links planted in the box's home are not followed: the server's own files s
 	const ran = runBox(r, "true");
 	assert.equal(ran.status, 0, ran.stderr);
 	assert.equal(readFileSync(v.authorizedKeys, "utf8"), "ssh-ed25519 PHONEKEY phone\n", "the phone's key is still the only one");
-	assert.equal(readFileSync(v.storeKey, "utf8"), "GRIPHUB_STORE_KEY=abab\n", "the store key is still the store key");
+	assert.equal(readFileSync(v.storeKey, "utf8"), "RYNEX_STORE_KEY=abab\n", "the store key is still the store key");
 	assert.ok(lstatSync(join(bh, ".gitconfig.tmp")).isSymbolicLink(), "the host did not touch the box's home at all");
 	assert.equal(readlinkSync(join(bh, ".ssh/id_ed25519.pub.tmp")), v.authorizedKeys);
 	assert.equal(syncRuns(r), 1, "the settings went in once, through podman exec");
@@ -442,9 +442,9 @@ test("the settings go in when they change or after a while, not before every com
 	assert.equal(syncRuns(r), 2, "a change is put in at once");
 	assert.equal(runBox(r, "echo four", { BOX_ALIVE_SECS: "0" }).status, 0);
 	assert.equal(syncRuns(r), 3, "and after a while they are put in again, so what a command in the box did to them does not last");
-	assert.ok(existsSync(join(r.griphubDir, "box.synced")));
+	assert.ok(existsSync(join(r.rynexDir, "box.synced")));
 	assert.equal(spawnSync(BOX, ["--reset"], { cwd: r.home, env: process.env }).status, 0);
-	assert.ok(!existsSync(join(r.griphubDir, "box.synced")), "a new container has none of them yet");
+	assert.ok(!existsSync(join(r.rynexDir, "box.synced")), "a new container has none of them yet");
 });
 
 test("what the container installs: files replace what is there (a link included), known_hosts is only seeded, what the server lacks is removed", (t) => {
@@ -522,7 +522,7 @@ test("a container that does not take the settings in time refuses the command, l
 	assert.match(hung.stderr, /putting its git and ssh settings in took more than 1s/);
 	assert.ok(!existsSync(join(r.home, "ran-anyway")));
 	delete process.env.STUB_SYNC_HANG;
-	rmSync(join(r.griphubDir, "box.synced"), { force: true });
+	rmSync(join(r.rynexDir, "box.synced"), { force: true });
 	process.env.STUB_SYNC_RUN = "1";
 	mkdirSync(join(boxHomeOf(r), ".gitconfig"), { recursive: true }); // a folder where the file goes: the install cannot put it there
 	const failed = runBox(r, "true");
@@ -532,12 +532,12 @@ test("a container that does not take the settings in time refuses the command, l
 
 test("resetting throws the container away and keeps the image and the home folder", async (t) => {
 	const r = rig(t, { state: "running" });
-	mkdirSync(join(r.griphubDir, "box-home"));
-	writeFileSync(join(r.griphubDir, "box-home", "keep.txt"), "mine");
+	mkdirSync(join(r.rynexDir, "box-home"));
+	writeFileSync(join(r.rynexDir, "box-home", "keep.txt"), "mine");
 	await r.box.reset();
 	assert.equal(existsSync(join(r.stub, "state")), false);
 	assert.equal(existsSync(join(r.stub, "image")), true);
-	assert.equal(readFileSync(join(r.griphubDir, "box-home", "keep.txt"), "utf8"), "mine");
+	assert.equal(readFileSync(join(r.rynexDir, "box-home", "keep.txt"), "utf8"), "mine");
 	assert.equal((await r.box.status(undefined)).state, "none");
 });
 
@@ -558,8 +558,8 @@ test("rebuilding the image shows what podman says, then drops the old container 
 	assert.equal(existsSync(join(r.stub, "image")), true);
 	assert.equal(existsSync(join(r.stub, "state")), false, "the container made from the old image is gone");
 	const build = r.calls().find((c) => c[0] === "build") ;
-	assert.deepEqual(build.slice(1, 3), ["-t", "localhost/griphub-box"]);
-	assert.ok(build.includes(join(r.griphubDir, "box", "Containerfile")));
+	assert.deepEqual(build.slice(1, 3), ["-t", "localhost/rynex-box"]);
+	assert.ok(build.includes(join(r.rynexDir, "box", "Containerfile")));
 });
 
 test("a build that fails keeps the old container, and says why", async (t) => {
@@ -589,7 +589,7 @@ test("two changes at once are not allowed to fight over the container", async (t
 
 test("wiping the home empties it, keeps the folder private, and leaves the workspace alone", async (t) => {
 	const r = rig(t, { state: "running" });
-	const bh = join(r.griphubDir, "box-home");
+	const bh = join(r.rynexDir, "box-home");
 	mkdirSync(join(bh, ".ssh"), { recursive: true });
 	writeFileSync(join(bh, ".ssh", "known_hosts"), "x");
 	writeFileSync(join(bh, ".bash_history"), "ls");
@@ -604,7 +604,7 @@ test("wiping the home empties it, keeps the folder private, and leaves the works
 
 test("files the outside user cannot delete are removed through podman's own user namespace", async (t) => {
 	const r = rig(t, { state: "running" });
-	const bh = join(r.griphubDir, "box-home");
+	const bh = join(r.rynexDir, "box-home");
 	mkdirSync(join(bh, "locked"), { recursive: true });
 	writeFileSync(join(bh, "locked", "owned-by-another-uid"), "x");
 	chmodSync(join(bh, "locked"), 0o000);
@@ -625,7 +625,7 @@ test("files the outside user cannot delete are removed through podman's own user
 test("a setting that points the home folder somewhere surprising is not obeyed", async (t) => {
 	const r = rig(t, { state: "running" });
 	for (const bad of ["/", r.home, join(r.home, "workspace"), "/etc"]) {
-		process.env.GRIPHUB_BOX_HOME = bad;
+		process.env.RYNEX_BOX_HOME = bad;
 		await assert.rejects(() => r.box.wipeHome(), (e) => e.code === "unsafe", bad);
 	}
 	assert.equal(existsSync(join(r.home, "workspace")), true);

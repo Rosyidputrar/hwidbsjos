@@ -15,13 +15,13 @@ const _allowed = {
   'network_screen.dart:https://dns.example/dns-query',
   'network_screen.dart:Search1API',
   'network_screen.dart:TinyFish',
-  'chat_export.dart:Download/GripHub',
+  'chat_export.dart:Download/Rynex',
   'mcp_screen.dart:memory',
   'mcp_screen.dart:npx -y @modelcontextprotocol/server-memory',
   'mcp_screen.dart:URL',
   'mcp_screen.dart:https://example.com/mcp',
-  'settings_hub.dart:GripHub AI Agent',
-  'settings_hub.dart:griphubrouter.web.id',
+  'settings_hub.dart:Rynex AI Agent',
+  'settings_hub.dart:github.com/seseegy',
   'message_views.dart:json',
   'message_views.dart:output',
   'message_views.dart:command',
@@ -39,9 +39,9 @@ const _allowed = {
   'folder_picker.dart:my-project',
   'skills_screen.dart:owner/repo/skills/name',
   'skills_screen.dart:skills.md',
-  'settings_screen.dart:GripHub Router',
+  'settings_screen.dart:Rynex Router',
   'server_screen.dart:agent.example.com',
-  'server_screen.dart:griphub1:…',
+  'server_screen.dart:rynex1:…',
   'illustration.dart:Illustrations by Storyset', // the licence's credit line, shown in English as it is written
 };
 

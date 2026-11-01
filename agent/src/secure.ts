@@ -1,7 +1,7 @@
 /**
  * At-rest encryption for the app's own secrets (GitHub/Vercel tokens, search
  * keys, MCP env/headers). The key is created and wrapped by the Android
- * Keystore on the Kotlin side and handed to the host as GRIPHUB_STORE_KEY.
+ * Keystore on the Kotlin side and handed to the host as RYNEX_STORE_KEY.
  * Files written before encryption was enabled are read as plain JSON and
  * encrypted on the next save.
  *
@@ -20,8 +20,8 @@ const PREFIX = "enc1:";
 // key out of every shell and MCP server the host spawns afterwards, while
 // this module keeps working through the cached copy.
 const CACHED_KEY: Buffer | null = (() => {
-	const hex = process.env.GRIPHUB_STORE_KEY;
-	delete process.env.GRIPHUB_STORE_KEY;
+	const hex = process.env.RYNEX_STORE_KEY;
+	delete process.env.RYNEX_STORE_KEY;
 	return hex && /^[0-9a-f]{64}$/i.test(hex) ? Buffer.from(hex, "hex") : null;
 })();
 

@@ -785,7 +785,7 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
                   agent,
                   markdown: subagentMarkdown(s),
                   title: tr('Subagent'),
-                  fileName: 'griphub-subagent-${s.id}.md',
+                  fileName: 'rynex-subagent-${s.id}.md',
                   heading: tr('Share this subagent'),
                   blurb: tr("As Markdown: the task, its steps and its report. Its thinking and the tools' output are left out."),
                   copied: tr('Copied'),

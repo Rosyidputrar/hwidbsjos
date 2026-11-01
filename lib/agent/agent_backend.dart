@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-/// How to start the host somewhere other than this phone: the program and its arguments (normally `ssh ... griphub-attach`),
+/// How to start the host somewhere other than this phone: the program and its arguments (normally `ssh ... rynex-attach`),
 /// and the environment to give it.
 class LaunchSpec {
   const LaunchSpec(this.argv, {this.env = const {}});

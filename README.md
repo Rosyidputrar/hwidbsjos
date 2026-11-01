@@ -1,35 +1,35 @@
 <p align="center">
-  <img src="assets/brand/logo.png" width="120" alt="GripHub logo">
+  <img src="assets/brand/logo.png" width="120" alt="Rynex logo">
 </p>
 
-<h1 align="center">GripHub AI Agent</h1>
+<h1 align="center">Rynex AI Agent</h1>
 
 <p align="center">An AI coding agent that runs on your Android phone.<br>
 Write, run, preview and deploy code without a laptop.</p>
 
 <p align="center">
-  <a href="https://github.com/seseegy/griphub-releases/releases/latest"><b>APK downloads</b></a> ·
-  <a href="https://github.com/seseegy/griphub"><b>Source</b></a>
+  <a href="https://github.com/seseegy/rynex-releases/releases/latest"><b>APK downloads</b></a> ·
+  <a href="https://github.com/seseegy/rynex"><b>Source</b></a>
 </p>
 
 <p align="center">
-  <img src="store/en/screenshot-1-home.png" alt="GripHub screenshots">
+  <img src="store/en/screenshot-1-home.png" alt="Rynex screenshots">
 </p>
 
-GripHub AI Agent puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs
+Rynex AI Agent puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs
 locally in a bundled Node.js runtime. It reads and writes files, runs shell commands in a real Debian or Alpine
 container, searches the web, and ships your project to GitHub Pages, Vercel or your own server.
 
-Chat runs through [GripHub Router](https://griphubrouter.web.id) (`griphubrouter.web.id/v1`, OpenAI-compatible):
-one API key unlocks 50+ models — Claude, GPT, Gemini, DeepSeek, GLM, Kimi, Qwen and more. Usage is billed in
-GripHub credits (1 credit = Rp 300); the Usage screen shows live balance, credit cost estimates per model, and
-the nearest credit expiry. Other OpenAI-compatible endpoints can be added as custom providers.
+Chat runs through a provider you choose — bring your own: sign in with an account (Anthropic, OpenAI,
+Gemini, OpenRouter and more), paste an API key, or add any compatible endpoint of your own, such as a local
+Ollama, a company gateway or your own server. There is no built-in provider and no account with us. Costs are
+each model's own prices; the Usage screen totals them in USD from the agent's own accounting.
 
 ## Privacy in one paragraph
 
-The app developer collects nothing and runs no server. Every chat you send goes to GripHub Router, which
-processes it as a service (see the [Privacy Policy](docs/privacy.html) for the full table of where data goes).
-Your GripHub API key, GitHub/Vercel tokens and SSH keys are encrypted on the device with a key held by the
+The app developer collects nothing and runs no server. Every chat you send goes to the provider you
+connected, which processes it as a service (see the [Privacy Policy](docs/privacy.html) for the full table of where data goes).
+Your provider API keys, GitHub/Vercel tokens and SSH keys are encrypted on the device with a key held by the
 Android Keystore. Backups are created only when you ask for them. Server mode (optional) runs the agent on a server of
 your own over SSH instead of on the phone; your data then lives on that server, and push notifications, if you turn
 them on, go through ntfy with a generic title only.
@@ -58,9 +58,9 @@ them on, go through ntfy with a generic title only.
   - MCP servers, skills (with a searchable skills catalogue), prompt templates and slash commands.
 - **Everyday use.**
   - Image and file attachments (paste a copied picture too), and voice input.
-  - Share to GripHub from other apps; home screen widget and Quick Settings tile.
+  - Share to Rynex from other apps; home screen widget and Quick Settings tile.
   - Notifications.
-  - Usage and cost estimates in GripHub credits and rupiah, and automatic fallback to another model.
+  - Usage and costs in USD at each model's own prices, and automatic fallback to another model.
   - App lock, encrypted tokens, and backup and restore.
   - Themes and accents, English and Bahasa Indonesia.
 - **Web search that survives DNS blocking.** DNS-over-HTTPS for the agent's network access.

@@ -21,7 +21,7 @@ void expectNoOverflow(String where) {
 }
 
 AgentController agentWithModel() => newAgent()
-  ..model = ModelInfo({'provider': 'griphub', 'id': 'mock', 'name': 'Mock'});
+  ..model = ModelInfo({'provider': 'mock', 'id': 'mock', 'name': 'Mock'});
 
 void main() {
   setUpAll(loadAppFonts);

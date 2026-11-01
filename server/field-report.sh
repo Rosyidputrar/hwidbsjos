@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GripHub field report: what the agent on this server is doing, for the field test (server_agent.md, phase 7).
+# Rynex field report: what the agent on this server is doing, for the field test (server_agent.md, phase 7).
 # Run it as root on the server, then paste the output back:
 #
 #   sudo bash field-report.sh                      # the last 24 hours
@@ -10,13 +10,13 @@
 # keys, tokens or file contents; the log lines are the host's own messages. Look it over before you share it anyway.
 #
 # Options
-#   --user NAME     the agent's account (default: griphub)
+#   --user NAME     the agent's account (default: rynex)
 #   --since TIME    how far back to read the log, in journalctl's words (default: "24 hours ago")
 #   --lines N       at most this many log lines (default: 80)
 #   -h, --help
 set -euo pipefail
 
-USER_NAME=griphub
+USER_NAME=rynex
 SINCE="24 hours ago"
 LINES=80
 
@@ -103,7 +103,7 @@ agent_report() {
 		--grep 'restart|memory|disk|kicked|SIGTERM|heap|out of memory|ENOSPC' -n "$LINES"
 }
 
-printf '# GripHub field report\n'
+printf '# Rynex field report\n'
 printf 'made: %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
 section "machine"
@@ -116,7 +116,7 @@ show free -m
 show df -h / "$(getent passwd "$USER_NAME" | cut -d: -f6)"
 printf 'oom kills since %s: %s\n' "$SINCE" "$(journalctl -k --no-pager -q --since "$SINCE" --grep 'Out of memory|oom-kill' 2>/dev/null | wc -l)"
 
-agent_report "$USER_NAME" griphub-hostd.service .griphub
+agent_report "$USER_NAME" rynex-hostd.service .rynex
 
 # CoderRa's agent next to it, if it is installed (the field test checks the two side by side).
 if id coderra >/dev/null 2>&1; then

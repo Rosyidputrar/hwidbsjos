@@ -19,10 +19,10 @@ import '../support/fake_backend.dart';
 import 'harness.dart';
 
 const _hostKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIABn0o4m7AzJb8wgXq1z+8+KtuqK5nyX6AX9nOQI2zVG';
-const _pubKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyOnlyForTests griphub-app';
+const _pubKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyOnlyForTests rynex-app';
 
 String _code() =>
-    'griphub1:${base64.encode(utf8.encode(jsonEncode({'v': 1, 'host': 'agentai.example.com', 'port': 22, 'user': 'griphub', 'hostKey': _hostKey})))}';
+    'rynex1:${base64.encode(utf8.encode(jsonEncode({'v': 1, 'host': 'agentai.example.com', 'port': 22, 'user': 'rynex', 'hostKey': _hostKey})))}';
 
 /// RemoteSetup with a fixed key and no ssh.
 class _StubSetup extends RemoteSetup {
@@ -67,10 +67,10 @@ void main() {
   });
 
   void configure({bool saved = false, bool active = false, ServerCheck? check}) {
-    final store = RemoteProfileStore(File('${tmp.path}/home/.griphub/remote.json'));
+    final store = RemoteProfileStore(File('${tmp.path}/home/.rynex/remote.json'));
     if (saved) store.save(RemoteProfile.fromSetupCode(SetupCode.parse(_code())).copyWith(active: active));
     // The setup script the agent bundle carries.
-    File('${tmp.path}/host/server/griphub-setup.sh')
+    File('${tmp.path}/host/server/rynex-setup.sh')
       ..createSync(recursive: true)
       ..writeAsStringSync('#!/bin/sh\n');
     final setup = _StubSetup('${tmp.path}/home');
@@ -103,7 +103,7 @@ void main() {
           'box': {'available': true, 'installed': false, 'enabled': true},
         },
         'settings_get' => {
-          'notify': {'enabled': true, 'url': 'https://ntfy.sh', 'topic': 'griphub-3f9c2a7b1d4e8f60a5b2c7d9e1f3a4b6'},
+          'notify': {'enabled': true, 'url': 'https://ntfy.sh', 'topic': 'rynex-3f9c2a7b1d4e8f60a5b2c7d9e1f3a4b6'},
         },
         _ => null,
       };
@@ -263,7 +263,7 @@ void main() {
           'installed': false,
           'state': 'none',
           'enabled': true,
-          'image': 'localhost/griphub-box',
+          'image': 'localhost/rynex-box',
           'startedAt': null,
           'usage': null,
           'limits': {'memory': '2g', 'swap': '3g', 'cpus': '1.5'},

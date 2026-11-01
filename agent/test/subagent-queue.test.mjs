@@ -37,7 +37,7 @@ function piLikeSession(runs, { onPrompt } = {}) {
 	const prompts = [];
 	const usage = { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 };
 	const session = {
-		model: { provider: "griphub", id: "claude-opus-5.5", name: "Claude Opus 5.5" },
+		model: { provider: "rynex", id: "claude-opus-5.5", name: "Claude Opus 5.5" },
 		thinkingLevel: "medium",
 		get isStreaming() {
 			return streaming;

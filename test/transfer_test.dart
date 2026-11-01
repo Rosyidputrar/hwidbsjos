@@ -268,7 +268,7 @@ void main() {
         Directory(daemon.workspace)
             .listSync()
             .map((e) => e.path.split('/').last)
-            .where((n) => n.startsWith('.griphub-up-')),
+            .where((n) => n.startsWith('.rynex-up-')),
         isEmpty,
       );
     }, skip: skip);
@@ -304,7 +304,7 @@ void main() {
         Directory(daemon.workspace)
             .listSync()
             .map((e) => e.path.split('/').last)
-            .where((n) => n.startsWith('.griphub-up-')),
+            .where((n) => n.startsWith('.rynex-up-')),
         isEmpty,
       );
     }, skip: skip);

@@ -31,7 +31,7 @@ void main() {
     'sessionFile': '/s/$chat.jsonl',
     'cwd': chat == 'work' ? '/w/shop' : '/w',
     'isStreaming': false,
-    if (chat == 'work') 'model': {'provider': 'griphub', 'id': 'm', 'name': 'M', 'input': ['text']},
+    if (chat == 'work') 'model': {'provider': 'mock', 'id': 'm', 'name': 'M', 'input': ['text']},
   };
 
   List<Map<String, dynamic>> messagesOf(String chat) => chat == 'work'

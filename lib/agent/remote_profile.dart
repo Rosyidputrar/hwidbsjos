@@ -19,7 +19,7 @@ class SetupCode {
   /// `ssh-ed25519 AAAA...` (type and key, no comment).
   final String hostKey;
 
-  static const prefix = 'griphub1:';
+  static const prefix = 'rynex1:';
 
   static final _hostOk = RegExp(r'^[A-Za-z0-9][A-Za-z0-9.:_-]*$');
   static final _userOk = RegExp(r'^[a-z_][a-z0-9_-]{0,31}$');
@@ -32,7 +32,7 @@ class SetupCode {
     final at = lines.indexWhere((l) => l.contains(prefix));
     if (at < 0) {
       throw SetupCodeError(
-        const Msg('That is not a setup code. It starts with "griphub1:" and the server script prints it at the end.'),
+        const Msg('That is not a setup code. It starts with "rynex1:" and the server script prints it at the end.'),
       );
     }
     var token = lines[at].substring(lines[at].indexOf(prefix));
@@ -46,7 +46,7 @@ class SetupCode {
       json = jsonDecode(utf8.decode(base64.decode(base64.normalize(token.substring(prefix.length)))));
     } catch (_) {
       throw SetupCodeError(
-        const Msg('The setup code is damaged. Copy the whole line again, from "griphub1:" to the end.'),
+        const Msg('The setup code is damaged. Copy the whole line again, from "rynex1:" to the end.'),
       );
     }
     if (json is! Map) throw SetupCodeError(const Msg('The setup code is damaged.'));
@@ -133,7 +133,7 @@ class RemoteProfile {
   final String? backupKey;
 
   /// The name ssh knows this server by.
-  static const alias = 'griphub-vps';
+  static const alias = 'rynex-vps';
 
   RemoteProfile copyWith({bool? active, String? backupKey}) => RemoteProfile(
     host: host,
@@ -196,8 +196,8 @@ class RemoteSetup {
     this.ssh = 'ssh',
     this.sshKeygen = 'ssh-keygen',
     this.rsync = 'rsync',
-    this.remoteDir = '.griphub',
-    this.restartCommand = 'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart griphub-hostd',
+    this.remoteDir = '.rynex',
+    this.restartCommand = 'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user restart rynex-hostd',
   });
 
   /// The app's home (it has `.ssh` in it).
@@ -213,9 +213,9 @@ class RemoteSetup {
   final String restartCommand;
 
   String get sshDir => '$home/.ssh';
-  String get keyPath => '$sshDir/griphub_vps';
-  String get knownHostsPath => '$sshDir/griphub_known_hosts';
-  String get configPath => '$sshDir/griphub_config';
+  String get keyPath => '$sshDir/rynex_vps';
+  String get knownHostsPath => '$sshDir/rynex_known_hosts';
+  String get configPath => '$sshDir/rynex_config';
 
   // -------------------------------------------------------------------------
   // The key
@@ -237,7 +237,7 @@ class RemoteSetup {
         '-N',
         '',
         '-C',
-        'griphub-app',
+        'rynex-app',
         '-f',
         keyPath,
       ], environment: env);
@@ -246,7 +246,7 @@ class RemoteSetup {
     if (!pub.existsSync()) {
       final r = await Process.run(sshKeygen, ['-y', '-f', keyPath], environment: env);
       if (r.exitCode != 0) throw StateError('Could not read the ssh key: ${r.stderr}'.trim());
-      pub.writeAsStringSync('${(r.stdout as String).trim()} griphub-app\n');
+      pub.writeAsStringSync('${(r.stdout as String).trim()} rynex-app\n');
     }
     return pub.readAsStringSync().trim();
   }
@@ -258,7 +258,7 @@ class RemoteSetup {
     }
   }
 
-  /// The command that runs the setup script this app carries (griphub-setup.sh: the server/ folder in one file) on the
+  /// The command that runs the setup script this app carries (rynex-setup.sh: the server/ folder in one file) on the
   /// server, to let this app in and set the server up. The script asks sudo for root itself.
   String bootstrapCommand(String publicKey, {String? address}) {
     String q(String s) => "'${s.replaceAll("'", r"'\''")}'";
@@ -266,12 +266,12 @@ class RemoteSetup {
   }
 
   /// What the setup script is called on the server.
-  static const setupFileName = 'griphub-setup.sh';
+  static const setupFileName = 'rynex-setup.sh';
 
-  /// One paste for the server's terminal: writes [script] (griphub-setup.sh) to a file and runs [command] on it, so the
+  /// One paste for the server's terminal: writes [script] (rynex-setup.sh) to a file and runs [command] on it, so the
   /// server needs nothing but this app.
   static String setupPaste(String script, String command) {
-    const end = 'GRIPHUB_SETUP';
+    const end = 'RYNEX_SETUP';
     if (script.split('\n').contains(end)) throw ArgumentError('the setup script contains the line $end');
     final body = script.endsWith('\n') ? script : '$script\n';
     return "cat > $setupFileName <<'$end'\n$body$end\n$command\n";
@@ -286,7 +286,7 @@ class RemoteSetup {
     final type = p.hostKey.split(' ').first;
     final algorithms = type == 'ssh-rsa' ? 'rsa-sha2-512,rsa-sha2-256' : type;
     return [
-      '# Written by GripHub for the server agent. Changes are overwritten.',
+      '# Written by Rynex for the server agent. Changes are overwritten.',
       'Host ${RemoteProfile.alias}',
       '  HostName ${p.host}',
       '  Port ${p.port}',
@@ -332,7 +332,7 @@ class RemoteSetup {
 
   /// What the app runs to reach the agent: ssh to the server and join its stdin and stdout to the daemon's socket.
   LaunchSpec launch(RemoteProfile p, {Map<String, String> env = const {}}) =>
-      LaunchSpec([ssh, ..._base, '-T', RemoteProfile.alias, '$remoteDir/bin/griphub-attach'], env: env);
+      LaunchSpec([ssh, ..._base, '-T', RemoteProfile.alias, '$remoteDir/bin/rynex-attach'], env: env);
 
   /// `ssh -N -L`: makes [remotePort] on the server's loopback available as [localPort] on this phone's. The server only
   /// lets the app's key forward to its own loopback (`permitopen`), and the phone's side is bound to loopback too.
@@ -394,10 +394,10 @@ class RemoteSetup {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     final script =
-        'if [ ! -x $remoteDir/bin/griphub-attach ]; then echo GRIPHUB:attach-missing; '
-        'elif [ ! -f $remoteDir/host/host.mjs ]; then echo GRIPHUB:host-missing; '
-        'elif [ ! -S $remoteDir/host.sock ]; then echo GRIPHUB:daemon-down; '
-        'else echo GRIPHUB:ok; fi';
+        'if [ ! -x $remoteDir/bin/rynex-attach ]; then echo RYNEX:attach-missing; '
+        'elif [ ! -f $remoteDir/host/host.mjs ]; then echo RYNEX:host-missing; '
+        'elif [ ! -S $remoteDir/host.sock ]; then echo RYNEX:daemon-down; '
+        'else echo RYNEX:ok; fi';
     final r = await _run([ssh, ..._base, '-T', RemoteProfile.alias, script], env: env, timeout: timeout);
     return classify(p, r.exitCode, r.stdout, r.stderr);
   }
@@ -406,7 +406,7 @@ class RemoteSetup {
   ServerCheck classify(RemoteProfile p, int exitCode, String stdout, String stderr) {
     final err = stderr.trim();
     if (exitCode == 0) {
-      final state = RegExp(r'GRIPHUB:([a-z-]+)').firstMatch(stdout)?.group(1);
+      final state = RegExp(r'RYNEX:([a-z-]+)').firstMatch(stdout)?.group(1);
       switch (state) {
         case 'ok':
           return const ServerCheck(ServerProblem.none, Msg('Connected. The agent is running on the server.'));
@@ -414,7 +414,7 @@ class RemoteSetup {
           return const ServerCheck(
             ServerProblem.daemonDown,
             Msg(
-              'Connected, but the agent is not running on the server. Start it with: systemctl --user start griphub-hostd (as the griphub user), or press Install / update.',
+              'Connected, but the agent is not running on the server. Start it with: systemctl --user start rynex-hostd (as the rynex user), or press Install / update.',
             ),
           );
         case 'host-missing':
@@ -426,7 +426,7 @@ class RemoteSetup {
           return const ServerCheck(
             ServerProblem.notInstalled,
             Msg(
-              'Connected, but the server is not set up (no griphub-attach). Run the server script on it first; the app shows the command.',
+              'Connected, but the server is not set up (no rynex-attach). Run the server script on it first; the app shows the command.',
             ),
           );
       }
@@ -620,14 +620,14 @@ class RemoteSetup {
   }
 
   /// Asks the host on the server to restart once nothing is in flight (`host_restart`), through the same
-  /// `griphub-attach` the app connects with. Returns its answer (`restarting`, or `pending`), or null when it gave none:
+  /// `rynex-attach` the app connects with. Returns its answer (`restarting`, or `pending`), or null when it gave none:
   /// not running, an attach that cannot connect, or no reply in 20 seconds.
   Future<Map<String, dynamic>?> _restartWhenIdle({Map<String, String>? env}) async {
     final Process p;
     try {
       p = await Process.start(
         ssh,
-        [..._base, '-T', RemoteProfile.alias, '$remoteDir/bin/griphub-attach'],
+        [..._base, '-T', RemoteProfile.alias, '$remoteDir/bin/rynex-attach'],
         environment: env,
       );
     } on ProcessException {

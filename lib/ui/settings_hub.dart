@@ -96,7 +96,7 @@ class _SettingsHubState extends State<SettingsHub> {
       try {
         final auth = LocalAuthentication();
         if (!await auth.isDeviceSupported()) throw tr('No screen lock is set on this phone.');
-        if (!await auth.authenticate(localizedReason: tr('Unlock GripHub AI Agent'))) return;
+        if (!await auth.authenticate(localizedReason: tr('Unlock Rynex AI Agent'))) return;
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
         return;
@@ -208,7 +208,7 @@ class _SettingsHubState extends State<SettingsHub> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(tr('GripHub AI Agent'), style: text.titleLarge),
+                          Text(tr('Rynex AI Agent'), style: text.titleLarge),
                           const SizedBox(height: 2),
                           Text(
                             Updater.instance.currentVersion.isEmpty
@@ -269,7 +269,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.image,
                     color: const Color(0xFF7C3AED),
                     title: tr('Generate image'),
-                    subtitle: tr('Make pictures with GripHub image models'),
+                    subtitle: tr('Make pictures with Rynex image models'),
                     onTap: () => _open(ImageGenScreen(agent: agent)),
                   ),
                 ],
@@ -457,7 +457,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.fingerprint,
                     color: const Color(0xFFE11D48),
                     title: tr('App lock'),
-                    subtitle: tr('Fingerprint or screen lock when opening GripHub AI Agent'),
+                    subtitle: tr('Fingerprint or screen lock when opening Rynex AI Agent'),
                     trailing: LabeledSwitch(label: tr('App lock'), value: look.appLock, onChanged: _setAppLock),
                     onTap: () => _setAppLock(!look.appLock),
                   ),
@@ -537,8 +537,7 @@ class _SettingsHubState extends State<SettingsHub> {
                 options: languages,
                 onChanged: (v) => look.update(language: v),
               ),
-              SectionLabel(tr('Powered by')),
-              _GripHubCard(openUrl: agent.client.openUrl),
+              _RynexCard(openUrl: agent.client.openUrl),
               SectionLabel(tr('About')),
               SettingsGroup(
                 children: [
@@ -579,7 +578,7 @@ extension on _SettingsHubState {
         d.progress != null ? '${tr('Downloading')} ${(d.progress! * 100).round()}%' : tr('Downloading'),
       UpdatePhase.ready => tr('Update ready to install'),
       UpdatePhase.failed => tr('Download failed'),
-      UpdatePhase.upToDate => tr('GripHub AI Agent is up to date'),
+      UpdatePhase.upToDate => tr('Rynex AI Agent is up to date'),
       UpdatePhase.idle => tr('Check for updates'),
     };
     final attention = u.phase == UpdatePhase.available || u.phase == UpdatePhase.ready;
@@ -665,13 +664,13 @@ class _Segmented<T> extends StatelessWidget {
   }
 }
 
-/// Who builds GripHub AI Agent, with links to their GitHub and site.
-/// The service this special build is powered by: GripHub Router.
-class _GripHubCard extends StatelessWidget {
-  const _GripHubCard({required this.openUrl});
+/// Who builds Rynex, with a link to their GitHub.
+/// Rynex is bring-your-own-provider: there is no built-in service to credit.
+class _RynexCard extends StatelessWidget {
+  const _RynexCard({required this.openUrl});
   final Future<void> Function(String url) openUrl;
 
-  static const site = 'https://griphubrouter.web.id';
+  static const site = 'https://github.com/seseegy';
 
   @override
   Widget build(BuildContext context) {
@@ -684,26 +683,26 @@ class _GripHubCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Avatar(name: 'GripHub', size: 52),
+              const Avatar(name: 'Rynex', size: 52),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('GripHub AI Agent', style: text.titleLarge),
+                    Text('Rynex AI Agent', style: text.titleLarge),
                     Text(
-                      'griphubrouter.web.id',
+                      tr('Made by seseegy'),
                       style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
                     ),
                   ],
                 ),
               ),
-              Icon(LucideIcons.globe, size: 22, color: p.text),
+              Icon(SimpleIcons.github, size: 22, color: p.text),
             ],
           ),
           const SizedBox(height: 12),
           Text(
-            tr('A special build powered by GripHub Router \u2014 Claude, GPT, Gemini, DeepSeek and more behind one API key. This app talks to GripHub only: add your key and start building.'),
+            tr('An AI coding agent on your phone. Bring your own provider: sign in with an account, use an API key, or point Rynex at your own server.'),
             style: text.bodyMedium?.copyWith(color: p.muted),
           ),
           const SizedBox(height: 12),
@@ -711,7 +710,7 @@ class _GripHubCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _LinkChip(icon: LucideIcons.globe, label: 'griphubrouter.web.id', onTap: () => openUrl(site)),
+              _LinkChip(icon: SimpleIcons.github, label: 'github.com/seseegy', onTap: () => openUrl(site)),
             ],
           ),
         ],

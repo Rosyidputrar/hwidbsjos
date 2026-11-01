@@ -39,7 +39,7 @@ Future<void> installUpdate(BuildContext context, AgentController agent) async {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('The agent is still working')),
-        content: Text(tr('Installing the update closes GripHub AI Agent and stops the current run.')),
+        content: Text(tr('Installing the update closes Rynex AI Agent and stops the current run.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Wait'))),
           TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Install anyway'))),
@@ -53,7 +53,7 @@ Future<void> installUpdate(BuildContext context, AgentController agent) async {
     messenger.showSnackBar(SnackBar(content: Text(tr(problem))));
   } else if (Updater.instance.awaitingPermission) {
     messenger.showSnackBar(
-      SnackBar(content: Text(tr('Allow GripHub AI Agent to install apps, then come back. The install continues on its own.'))),
+      SnackBar(content: Text(tr('Allow Rynex AI Agent to install apps, then come back. The install continues on its own.'))),
     );
   }
 }
@@ -94,7 +94,7 @@ class _UpdateSheet extends StatelessWidget {
           UpdatePhase.downloading => ('${tr('Downloading')} ${d.version ?? ''}', null),
           UpdatePhase.ready => (tr('Update ready to install'), d.version),
           UpdatePhase.failed => (tr('Download failed'), null),
-          UpdatePhase.upToDate => (tr('GripHub AI Agent is up to date'), null),
+          UpdatePhase.upToDate => (tr('Rynex AI Agent is up to date'), null),
           UpdatePhase.idle => (tr('App updates'), null),
         };
         final notes = release?.notes ?? '';
@@ -161,7 +161,7 @@ class _UpdateSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  tr('You can leave GripHub AI Agent; the download continues in the background.'),
+                  tr('You can leave Rynex AI Agent; the download continues in the background.'),
                   style: text.bodySmall?.copyWith(color: p.muted),
                 ),
               ],

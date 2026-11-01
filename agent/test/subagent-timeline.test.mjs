@@ -17,7 +17,7 @@ function session(script) {
 	let listener;
 	let n = 0;
 	const s = {
-		model: { provider: "griphub", id: "claude-opus-5.5", name: "Claude Opus 5.5" },
+		model: { provider: "rynex", id: "claude-opus-5.5", name: "Claude Opus 5.5" },
 		thinkingLevel: "high",
 		isStreaming: false,
 		subscribe(fn) {

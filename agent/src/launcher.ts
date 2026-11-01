@@ -2,7 +2,7 @@
  * Keeps the server's launcher files in step with the host that is running.
  *
  * `server/bootstrap.sh` installs three files outside the host's own folder: the box launcher (`bin/box`), the box's
- * Containerfile and the program the app connects through (`bin/griphub-attach`). The app's update only copies the host
+ * Containerfile and the program the app connects through (`bin/rynex-attach`). The app's update only copies the host
  * folder, so without this a fix to one of those files reached only servers that were set up again by hand. The bundle
  * carries them in `launcher/` (build.mjs); at start the host puts any that changed where bootstrap.sh put them.
  *
@@ -16,14 +16,14 @@ import { dirname, join } from "node:path";
 export interface LauncherFile {
 	/** Name inside the bundle's `launcher/` folder. */
 	name: string;
-	/** Where bootstrap.sh installs it, relative to the GripHub folder (`~/.griphub`). */
+	/** Where bootstrap.sh installs it, relative to the Rynex folder (`~/.rynex`). */
 	target: string;
 	mode: number;
 }
 
 export const LAUNCHER_FILES: LauncherFile[] = [
 	{ name: "box", target: join("bin", "box"), mode: 0o755 },
-	{ name: "griphub-attach", target: join("bin", "griphub-attach"), mode: 0o755 },
+	{ name: "rynex-attach", target: join("bin", "rynex-attach"), mode: 0o755 },
 	{ name: "Containerfile", target: join("box", "Containerfile"), mode: 0o644 },
 ];
 
@@ -32,11 +32,11 @@ export const LAUNCHER_FILES: LauncherFile[] = [
  * renamed over it, so a `box` that is running right now keeps reading the old file and the next call gets the new one.
  * Returns the targets that were replaced; one that cannot be written is reported to [warn] and skipped.
  */
-export function syncLauncher(o: { hostDir: string; griphubDir: string; warn?: (message: string) => void }): string[] {
+export function syncLauncher(o: { hostDir: string; rynexDir: string; warn?: (message: string) => void }): string[] {
 	const replaced: string[] = [];
 	for (const f of LAUNCHER_FILES) {
 		const from = join(o.hostDir, "launcher", f.name);
-		const to = join(o.griphubDir, f.target);
+		const to = join(o.rynexDir, f.target);
 		if (!existsSync(from) || !existsSync(to)) continue;
 		const tmp = `${to}.new-${process.pid}`;
 		try {

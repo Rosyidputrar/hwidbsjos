@@ -10,9 +10,9 @@ import { bundle, tempDir } from "./helpers.mjs";
 // The store key the app hands the host; each bundle reads it once at load (and takes it out of the environment).
 const STORE_KEY = "ab".repeat(32);
 const { Guard } = await bundle("guard");
-process.env.GRIPHUB_STORE_KEY = STORE_KEY;
+process.env.RYNEX_STORE_KEY = STORE_KEY;
 const { GitHubSync } = await bundle("sync");
-process.env.GRIPHUB_STORE_KEY = STORE_KEY;
+process.env.RYNEX_STORE_KEY = STORE_KEY;
 const { Integrations, NTFY_DEFAULT_URL } = await bundle("integrations");
 
 /** A guard wired into a stand-in for pi's extension API; `call` runs one tool call through it. */
@@ -134,10 +134,10 @@ test("notifications are off until turned on, need a valid topic, and default to 
 	assert.equal(it.notifyConfig(), null);
 	assert.deepEqual(it.publicSettings().notify, { enabled: false, url: NTFY_DEFAULT_URL, topic: null });
 	// A topic alone does not turn them on.
-	it.updateSettings({ notify: { topic: "griphub-0123456789abcdef" } });
+	it.updateSettings({ notify: { topic: "rynex-0123456789abcdef" } });
 	assert.equal(it.notifyConfig(), null);
 	it.updateSettings({ notify: { enabled: true } });
-	assert.deepEqual(it.notifyConfig(), { url: "https://ntfy.sh", topic: "griphub-0123456789abcdef" });
+	assert.deepEqual(it.notifyConfig(), { url: "https://ntfy.sh", topic: "rynex-0123456789abcdef" });
 	// An own server; a bad one is refused and the saved settings stay as they were.
 	it.updateSettings({ notify: { url: "https://ntfy.example.com" } });
 	assert.equal(it.notifyConfig().url, "https://ntfy.example.com");
@@ -147,7 +147,7 @@ test("notifications are off until turned on, need a valid topic, and default to 
 	// Off needs no valid address, and keeps the topic for next time.
 	it.updateSettings({ notify: { enabled: false, url: "ftp://broken" } });
 	assert.equal(it.notifyConfig(), null);
-	assert.equal(it.publicSettings().notify.topic, "griphub-0123456789abcdef");
+	assert.equal(it.publicSettings().notify.topic, "rynex-0123456789abcdef");
 });
 
 test("deploy commands: the server's box when there is one, its plain shell otherwise; the phone's container as before", async (t) => {
@@ -164,8 +164,8 @@ test("deploy commands: the server's box when there is one, its plain shell other
 	boxScript = null;
 	assert.match(await it.containerRunner().run("box", ["-c", "echo plain"], { cwd: dir }), /^plain/);
 	// On the phone: available only with the proot container installed, run through `box` on PATH (unchanged).
-	const before = process.env.GRIPHUB_ROOTFS;
-	delete process.env.GRIPHUB_ROOTFS;
-	t.after(() => (before === undefined ? delete process.env.GRIPHUB_ROOTFS : (process.env.GRIPHUB_ROOTFS = before)));
+	const before = process.env.RYNEX_ROOTFS;
+	delete process.env.RYNEX_ROOTFS;
+	t.after(() => (before === undefined ? delete process.env.RYNEX_ROOTFS : (process.env.RYNEX_ROOTFS = before)));
 	assert.equal(integrations(t).containerRunner().available, false);
 });

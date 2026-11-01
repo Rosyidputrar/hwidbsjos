@@ -2,14 +2,14 @@
 
 ## Bahasa Indonesia
 
-- Edit & kirim ulang kini bertanya dulu. Sebelumnya semua pesan sesudahnya langsung keluar dari chat (dan dilupakan agent) tanpa pertanyaan dan tanpa undo, sementara file yang sudah diubah agent tetap berubah. Sekarang muncul lembar yang menyebut berapa pesan yang keluar, bahwa file tidak ikut dikembalikan (pakai Perubahan & undo), dan menawarkan Cabangkan lebih dulu: chat disalin dan chat ini tetap utuh.
-- Subagent pertama di setiap chat kini meminta persetujuan (bila mode persetujuan Hanya yang berisiko atau Tanya semua). Kartunya menampilkan tugas dan profilnya (baca atau penuh). Sekali kamu mengizinkan, subagent berikutnya di chat itu tidak ditanya lagi, dan Selalu berarti semua subagent. Sebelumnya subagent, yang bisa memakai sampai 50 kredit (sekitar Rp 15.000) masing-masing dan tiga sekaligus, mulai tanpa kabar.
-- Setelah key GripHub pertama disimpan, aplikasi menawarkan batas harian (10, 25, 50, atau 100 kredit, lengkap dengan nilai rupiahnya) atau tanpa batas. Pemakaian tidak dibatasi secara bawaan, dan sebelumnya tidak ada yang menyebutnya. Batas ini bisa diubah di Pengaturan, Pemakaian & anggaran.
-- Baris Pemakaian & anggaran di Pengaturan kini menyebut "Tanpa batas harian: ketuk untuk mengatur" bila belum ada batas. Layar Subagent menyebut berapa kredit yang bisa dipakai tiap subagent dan bahwa tiga bisa berjalan sekaligus.
+- Rynex kini bring your own provider: tidak ada lagi provider bawaan yang terkunci. Hubungkan provider dengan masuk memakai akun (Anthropic, OpenAI, Gemini, OpenRouter, dan lainnya), menempel kunci API, atau menambahkan endpoint kustom apa pun yang kompatibel — Ollama lokal, gateway kantor, atau servermu sendiri. Layarnya ada di Pengaturan → Model & provider.
+- Sistem kredit hilang. Semua biaya kini dihitung dari tarif tiap model sendiri dan ditampilkan dalam USD: di layar Pemakaian, di catatan kaki tiap balasan, di panel subagent, dan di batas harian serta batas subagent (yang kini juga dalam USD).
+- Buat gambar kini memakai provider kustommu yang tersimpan kuncinya — bukan lagi satu layanan tertentu.
+- Nama, ikon, dan identitas aplikasi diperbarui menjadi Rynex (paket com.airynex.agent). Folder data lama di server otomatis berganti nama saat pertama dijalankan, jadi sesi dan pengaturanmu tetap ada.
 
 ## English
 
-- Edit & resend now asks first. Before, every message after it left the chat (and the agent forgot it) with no question and no undo, while the files the agent had changed stayed changed. A sheet now says how many messages leave, that files are not put back (use Changes & undo), and offers Fork first: the chat is copied and this one stays as it is.
-- The first subagent of each chat now asks for approval (in the Risky only and Ask all modes). The card shows the task and its profile (read or full). Once you allow it, later subagents in that chat are not asked, and Always means every subagent. Before, a subagent, which can spend up to 50 credits (about Rp 15,000) each and three at a time, started without a word.
-- After the first GripHub key is saved, the app offers a daily limit (10, 25, 50 or 100 credits, with each one's rupiah value) or no limit. Spending is not capped by default, and nothing said so. The limit can be changed in Settings, under Usage & budget.
-- The Usage & budget row in Settings now says "No daily limit: tap to set one" when there is none. The Subagent screen says how many credits each subagent can spend and that three can run at once.
+- Rynex is now bring-your-own-provider: there is no locked built-in provider anymore. Connect a provider by signing in with an account (Anthropic, OpenAI, Gemini, OpenRouter and more), pasting an API key, or adding any compatible custom endpoint — a local Ollama, a company gateway, or your own server. Find it in Settings → Models & providers.
+- The credit system is gone. Every cost is now priced from each model's own rates and shown in USD: on the Usage screen, in each reply's footer, in the subagent panel, and in the daily and subagent limits (also in USD now).
+- Image generation now uses one of your saved custom providers instead of one specific service.
+- The app's name, icon and identity are now Rynex (package com.airynex.agent). On a server, the old data folder is renamed automatically on first run, so your sessions and settings carry over.

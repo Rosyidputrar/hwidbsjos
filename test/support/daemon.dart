@@ -7,18 +7,18 @@ import 'package:rynex/agent/agent_client.dart';
 
 /// The real host running as a daemon (agent/build/harness/host.mjs: host.ts bundled for the tests by
 /// agent/test/build-harness.mjs), with a throwaway home, so Dart tests meet it the way the app does through ssh. The
-/// attach program is the real `server/griphub-attach`.
+/// attach program is the real `server/rynex-attach`.
 ///
-/// GripHub's host only talks to GripHub Router; with a [MockModel] the router's chat completions are sent to it by a
+/// Rynex's host only talks to Rynex Router; with a [MockModel] the router's chat completions are sent to it by a
 /// preloaded fetch (agent/test/fixtures/router-redirect.mjs), and [useMockModel] saves a key and picks the model.
 ///
 /// Needs the harness built and `node` on the PATH. Otherwise [unavailable] says what is missing and the tests skip,
-/// unless `GRIPHUB_REQUIRE_NODE_SIDE` is set (CI), when they fail instead. Adapted from CoderRa's test/support.
+/// unless `RYNEX_REQUIRE_NODE_SIDE` is set (CI), when they fail instead. Adapted from CoderRa's test/support.
 class TestDaemon {
   TestDaemon._(this.home, this.sock, this._env);
 
   static const host = 'agent/build/harness/host.mjs';
-  static const attach = 'server/griphub-attach';
+  static const attach = 'server/rynex-attach';
   static const routerRedirect = 'agent/test/fixtures/router-redirect.mjs';
 
   static String get node => Platform.environment['NODE'] ?? 'node';
@@ -39,7 +39,7 @@ class TestDaemon {
   static String? get skip {
     final why = unavailable;
     if (why == null) return null;
-    if (Platform.environment['GRIPHUB_REQUIRE_NODE_SIDE'] != null) throw StateError(why);
+    if (Platform.environment['RYNEX_REQUIRE_NODE_SIDE'] != null) throw StateError(why);
     return why;
   }
 
@@ -66,15 +66,15 @@ class TestDaemon {
       ...Platform.environment,
       'HOME': home.path,
       'PI_CODING_AGENT_DIR': agentDir,
-      'GRIPHUB_WORKSPACE': '${home.path}/workspace',
-      'GRIPHUB_DIR': '${home.path}/.griphub',
-      'GRIPHUB_STORE_KEY': 'ab' * 32,
-      'GRIPHUB_TEST_ROUTER': ?model?.baseUrl,
+      'RYNEX_WORKSPACE': '${home.path}/workspace',
+      'RYNEX_DIR': '${home.path}/.rynex',
+      'RYNEX_STORE_KEY': 'ab' * 32,
+      'RYNEX_TEST_ROUTER': ?model?.baseUrl,
       'PI_SKIP_VERSION_CHECK': '1',
       'PI_TELEMETRY': '0',
       'GITHUB_TOKEN': '',
       'GH_TOKEN': '',
-      'GRIPHUB_SOCK': sock,
+      'RYNEX_SOCK': sock,
       ...env,
     });
     await d.launch();
@@ -108,17 +108,24 @@ class TestDaemon {
   /// What the app would run through ssh: the real attach program, pointed at this daemon's socket.
   LaunchSpec get launchSpec => LaunchSpec([node, attach], env: _env);
 
-  /// Saves a GripHub key with the test model and picks it, as the app's onboarding would.
+  /// Saves the test provider with the test model and picks it, as connecting
+  /// a provider in the app would. Its canonical base is intercepted by the
+  /// preloaded fixture (agent/test/fixtures/router-redirect.mjs), which
+  /// forwards chat completions to the test model server.
   static Future<void> useMockModel(AgentClient client) async {
     await client.call('custom_provider_save', {
       'provider': {
+        'id': 'mock',
+        'name': 'Mock',
+        'api': 'openai-completions',
+        'baseUrl': 'https://mock.router.test/v1',
         'apiKey': 'sk-test',
         'models': [
           {'id': 'mock-1', 'name': 'Mock'},
         ],
       },
     });
-    await client.call('set_model', {'provider': 'griphub', 'model': 'mock-1'});
+    await client.call('set_model', {'provider': 'mock', 'model': 'mock-1'});
   }
 
   Future<void> kill() async {

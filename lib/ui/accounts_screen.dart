@@ -103,7 +103,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                                 'Create a classic token with the repo and workflow scopes, then paste it here.',
                             linkLabel: 'Create a token',
                             onLink: () => widget.agent.client.openUrl(
-                              'https://github.com/settings/tokens/new?scopes=repo,workflow,read:org&description=GripHub AI Agent',
+                              'https://github.com/settings/tokens/new?scopes=repo,workflow,read:org&description=Rynex AI Agent',
                             ),
                             hint: 'ghp_… or github_pat_…',
                             onConnect: (t) => _guard(() => it.githubLogin(t), success: 'GitHub connected'),
@@ -613,7 +613,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                         Text(
                           _saved.isNotEmpty
                               ? _saved
-                              : (_builtIn ? tr('Built-in GripHub app') : tr('Not set: sign-in with a code is off')),
+                              : (_builtIn ? tr('Built-in Rynex app') : tr('Not set: sign-in with a code is off')),
                           style: text.bodySmall,
                         ),
                       ],

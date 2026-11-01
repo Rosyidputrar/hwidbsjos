@@ -19,9 +19,9 @@ final _png = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
 );
 
-/// The screens GripHub has on top of CoderRa's that read project files, per [FsVariant]: the sent-attachment viewer and
+/// The screens Rynex has on top of CoderRa's that read project files, per [FsVariant]: the sent-attachment viewer and
 /// thumbnails (the copies live in the project's `.attachments`, on the agent's machine) and the project memory file.
-void griphubFsSuite(FsVariant variant) {
+void rynexFsSuite(FsVariant variant) {
   late Directory dir;
   late AgentController agent;
 

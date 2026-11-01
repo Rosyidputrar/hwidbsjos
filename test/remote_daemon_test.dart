@@ -29,7 +29,7 @@ void main() {
 
   setUp(() async {
     model = await MockModel.start();
-    daemon = await TestDaemon.start(model: model, env: {'GRIPHUB_PING_MS': '150', 'GRIPHUB_IDLE_MS': '5000'});
+    daemon = await TestDaemon.start(model: model, env: {'RYNEX_PING_MS': '150', 'RYNEX_IDLE_MS': '5000'});
     backend = ProcessBackend();
     client = newClient(backend);
     records = [];

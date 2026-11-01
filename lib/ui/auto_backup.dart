@@ -242,7 +242,7 @@ Future<void> offerServerRestore(BuildContext context, AgentController agent) asy
   await restoreServerBackup(context, agent, local.first);
 }
 
-/// The phone agent's own automatic backups (agent/src/autobackup.ts on this phone): encrypted into Download/GripHub,
+/// The phone agent's own automatic backups (agent/src/autobackup.ts on this phone): encrypted into Download/Rynex,
 /// without API keys, with the key shown once as a recovery code. Only with the agent on this phone in use.
 class PhoneBackupCard extends StatefulWidget {
   const PhoneBackupCard({super.key, required this.agent});
@@ -349,7 +349,7 @@ class _PhoneBackupCardState extends State<PhoneBackupCard> with BusyActions {
           const SizedBox(height: 8),
           Text(
             tr(
-              'Every hour when something changed: chats, projects, skills and schedules, encrypted into Download/GripHub/auto (the newest three). API keys and accounts are never in it. To survive a lost phone, the folder must leave it — a sync app or a copy — and the recovery code must be written down somewhere safe.',
+              'Every hour when something changed: chats, projects, skills and schedules, encrypted into Download/Rynex/auto (the newest three). API keys and accounts are never in it. To survive a lost phone, the folder must leave it — a sync app or a copy — and the recovery code must be written down somewhere safe.',
             ),
             style: text.bodySmall,
           ),
@@ -456,7 +456,7 @@ Future<void> showRecoveryCode(BuildContext context, String key) async {
   );
 }
 
-/// Restores a phone backup (a .ghb from Download/GripHub/auto) on this phone, asking for the recovery code.
+/// Restores a phone backup (a .ryb from Download/Rynex/auto; .ghb from before the rename also opens) on this phone, asking for the recovery code.
 Future<void> restorePhoneBackup(BuildContext context, AgentController agent, String path) async {
   final controller = TextEditingController();
   final key = await showDialog<String>(

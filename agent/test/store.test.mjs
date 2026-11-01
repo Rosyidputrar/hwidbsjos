@@ -24,7 +24,7 @@ const entry = join(dir, "entry.ts");
 writeFileSync(entry, `export * from ${JSON.stringify(join(here, "..", "src", "secure.ts"))};\nexport * from ${JSON.stringify(join(here, "..", "src", "state.ts"))};\n`);
 const store = join(dir, "store.mjs");
 await build({ entryPoints: [entry], outfile: store, bundle: true, platform: "node", format: "esm", logLevel: "error" });
-process.env.GRIPHUB_STORE_KEY = KEY;
+process.env.RYNEX_STORE_KEY = KEY;
 const secure = await import(store);
 
 let n = 0;
@@ -49,8 +49,8 @@ function child(body, { key = KEY } = {}) {
 	const file = join(dir, `child-${++n}.mjs`);
 	writeFileSync(file, `import * as store from ${J(store)};\nconst problems = [];\nstore.onStoreProblem((p) => problems.push(p));\n${body}\n`);
 	const env = { ...process.env };
-	delete env.GRIPHUB_STORE_KEY;
-	if (key) env.GRIPHUB_STORE_KEY = key;
+	delete env.RYNEX_STORE_KEY;
+	if (key) env.RYNEX_STORE_KEY = key;
 	const r = spawnSync(process.execPath, [file], { env, encoding: "utf8", timeout: 30_000 });
 	assert.equal(r.status, 0, r.stderr);
 	return r.stdout.trim() ? JSON.parse(r.stdout.trim().split("\n").pop()) : null;
@@ -66,7 +66,7 @@ const pad = "x".repeat(8_000_000); // large, so that a save takes long enough to
 for (let i = 0; ; i++) { writeSecureJson(${J(file)}, { i, pad }); if (i === 0) console.log("first"); }`,
 	);
 	for (let round = 0; round < 8; round++) {
-		const p = spawn(process.execPath, [writer], { env: { ...process.env, GRIPHUB_STORE_KEY: KEY }, stdio: ["ignore", "pipe", "ignore"] });
+		const p = spawn(process.execPath, [writer], { env: { ...process.env, RYNEX_STORE_KEY: KEY }, stdio: ["ignore", "pipe", "ignore"] });
 		await new Promise((r) => p.stdout.once("data", r)); // the first save is done
 		await new Promise((r) => setTimeout(r, 40 + round * 23)); // then killed at a different moment each round
 		p.kill("SIGKILL");

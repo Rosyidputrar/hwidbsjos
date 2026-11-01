@@ -43,8 +43,8 @@ export const defaultExec: Exec = (file, args, o) =>
 export interface BoxOptions {
 	/** server/box/box as installed on the server. */
 	script: string;
-	/** `~/.griphub`: holds box.conf, box-home and the Containerfile. */
-	griphubDir: string;
+	/** `~/.rynex`: holds box.conf, box-home and the Containerfile. */
+	rynexDir: string;
 	image?: string;
 	name?: string;
 	podman?: string;
@@ -100,11 +100,11 @@ export class PodmanBox {
 	private working: string | null = null;
 
 	constructor(private readonly o: BoxOptions) {
-		this.image = o.image ?? "localhost/griphub-box";
-		this.name = o.name ?? "griphub-box";
+		this.image = o.image ?? "localhost/rynex-box";
+		this.name = o.name ?? "rynex-box";
 		this.podman = o.podman ?? "podman";
 		this.exec = o.exec ?? defaultExec;
-		this.stream = o.stream ?? ((cmd, args, log) => run(cmd, args, { cwd: o.griphubDir, log }));
+		this.stream = o.stream ?? ((cmd, args, log) => run(cmd, args, { cwd: o.rynexDir, log }));
 	}
 
 	get available() {
@@ -117,14 +117,14 @@ export class PodmanBox {
 
 	/** Where the container's home lives on the server. */
 	get homeDir() {
-		return process.env.GRIPHUB_BOX_HOME ?? join(this.o.griphubDir, "box-home");
+		return process.env.RYNEX_BOX_HOME ?? join(this.o.rynexDir, "box-home");
 	}
 
 	/** The limits the container is made with (box.conf, then the script's own defaults). Applied when it is next created. */
 	limits(): BoxLimits {
 		const out = { ...DEFAULT_LIMITS };
 		try {
-			const conf = readFileSync(process.env.GRIPHUB_BOX_CONF ?? join(this.o.griphubDir, "box.conf"), "utf8");
+			const conf = readFileSync(process.env.RYNEX_BOX_CONF ?? join(this.o.rynexDir, "box.conf"), "utf8");
 			for (const [key, field] of [["BOX_MEMORY", "memory"], ["BOX_SWAP", "swap"], ["BOX_CPUS", "cpus"]] as const) {
 				const m = new RegExp(`^\\s*${key}=["']?([0-9.]+[kKmMgG]?)["']?\\s*(?:#.*)?$`, "m").exec(conf);
 				if (m) out[field] = m[1];
@@ -248,7 +248,7 @@ export class PodmanBox {
 	/** Builds the image again from server/box/Containerfile (minutes), then drops the container so it is made from the new one. */
 	async rebuildImage(log: Log): Promise<void> {
 		this.requireBox();
-		const dir = join(this.o.griphubDir, "box");
+		const dir = join(this.o.rynexDir, "box");
 		if (!existsSync(join(dir, "Containerfile"))) throw new FsError("ENOENT", "The Containerfile is missing from the server. Run the setup script again.");
 		return this.exclusive("rebuilding the image", async () => {
 			await this.stream(this.podman, ["build", "-t", this.image, "-f", join(dir, "Containerfile"), dir], log);

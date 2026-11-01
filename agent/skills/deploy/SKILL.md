@@ -5,7 +5,7 @@ description: Publish a site or app from the phone to Vercel, GitHub Pages or the
 
 # Deploy
 
-The easiest path is the rocket button in the GripHub AI Agent chat: it deploys the
+The easiest path is the rocket button in the Rynex AI Agent chat: it deploys the
 current project folder and shows CI and build logs live. Suggest it first.
 When the user wants you to do it, use these.
 

@@ -1,6 +1,6 @@
 # Uji lapangan mode server (fase 7)
 
-Checklist untuk menguji GripHub di VPS sungguhan (`agentai`: 4 CPU, RAM 8 GB, disk 100 GB) sebelum PR #9 digabung ke
+Checklist untuk menguji Rynex di VPS sungguhan (`agentai`: 4 CPU, RAM 8 GB, disk 100 GB) sebelum PR #9 digabung ke
 `main`. Label tombol ditulis dalam bahasa Indonesia app (dengan teks Inggrisnya dalam kurung). Centang yang lulus, catat yang tidak (langkah, apa yang terlihat, jam). Di akhir, kirim **output
 `field-report.sh`** dan catatan itu; perbaikannya dikerjakan dari situ.
 
@@ -15,10 +15,10 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 
 - [ ] App: Pengaturan → baris **Agent: HP ini** di atas (atau Data & keamanan → **Agent di VPS / server**) → isi
       alamat VPS → **Salin perintah setup**.
-- [ ] VPS (aplikasi SSH, sebagai root atau akun dengan sudo): tempel. File terbongkar di `~/griphub-server` tanpa pesan
+- [ ] VPS (aplikasi SSH, sebagai root atau akun dengan sudo): tempel. File terbongkar di `~/rynex-server` tanpa pesan
       "arrived damaged"; tidak ada peringatan "written for Ubuntu and Debian"; ada baris `host key:`. Selesai tanpa
-      error dan mencetak `griphub1:…`. Catat berapa lama (paket, Node, image box).
-- [ ] Coba juga **Atau bagikan file setup**: file `griphub-setup.sh` bisa dikirim ke aplikasi lain.
+      error dan mencetak `rynex1:…`. Catat berapa lama (paket, Node, image box).
+- [ ] Coba juga **Atau bagikan file setup**: file `rynex-setup.sh` bisa dikirim ke aplikasi lain.
 - [ ] Akhir output setup: tidak ada peringatan "the agent's box was not built" atau "building the box failed". Bila
       ada, catat pesan podman; setelah itu app: Pengaturan → **Box agent** → **Bangun box**.
 - [ ] App: tempel setup code → **Simpan server**: tes berjalan sendiri → "Tersambung. Agent belum dipasang di server…"
@@ -58,7 +58,7 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 
 ## 5. Subagent paralel dan memori
 
-- [ ] Jalankan `sudo bash ~/griphub-server/field-report.sh --since "10 minutes ago"` di VPS: catat `MemoryCurrent` sebagai awal.
+- [ ] Jalankan `sudo bash ~/rynex-server/field-report.sh --since "10 minutes ago"` di VPS: catat `MemoryCurrent` sebagai awal.
 - [ ] Minta 3 subagent paralel (mis. tiga analisis repo berbeda). Kartu subagent bergerak; catat `MemoryPeak` dari
       `field-report.sh` setelahnya (batas 2 GB).
 - [ ] Saat subagent bekerja, putuskan HP (mode pesawat 2 menit): setelah tersambung, status subagent benar,
@@ -89,7 +89,7 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
       **Sambungkan lagi** → tab tersambung ke sesi yang sama (`top` masih jalan).
 - [ ] Tutup app, buka lagi Terminal: tab bergabung ke sesi tmux yang sama.
 - [ ] Tab **Shell box (box agent)**: masuk ke container box; `node -v` dan `git` ada.
-- [ ] Tutup tab: di VPS `sudo -u griphub tmux ls` tidak lagi menampilkan sesi itu.
+- [ ] Tutup tab: di VPS `sudo -u rynex tmux ls` tidak lagi menampilkan sesi itu.
 
 - [ ] Jadwalkan tugas jam tertentu (mis. 5 menit lagi, jam HP): berjalan pada jam HP, bukan jam UTC server.
 
@@ -120,13 +120,13 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 - [ ] Biarkan agent menyala 24 jam (boleh dengan satu tugas terjadwal atau run latar belakang yang jalan berkala).
 - [ ] Lalu di VPS:
       ```
-      sudo bash ~/griphub-server/field-report.sh --since "24 hours ago" > griphub-report.txt
+      sudo bash ~/rynex-server/field-report.sh --since "24 hours ago" > rynex-report.txt
       ```
       Periksa isinya, lalu kirim. Yang dilihat: `NRestarts`, `MemoryPeak`, OOM kill, peringatan di log, ukuran
       data, dan kondisi CoderRa di sebelahnya.
 
 ## Yang dikirim balik
 
-1. `griphub-report.txt` dari langkah 13 (dan laporan lain yang Anda ambil di tengah jalan).
+1. `rynex-report.txt` dari langkah 13 (dan laporan lain yang Anda ambil di tengah jalan).
 2. Daftar langkah yang gagal: nomor, apa yang terlihat, kira-kira jam berapa.
 3. Tangkapan layar bila tampilannya aneh (pratinjau, terminal, banner koneksi).

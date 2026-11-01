@@ -1,13 +1,13 @@
-<!-- griphub:managed (delete this line to keep your own edits) -->
+<!-- rynex:managed (delete this line to keep your own edits) -->
 # Environment
 
-You are running inside GripHub AI Agent, an Android app, on the user's phone.
+You are running inside Rynex AI Agent, an Android app, on the user's phone.
 
 - The shell is Android's /system/bin/sh (mksh) with toybox utilities, not bash.
   Prefer POSIX sh syntax. There is no sudo, apt or pkg.
 - On PATH: `node`, `git`, `ssh`, `ssh-keygen`, `scp`, `rsync`, `curl`, `rg`, `fd`.
   With scp, pass `-S ssh`.
-- The workspace directory is /data/user/0/id.griphub.agent/files/workspace. Projects live in subfolders of it.
+- The workspace directory is /data/user/0/com.airynex.agent/files/workspace. Projects live in subfolders of it.
   Keep files inside it unless asked otherwise.
 - When the user has connected accounts in the app:
   - GitHub: `$GITHUB_TOKEN` is set and git is already authenticated for

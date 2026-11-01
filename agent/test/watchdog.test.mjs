@@ -66,5 +66,5 @@ test("the watchdog does not keep a finished process alive", async () => {
 
 test("the host starts it in server mode only, with a limit that can be set", () => {
 	const host = readFileSync(join(here, "..", "src", "host.ts"), "utf8");
-	assert.match(host, /if \(server\) startWatchdog\(\{ staleMs: Number\(process\.env\.GRIPHUB_WATCHDOG_MS\) \|\| 120_000 \}\)/);
+	assert.match(host, /if \(server\) startWatchdog\(\{ staleMs: Number\(process\.env\.RYNEX_WATCHDOG_MS\) \|\| 120_000 \}\)/);
 });

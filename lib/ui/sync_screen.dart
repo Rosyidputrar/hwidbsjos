@@ -53,7 +53,7 @@ class _SyncScreenState extends State<SyncScreen> {
           content: Text(
             [
               tr(
-                'GripHub AI Agent creates a private repository griphub-sync in your GitHub account and keeps your chats, projects and settings there.',
+                'Rynex AI Agent creates a private repository rynex-sync in your GitHub account and keeps your chats, projects and settings there.',
               ),
               tr(
                 'Provider keys and tokens are never uploaded. Chats can still contain anything you pasted into them, so keep the repository private.',

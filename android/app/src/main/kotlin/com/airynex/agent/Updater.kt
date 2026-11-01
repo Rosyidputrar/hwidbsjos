@@ -119,7 +119,7 @@ object Updater {
         // A leftover file with the same name would make DownloadManager pick another name.
         File(dir(context), safeName).delete()
         val request = DownloadManager.Request(Uri.parse(url))
-            .setTitle("GripHub AI Agent $version")
+            .setTitle("Rynex AI Agent $version")
             .setDescription("Downloading update")
             .setMimeType("application/vnd.android.package-archive")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
@@ -230,8 +230,8 @@ object Updater {
             context,
             NOTIFICATION_ID,
             Notifications.APP_UPDATES,
-            if (ok) Notifications.t(context, "GripHub AI Agent $version is ready", "GripHub AI Agent $version siap dipasang")
-            else Notifications.t(context, "GripHub AI Agent update failed", "Update GripHub AI Agent gagal"),
+            if (ok) Notifications.t(context, "Rynex AI Agent $version is ready", "Rynex AI Agent $version siap dipasang")
+            else Notifications.t(context, "Rynex AI Agent update failed", "Update Rynex AI Agent gagal"),
             if (ok) Notifications.t(context, "Tap to install the update", "Ketuk untuk memasang update")
             else Notifications.t(context, "Tap to try again", "Ketuk untuk mencoba lagi"),
             mapOf("action" to "update"),

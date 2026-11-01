@@ -120,7 +120,7 @@ test("it can check on a timer, and stops", async () => {
 // ---------------------------------------------------------------------------
 // Notifier
 
-const good = { url: "https://ntfy.example.com", topic: "griphub-abc12345" };
+const good = { url: "https://ntfy.example.com", topic: "rynex-abc12345" };
 
 test("a config is valid or says what is wrong with it", () => {
 	assert.equal(checkConfig(good), null);
@@ -150,17 +150,17 @@ function notifier(over = {}) {
 test("a push goes to the topic with a plain title, a priority and tags, and says nothing about the project", async () => {
 	const { n, calls } = notifier();
 	assert.equal(await n.send("done", "Task finished", { priority: 4, tags: ["white_check_mark", "robot"] }), true);
-	assert.equal(calls[0].url, "https://ntfy.example.com/griphub-abc12345");
+	assert.equal(calls[0].url, "https://ntfy.example.com/rynex-abc12345");
 	const h = calls[0].init.headers;
 	assert.deepEqual([h.Title, h.Priority, h.Tags], ["Task finished", "4", "white_check_mark,robot"]);
 	assert.equal(calls[0].init.method, "POST");
-	assert.equal(calls[0].init.body, "Open GripHub to see.");
+	assert.equal(calls[0].init.body, "Open Rynex to see.");
 });
 
 test("a trailing slash on the server is tolerated, and titles are kept to plain ASCII", async () => {
-	const { n, calls } = notifier({ config: () => ({ url: "https://ntfy.example.com//", topic: "griphub-abc12345" }) });
+	const { n, calls } = notifier({ config: () => ({ url: "https://ntfy.example.com//", topic: "rynex-abc12345" }) });
 	await n.send("k", "Selesai ✓ café");
-	assert.equal(calls[0].url, "https://ntfy.example.com/griphub-abc12345");
+	assert.equal(calls[0].url, "https://ntfy.example.com/rynex-abc12345");
 	assert.equal((calls[0].init.headers).Title, "Selesai ? caf?");
 	assert.equal((calls[0].init.headers).Priority, "3");
 });
@@ -224,12 +224,12 @@ test("it really posts over HTTP", async (t) => {
 	await new Promise ((r) => server.listen(0, "127.0.0.1", () => r()));
 	t.after(() => void server.close());
 	const port = (server.address()).port;
-	const n = new Notifier({ config: () => ({ url: `http://127.0.0.1:${port}`, topic: "griphub-realtest1" }), shouldSend: () => true });
+	const n = new Notifier({ config: () => ({ url: `http://127.0.0.1:${port}`, topic: "rynex-realtest1" }), shouldSend: () => true });
 	assert.equal(await n.send("x", "Task needs you", { priority: 4 }), true);
-	assert.equal(got[0].url, "/griphub-realtest1");
+	assert.equal(got[0].url, "/rynex-realtest1");
 	assert.equal(got[0].headers.title, "Task needs you");
 	assert.equal(got[0].headers.priority, "4");
-	assert.equal(got[0].body, "Open GripHub to see.");
+	assert.equal(got[0].body, "Open Rynex to see.");
 });
 
 test("a test push goes out with the app open and outside the rate limit, and says why when it cannot", async () => {
@@ -240,10 +240,10 @@ test("a test push goes out with the app open and outside the rate limit, and say
 	assert.deepEqual(await n.test(), { ok: true }, "pressing it twice is fine");
 	assert.equal(calls.length, 2);
 	assert.equal(calls[0].init.headers.Title, "Test notification");
-	assert.equal(calls[0].init.body, "Notifications from GripHub arrive on this phone.");
+	assert.equal(calls[0].init.body, "Notifications from Rynex arrive on this phone.");
 
 	assert.deepEqual(await notifier({ config: () => null }).n.test(), { ok: false, reason: "off" });
-	const bad = await notifier({ config: () => ({ url: "ftp://x", topic: "griphub-0123456789" }) }).n.test();
+	const bad = await notifier({ config: () => ({ url: "ftp://x", topic: "rynex-0123456789" }) }).n.test();
 	assert.equal(bad.reason, "config");
 	assert.match(bad.detail, /https:\/\//);
 	const refused = await notifier({ fetchImpl: async () => new Response("no", { status: 403 }) }).n.test();

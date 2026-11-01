@@ -58,7 +58,7 @@ void main() {
     final c2 = AgentClient(backend: other)..remote = const LaunchSpec(['ssh']);
     await expectLater(
       c2.start(),
-      throwsA(isA<AgentError>().having((e) => e.message, 'message', contains('not a GripHub'))),
+      throwsA(isA<AgentError>().having((e) => e.message, 'message', contains('not a Rynex'))),
     );
   });
 

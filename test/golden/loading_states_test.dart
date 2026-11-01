@@ -44,7 +44,7 @@ class _SlowFs extends LocalFs {
 }
 
 ModelInfo _model(String id, {String? name}) =>
-    ModelInfo({'provider': 'griphub', 'id': id, 'name': name ?? id, 'input': const ['text']});
+    ModelInfo({'provider': 'mock', 'id': id, 'name': name ?? id, 'input': const ['text']});
 
 void main() {
   setUpAll(loadAppFonts);
@@ -124,7 +124,7 @@ void main() {
           look,
           StopToSwitchOverlay(
             agent: agent,
-            child: Scaffold(appBar: AppBar(title: const Text('GripHub')), body: const SizedBox()),
+            child: Scaffold(appBar: AppBar(title: const Text('Rynex')), body: const SizedBox()),
           ),
         );
         agent.busy = true;
@@ -200,7 +200,7 @@ void main() {
       final thirty = Completer<Object?>();
       host.answers['usage'] = (cmd) => cmd['days'] == 7
           ? [
-              {'day': day, 'provider': 'griphub', 'model': 'seven-model', 'input': 1000, 'output': 10, 'requests': 1},
+              {'day': day, 'provider': 'mock', 'model': 'seven-model', 'input': 1000, 'output': 10, 'requests': 1},
             ]
           : thirty.future;
       final agent = newAgent();
@@ -214,7 +214,7 @@ void main() {
       expect(find.byType(EnergySpinner), findsWidgets);
 
       thirty.complete([
-        {'day': day, 'provider': 'griphub', 'model': 'thirty-model', 'input': 5000, 'output': 50, 'requests': 4},
+        {'day': day, 'provider': 'mock', 'model': 'thirty-model', 'input': 5000, 'output': 50, 'requests': 4},
       ]);
       await frames(tester);
       expect(find.text('thirty-model'), findsWidgets);
@@ -224,7 +224,7 @@ void main() {
     testWidgets('the same period read twice: the older read finishing last does not overwrite the newer', (tester) async {
       final host = FakeHost();
       final day = DateTime(2026, 10, 27).toIso8601String().substring(0, 10);
-      Map<String, Object> row(String model) => {'day': day, 'provider': 'griphub', 'model': model, 'input': 1000, 'output': 10, 'requests': 1};
+      Map<String, Object> row(String model) => {'day': day, 'provider': 'mock', 'model': model, 'input': 1000, 'output': 10, 'requests': 1};
       final slowFirst = Completer<Object?>();
       var reads = 0;
       // The first read is slow and carries the old numbers; the refresh behind it is fast and carries the new ones.

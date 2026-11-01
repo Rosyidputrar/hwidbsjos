@@ -27,14 +27,14 @@ class RemoteRig {
   final AgentController agent;
   final servers = <HttpServer>[];
 
-  String get remoteDir => '${server.path}/.griphub';
+  String get remoteDir => '${server.path}/.rynex';
   String get workspace => daemon.workspace;
 
   static Future<RemoteRig> start() async {
     final sshd = await TestSshd.start();
     final app = Directory.systemTemp.createTempSync('gh-app-');
     final server = Directory.systemTemp.createTempSync('gh-server-');
-    final remoteDir = '${server.path}/.griphub';
+    final remoteDir = '${server.path}/.rynex';
     final setup = RemoteSetup(home: app.path, remoteDir: remoteDir);
     final profile = RemoteProfile(
       host: '127.0.0.1',
@@ -48,14 +48,14 @@ class RemoteRig {
 
     final daemon = await TestDaemon.start(socket: '$remoteDir/host.sock');
     final node = (Process.runSync('which', [TestDaemon.node]).stdout as String).trim();
-    File('$remoteDir/bin/griphub-attach')
+    File('$remoteDir/bin/rynex-attach')
       ..createSync(recursive: true)
       ..writeAsStringSync(
-        "#!/bin/sh\nexec env GRIPHUB_SOCK='$remoteDir/host.sock' '$node' '${Directory.current.path}/server/griphub-attach'\n",
+        "#!/bin/sh\nexec env RYNEX_SOCK='$remoteDir/host.sock' '$node' '${Directory.current.path}/server/rynex-attach'\n",
       );
-    Process.runSync('chmod', ['755', '$remoteDir/bin/griphub-attach']);
+    Process.runSync('chmod', ['755', '$remoteDir/bin/rynex-attach']);
 
-    final store = RemoteProfileStore(File('${app.path}/.griphub/remote.json'))..save(profile);
+    final store = RemoteProfileStore(File('${app.path}/.rynex/remote.json'))..save(profile);
     final agent = AgentController(AgentClient(backend: ProcessBackend()));
     agent.remote.env = Platform.environment;
     agent.remote.configure(setup: setup, store: store);

@@ -24,7 +24,7 @@ Fondasinya sudah ada: `AgentRuntime.extractAssets` mengekstrak `agent.zip` ke fo
      "protocol": 3,
      "minAppVersion": "1.0.35",
      "sha256": "<hash zip>",
-     "url": "https://github.com/seseegy/griphub-releases/releases/download/v1.0.40/agent-1.0.40.zip"
+     "url": "https://github.com/seseegy/rynex-releases/releases/download/v1.0.40/agent-1.0.40.zip"
    }
    ```
    Manifest ditandatangani dengan kunci Ed25519 khusus (`agent-manifest.json.sig`), terpisah dari keystore APK.

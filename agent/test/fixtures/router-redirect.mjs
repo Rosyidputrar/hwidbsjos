@@ -1,9 +1,9 @@
-// Preloaded into a test host (node --import) by the app's Dart tests (test/support/daemon.dart): sends GripHub
-// Router's chat completions to a test model at GRIPHUB_TEST_ROUTER (an OpenAI-compatible base URL), and answers the
-// router's other endpoints (account, rates) with a 404 so they never reach the test model. The provider lock stays as
-// it is: the host still talks to the one canonical URL, only fetch underneath it is pointed elsewhere.
-const ROUTER = "https://griphubrouter.web.id/v1";
-const target = process.env.GRIPHUB_TEST_ROUTER;
+// Preloaded into a test host (node --import) by the app's Dart tests (test/support/daemon.dart): sends the
+// test provider's chat completions to a test model at RYNEX_TEST_ROUTER (an OpenAI-compatible base URL), and
+// answers the provider's other endpoints with a 404 so they never reach the test model. The host still talks
+// to the test provider's canonical base URL; only fetch underneath it is pointed elsewhere.
+const ROUTER = "https://mock.router.test/v1";
+const target = process.env.RYNEX_TEST_ROUTER;
 const realFetch = globalThis.fetch;
 
 globalThis.fetch = async (input, init) => {

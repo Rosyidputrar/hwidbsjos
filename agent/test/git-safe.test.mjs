@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { bundle } from "./helpers.mjs";
 
 // secure.ts (behind integrations) reads the store key once, at import.
-process.env.GRIPHUB_STORE_KEY = "ab".repeat(32);
+process.env.RYNEX_STORE_KEY = "ab".repeat(32);
 const gitops = await bundle("gitops");
 const { gitRun, Integrations } = await bundle("integrations");
 const { SAFE_GIT_FLAGS, assertRepoConfigSafe, gitEnv } = await bundle("gitsafe");
@@ -266,16 +266,16 @@ test("the project list does not run what a project names, and still reads the pr
 });
 
 test("git's environment has no tokens or keys and nothing to ask a person with", async () => {
-	const env = gitEnv({ PATH: "/bin", HOME: "/h", GITHUB_TOKEN: "t", GH_TOKEN: "t", VERCEL_TOKEN: "t", CLOUDFLARE_API_TOKEN: "t", GRIPHUB_STORE_KEY: "k", OPENAI_API_KEY: "k", MY_SECRET: "s", DB_PASSWORD: "p", SSH_AUTH_SOCK: "/s", GIT_EXTERNAL_DIFF: "x", LANG: "C" });
+	const env = gitEnv({ PATH: "/bin", HOME: "/h", GITHUB_TOKEN: "t", GH_TOKEN: "t", VERCEL_TOKEN: "t", CLOUDFLARE_API_TOKEN: "t", RYNEX_STORE_KEY: "k", OPENAI_API_KEY: "k", MY_SECRET: "s", DB_PASSWORD: "p", SSH_AUTH_SOCK: "/s", GIT_EXTERNAL_DIFF: "x", LANG: "C" });
 	assert.deepEqual(Object.keys(env).sort(), ["GIT_ASKPASS", "GIT_EDITOR", "GIT_PAGER", "GIT_TERMINAL_PROMPT", "HOME", "LANG", "PATH", "SSH_AUTH_SOCK"]);
 	assert.equal(env.GIT_TERMINAL_PROMPT, "0");
 	// And that is what the child gets: an alias that prints its environment.
 	const dir = repo();
 	process.env.GITHUB_TOKEN = "ghp_should-not-reach-git";
-	process.env.GRIPHUB_STORE_KEY = "ab".repeat(32);
+	process.env.RYNEX_STORE_KEY = "ab".repeat(32);
 	try {
 		const printed = await gitRun(["-c", "alias.e=!env", "e"], { cwd: dir });
-		assert.ok(!/ghp_should-not-reach-git|GITHUB_TOKEN|GRIPHUB_STORE_KEY/.test(printed), "no secrets in git's environment");
+		assert.ok(!/ghp_should-not-reach-git|GITHUB_TOKEN|RYNEX_STORE_KEY/.test(printed), "no secrets in git's environment");
 		assert.match(printed, /^GIT_TERMINAL_PROMPT=0$/m);
 		assert.match(printed, /^HOME=/m, "but git still finds its settings");
 	} finally {

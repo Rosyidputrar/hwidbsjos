@@ -58,8 +58,8 @@ void main() {
     rig.agent.remote.store!.save(rig.agent.remote.profile!);
     rig.agent.remote.configure(setup: rig.setup, store: rig.agent.remote.store!, hostDir: bundle.path);
     expect(rig.agent.client.isRemote, isTrue);
-    expect(rig.agent.client.remote!.argv, contains('griphub-vps'));
-    expect(rig.agent.client.remote!.argv.last, '${rig.remoteDir}/bin/griphub-attach');
+    expect(rig.agent.client.remote!.argv, contains('rynex-vps'));
+    expect(rig.agent.client.remote!.argv.last, '${rig.remoteDir}/bin/rynex-attach');
   }, skip: skip);
 
   test('forgetting the server removes the key and the ssh files, and the app is back on the phone', () async {

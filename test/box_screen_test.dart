@@ -33,7 +33,7 @@ void main() {
     'installed': true,
     'state': 'running',
     'enabled': true,
-    'image': 'localhost/griphub-box',
+    'image': 'localhost/rynex-box',
     'startedAt': DateTime.now().toUtc().subtract(const Duration(hours: 3, minutes: 5)).toIso8601String(),
     'usage': {'memoryBytes': 512 * 1024 * 1024, 'memoryLimitBytes': 2 * 1024 * 1024 * 1024, 'processes': 5},
     'limits': {'memory': '2g', 'swap': '3g', 'cpus': '1.5'},
@@ -71,7 +71,7 @@ void main() {
           case 'container_install':
             backend
               ..say({'type': 'task', 'taskId': c['taskId'], 'line': 'STEP 1/3: FROM ubuntu'})
-              ..say({'type': 'task', 'taskId': c['taskId'], 'line': 'Successfully tagged localhost/griphub-box'});
+              ..say({'type': 'task', 'taskId': c['taskId'], 'line': 'Successfully tagged localhost/rynex-box'});
             box = {...box, 'state': 'none', 'usage': null};
             // The build takes a while: its output arrives well before the answer, as it does for real.
             return buildDone.future;
@@ -211,7 +211,7 @@ void main() {
     await open(tester);
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    expect(find.textContaining('directly on the server, as the griphub user'), findsOneWidget);
+    expect(find.textContaining('directly on the server, as the rynex user'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(sent().contains('container_enable'), isFalse);
@@ -388,7 +388,7 @@ void main() {
     final tmp = Directory.systemTemp.createTempSync('cr-box-');
     addTearDown(() => tmp.deleteSync(recursive: true));
     final store = RemoteProfileStore(File('${tmp.path}/remote.json'))
-      ..save(const RemoteProfile(host: 'h', port: 22, user: 'griphub', hostKey: 'ssh-ed25519 AAAA', active: true));
+      ..save(const RemoteProfile(host: 'h', port: 22, user: 'rynex', hostKey: 'ssh-ed25519 AAAA', active: true));
     agent.remote.configure(
       setup: RemoteSetup(home: tmp.path),
       store: store,

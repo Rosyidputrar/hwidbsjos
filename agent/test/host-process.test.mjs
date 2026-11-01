@@ -73,16 +73,16 @@ function env(dir, extra = {}) {
 	return {
 		...process.env,
 		HOME: dir,
-		GRIPHUB_WORKSPACE: join(dir, "workspace"),
-		GRIPHUB_DIR: join(dir, ".griphub"),
-		GRIPHUB_STORE_KEY: "ab".repeat(32),
-		// These tests run inside a GripHub agent too (the product tests itself); its session would otherwise leak in
+		RYNEX_WORKSPACE: join(dir, "workspace"),
+		RYNEX_DIR: join(dir, ".rynex"),
+		RYNEX_STORE_KEY: "ab".repeat(32),
+		// These tests run inside a Rynex agent too (the product tests itself); its session would otherwise leak in
 		// here. The agent dir must stay under this test's HOME (pi reads PI_CODING_AGENT_DIR first), and an outer
-		// GRIPHUB_MODE=server would turn a phone-mode host into a server one (server mode is chosen with --listen).
+		// RYNEX_MODE=server would turn a phone-mode host into a server one (server mode is chosen with --listen).
 		PI_CODING_AGENT_DIR: join(dir, ".pi", "agent"),
-		GRIPHUB_MODE: undefined,
+		RYNEX_MODE: undefined,
 		// The restart gate checks often, so waiting "for a few polls" is a short wait.
-		GRIPHUB_RESTART_POLL_MS: "50",
+		RYNEX_RESTART_POLL_MS: "50",
 		...extra,
 	};
 }
@@ -246,7 +246,7 @@ test("phone mode: files_find gives the composer's @ list from the chat's folder,
 // Server: daemon on a unix socket
 
 function daemon(t, dir, extra = {}, nodeArgs = []) {
-	const sock = join(dir, ".griphub", "host.sock");
+	const sock = join(dir, ".rynex", "host.sock");
 	// systemd gives a daemon /dev/null for stdin; its end must not stop the host.
 	const child = spawnHost([...nodeArgs, hostFile, "--listen", sock], {
 		cwd: join(dir, "workspace"),
@@ -305,7 +305,7 @@ test("server mode: a private socket, hello_server, resume, kick, and the daemon 
 	await started(d);
 	assert.equal(statSync(d.sock).mode & 0o777, 0o600);
 	assert.equal(statSync(dirname(d.sock)).mode & 0o777, 0o700);
-	assert.ok(existsSync(join(dir, ".griphub", "running")));
+	assert.ok(existsSync(join(dir, ".rynex", "running")));
 
 	const one = await dial(d.sock);
 	const hello = await one.until((r) => r.type === "hello_server");
@@ -340,7 +340,7 @@ test("server mode: a private socket, hello_server, resume, kick, and the daemon 
 	d.child.kill("SIGTERM");
 	assert.equal(await exited(d.child), 0);
 	assert.ok(!existsSync(d.sock));
-	assert.ok(!existsSync(join(dir, ".griphub", "running")));
+	assert.ok(!existsSync(join(dir, ".rynex", "running")));
 });
 
 test("server mode: a daemon that was killed says so after it comes back", async (t) => {
@@ -349,7 +349,7 @@ test("server mode: a daemon that was killed says so after it comes back", async 
 	await started(first);
 	first.child.kill("SIGKILL");
 	await exited(first.child);
-	assert.ok(existsSync(join(dir, ".griphub", "running")), "the marker stays behind");
+	assert.ok(existsSync(join(dir, ".rynex", "running")), "the marker stays behind");
 
 	const second = daemon(t, dir);
 	await started(second);
@@ -372,7 +372,7 @@ test("server mode: host_restart when idle ends the daemon (systemd starts a fres
 	const r = await c.call("host_restart", { whenIdle: true });
 	assert.deepEqual(r.data, { restarting: true });
 	assert.equal(await exited(d.child), 0);
-	assert.ok(!existsSync(join(dir, ".griphub", "running")), "a planned restart is a clean exit");
+	assert.ok(!existsSync(join(dir, ".rynex", "running")), "a planned restart is a clean exit");
 });
 
 test("server mode: a second daemon on the same socket is refused", async (t) => {
@@ -391,7 +391,7 @@ test("server mode: a second daemon on the same socket is refused", async (t) => 
 
 const mockRouter = pathToFileURL(join(here, "fixtures", "mock-router.mjs")).href;
 
-/** A daemon on the mock router with a GripHub key and model, connected and resumed. */
+/** A daemon on the mock router with a Rynex key and model, connected and resumed. */
 async function withModel(t, extra = {}) {
 	const dir = home(t);
 	const mock = { MOCK_LOG: join(dir, "mock.log"), MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Separuh laporan: 3 dari 5 berkas diperiksa.", ...extra };
@@ -422,7 +422,7 @@ test("server mode: host_restart when idle waits for a working subagent, then res
 	const id = await startSubagent(m);
 	const r = await m.c.call("host_restart", { whenIdle: true });
 	assert.deepEqual(r.data, { restarting: false, pending: true });
-	// The gate polls every 50 ms here (GRIPHUB_RESTART_POLL_MS): after twenty polls it is still waiting, the subagent untouched.
+	// The gate polls every 50 ms here (RYNEX_RESTART_POLL_MS): after twenty polls it is still waiting, the subagent untouched.
 	await new Promise((res) => setTimeout(res, 1000));
 	assert.equal(m.d.child.exitCode, null, "the restart waits for the subagent");
 	assert.ok(!m.c.records.some((x) => x.type === "subagent_finished"));
@@ -431,7 +431,7 @@ test("server mode: host_restart when idle waits for a working subagent, then res
 	const done = await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === id);
 	assert.equal(done.subagent.status, "done");
 	assert.equal(await exited(m.d.child), 0);
-	assert.ok(!existsSync(join(m.dir, ".griphub", "running")));
+	assert.ok(!existsSync(join(m.dir, ".rynex", "running")));
 });
 
 test("server mode: health says which bundle the process runs and whether a copied update is waiting to restart it", async (t) => {
@@ -455,8 +455,8 @@ test("server mode: health says which bundle the process runs and whether a copie
 
 test("server mode: at start the host puts the launcher files of its bundle where the setup script put them", async (t) => {
 	const dir = home(t);
-	const gh = join(dir, ".griphub");
-	for (const [name, target, mode] of [["box", "bin/box", 0o755], ["griphub-attach", "bin/griphub-attach", 0o755], ["Containerfile", "box/Containerfile", 0o644]]) {
+	const gh = join(dir, ".rynex");
+	for (const [name, target, mode] of [["box", "bin/box", 0o755], ["rynex-attach", "bin/rynex-attach", 0o755], ["Containerfile", "box/Containerfile", 0o644]]) {
 		mkdirSync(join(out, "launcher"), { recursive: true });
 		writeFileSync(join(out, "launcher", name), `#!/bin/sh\n# new ${name}\n`);
 		mkdirSync(join(gh, target.split("/")[0]), { recursive: true });
@@ -466,7 +466,7 @@ test("server mode: at start the host puts the launcher files of its bundle where
 	t.after(() => rmSync(join(out, "launcher"), { recursive: true, force: true }));
 	const d = daemon(t, dir);
 	await started(d);
-	for (const [name, target] of [["box", "bin/box"], ["griphub-attach", "bin/griphub-attach"], ["Containerfile", "box/Containerfile"]]) {
+	for (const [name, target] of [["box", "bin/box"], ["rynex-attach", "bin/rynex-attach"], ["Containerfile", "box/Containerfile"]]) {
 		assert.equal(readFileSync(join(gh, target), "utf8"), `#!/bin/sh\n# new ${name}\n`, target);
 	}
 	assert.equal(statSync(join(gh, "bin", "box")).mode & 0o777, 0o755, "still executable");
@@ -487,7 +487,7 @@ test("server mode: SIGTERM stops a working subagent with its partial report befo
 // ---------------------------------------------------------------------------
 // Server mode, phase 2: what the server does differently (server_agent.md 4.3–4.8)
 
-const PHONE_FIXTURE_WS = "/data/user/0/id.griphub.agent/files/workspace";
+const PHONE_FIXTURE_WS = "/data/user/0/com.airynex.agent/files/workspace";
 
 /** Starts a daemon, connects, and resumes; `hello` says where the agent's folder is. */
 async function connected(t, dir, extra = {}, nodeArgs = []) {
@@ -518,7 +518,7 @@ test("server mode: the server's notes, files over fs_*, a preview, health, and n
 	assert.deepEqual(listed.data.map((e) => [e.name, e.type]), [["site", "dir"]]);
 	const read = await c.call("fs_read", { path: join(ws, "site", "index.html") });
 	assert.equal(Buffer.from(read.data.data, "base64").toString(), "<h1>Halo</h1>");
-	const outside = await c.call("fs_read", { path: join(dir, ".griphub", "running") });
+	const outside = await c.call("fs_read", { path: join(dir, ".rynex", "running") });
 	assert.deepEqual([outside.ok, outside.code], [false, "outside_root"]);
 	const skills = await c.call("fs_write", { path: join(agentDir, "skills", "x.md"), data: "" });
 	assert.equal(skills.ok, false, "the skills folder is read-only");
@@ -569,7 +569,7 @@ test("server mode: the box is the agent's shell when the server has one, and the
 	const launcher = join(dir, "box-launcher");
 	writeFileSync(launcher, "#!/bin/sh\necho box-works\n");
 	chmodSync(launcher, 0o755);
-	const { c, agentDir } = await connected(t, dir, { GRIPHUB_BOX: launcher, PATH: `${join(dir, "no-podman")}:/usr/bin:/bin` });
+	const { c, agentDir } = await connected(t, dir, { RYNEX_BOX: launcher, PATH: `${join(dir, "no-podman")}:/usr/bin:/bin` });
 	const notes = () => readFileSync(join(agentDir, "AGENTS.md"), "utf8");
 	assert.match(notes(), /inside an Ubuntu container as root/);
 	const s1 = (await c.call("container_status")).data;
@@ -617,7 +617,7 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 	t.after(() => ntfy.close());
 
 	const m = await withModel(t);
-	const topic = "griphub-0123456789abcdef";
+	const topic = "rynex-0123456789abcdef";
 	const set = await m.c.call("settings_set", { settings: { notify: { enabled: true, url: `http://127.0.0.1:${ntfy.address().port}`, topic } } });
 	assert.equal(set.ok, true, set.error);
 
@@ -646,7 +646,7 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 	await waitFor(() => pushes.length > 0, 15_000);
 	assert.equal(pushes[0].url, `/${topic}`);
 	assert.equal(pushes[0].title, "Subagent finished");
-	assert.equal(pushes[0].body, "Open GripHub to see.");
+	assert.equal(pushes[0].body, "Open Rynex to see.");
 });
 
 test("phone mode: the notes are exactly as before, sync is offered, and files work the same way", async (t) => {
@@ -718,7 +718,7 @@ test("a background job's result calls its chat back with no user message, and tu
 		30_000,
 		"for the job's message",
 	);
-	assert.equal(notice.event.message.customType, "griphub_job");
+	assert.equal(notice.event.message.customType, "rynex_job");
 	assert.equal(notice.event.message.details.job.id, ended.job.id);
 	const reply = await m.c.until(
 		(r) => r.type === "event" && r.event.type === "message_end" && r.event.message.role === "assistant" && /Job said/.test(JSON.stringify(r.event.message.content)),
@@ -731,8 +731,8 @@ test("a background job's result calls its chat back with no user message, and tu
 	// In the chat: one user message (the user's), the job's own message, and each turn's time on its last reply.
 	const history = (await m.c.call("messages")).data;
 	assert.equal(history.filter((x) => x.role === "user").length, 1, "the callback is not a user message");
-	assert.equal(history.filter((x) => x.role === "custom" && x.customType === "griphub_job").length, 1);
-	assert.equal(history.filter((x) => x.role === "assistant" && typeof x.griphubTurnMs === "number").length, 2, "both turns kept their time");
+	assert.equal(history.filter((x) => x.role === "custom" && x.customType === "rynex_job").length, 1);
+	assert.equal(history.filter((x) => x.role === "assistant" && typeof x.rynexTurnMs === "number").length, 2, "both turns kept their time");
 	assert.deepEqual((await m.c.call("job_list")).data.map((j) => j.status), ["done"]);
 });
 
@@ -775,7 +775,7 @@ test("server mode: automatic backups are off until the phone gives its key, then
 	const now = await c.call("auto_backup_now");
 	assert.equal(now.ok, true, now.error);
 	const [latest] = now.data.backups;
-	assert.match(latest.name, /^auto-\d+\.ghb$/);
+	assert.match(latest.name, /^auto-\d+\.ryb$/);
 	assert.ok(latest.size > 0);
 	// The app fetches it like any file; it cannot be changed from there.
 	const read = await c.call("fs_read", { path: latest.path });
@@ -790,10 +790,10 @@ test("server mode: automatic backups are off until the phone gives its key, then
 
 test("phone mode: automatic backups into its own folder, no secrets in them, and the recovery code only here", async (t) => {
 	const dir = home(t);
-	const backupsDir = join(dir, "download", "GripHub", "auto");
+	const backupsDir = join(dir, "download", "Rynex", "auto");
 	const child = spawnHost([hostFile], {
 		cwd: join(dir, "workspace"),
-		env: env(dir, { GRIPHUB_PHONE_BACKUP_DIR: backupsDir }),
+		env: env(dir, { RYNEX_PHONE_BACKUP_DIR: backupsDir }),
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	t.after(() => child.kill("SIGKILL"));
@@ -817,7 +817,7 @@ test("phone mode: automatic backups into its own folder, no secrets in them, and
 	const now = await call("auto_backup_now");
 	assert.equal(now.ok, true, now.error);
 	const [latest] = now.data.backups;
-	assert.match(latest.name, /^auto-\d+\.ghb$/);
+	assert.match(latest.name, /^auto-\d+\.ryb$/);
 	assert.ok(latest.path.startsWith(backupsDir), "written to the shared folder, where it survives the app");
 	const raw = readFileSync(latest.path);
 	assert.equal(raw.subarray(0, 4).toString(), "GHB1", "encrypted");
@@ -838,7 +838,7 @@ test("phone mode: automatic backups into its own folder, no secrets in them, and
 	const restored = await h2.until((r) => r.type === "response" && r.id === 1);
 	assert.equal(restored.ok, true, restored.error);
 	assert.equal(readFileSync(join(other, "workspace", "notes.md"), "utf8"), "catatan penting");
-	assert.equal(existsSync(join(other, ".pi", "agent", "griphub", "custom-providers.json")), false, "no API keys came along: they were never in it");
+	assert.equal(existsSync(join(other, ".pi", "agent", "rynex", "custom-providers.json")), false, "no API keys came along: they were never in it");
 });
 
 test("server mode: the backup key is never told", async (t) => {
@@ -869,8 +869,8 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 
 	// The phone restores it. A plain-text zip a dead host left behind is swept at start.
 	const dir = home(t);
-	mkdirSync(join(dir, ".pi", "agent", "griphub"), { recursive: true });
-	writeFileSync(join(dir, ".pi", "agent", "griphub", "restore-123.zip"), "leftover");
+	mkdirSync(join(dir, ".pi", "agent", "rynex"), { recursive: true });
+	writeFileSync(join(dir, ".pi", "agent", "rynex", "restore-123.zip"), "leftover");
 	const child = spawnHost([hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
@@ -1078,7 +1078,7 @@ test("with no limit set, a model at the default's floor is left to its own limit
 // subagent and a picture started whatever was left. The spend is made up by the test hook (nothing is bought).
 
 test("server mode: with the daily budget used up, a plan, a retry, a subagent and a picture are refused before anything is sent", async (t) => {
-	const m = await withModel(t, { GRIPHUB_TEST_SPENT_CREDITS: "5.02" });
+	const m = await withModel(t, { RYNEX_TEST_SPENT_USD: "5.02" });
 	const set = await m.c.call("settings_set", { settings: { dailyBudget: 5 } });
 	assert.equal(set.ok, true, set.error);
 	const refused = /Daily budget of \$5 reached \(\$5\.02 spent today\)/;
@@ -1098,7 +1098,7 @@ test("server mode: with the daily budget used up, a plan, a retry, a subagent an
 });
 
 test("server mode: with no budget set (or room left) the same commands go ahead", async (t) => {
-	const m = await withModel(t, { GRIPHUB_TEST_SPENT_CREDITS: "5.02" });
+	const m = await withModel(t, { RYNEX_TEST_SPENT_USD: "5.02" });
 	// No dailyBudget: off.
 	const off = await m.c.call("subagent_start", { task: "Periksa lima berkas", profile: "read" });
 	assert.equal(off.ok, true, off.error);

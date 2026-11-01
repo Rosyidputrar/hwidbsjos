@@ -32,7 +32,7 @@ void main() {
   });
 
   void configure({bool saved = false, bool active = false}) {
-    final store = RemoteProfileStore(File('${tmp.path}/home/.griphub/remote.json'));
+    final store = RemoteProfileStore(File('${tmp.path}/home/.rynex/remote.json'));
     if (saved) store.save(RemoteProfile.fromSetupCode(SetupCode.parse(setupCode())).copyWith(active: active));
     agent.remote.configure(setup: StubSetup('${tmp.path}/home'), store: store, hostDir: '${tmp.path}/host');
   }

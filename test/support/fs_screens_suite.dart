@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'editor_ui_suite.dart';
 import 'files_ui_suite.dart';
-import 'griphub_fs_suite.dart';
+import 'rynex_fs_suite.dart';
 import 'prompt_ui_suite.dart';
 
 /// Every screen that works on project files, run against one kind of file access.
@@ -12,5 +12,5 @@ void fsScreensSuite(FsVariant variant) {
   filesUiSuite(variant);
   editorUiSuite(variant);
   promptAndNewChatSuite(variant);
-  griphubFsSuite(variant);
+  rynexFsSuite(variant);
 }

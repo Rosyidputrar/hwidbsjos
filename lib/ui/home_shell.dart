@@ -999,7 +999,7 @@ class _ConnectCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  tr('Connect GripHub'),
+                  tr('Connect Rynex'),
                   style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
                 ),
               ),
@@ -1017,7 +1017,7 @@ class _ConnectCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            tr('Add your GripHub Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through GripHub.'),
+            tr('Add your Rynex Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through Rynex.'),
             style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
           ),
           const SizedBox(height: 16),

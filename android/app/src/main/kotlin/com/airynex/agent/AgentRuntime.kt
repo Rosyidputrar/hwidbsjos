@@ -77,7 +77,7 @@ object AgentRuntime {
         val env = linkedMapOf(
             "HOME" to home.path,
             "PI_CODING_AGENT_DIR" to agentDir.path,
-            "GRIPHUB_WORKSPACE" to workspace.path,
+            "RYNEX_WORKSPACE" to workspace.path,
             "TMPDIR" to tmp.path,
             "PATH" to "${bin.path}:/system/bin:/system/xbin",
             "LD_LIBRARY_PATH" to nativeDir.path,
@@ -85,7 +85,7 @@ object AgentRuntime {
             "TERM" to "dumb",
             "LANG" to "en_US.UTF-8",
             "PI_SKIP_VERSION_CHECK" to "1",
-            // GripHub AI Agent sends no telemetry; keep pi's install ping off even if a future version bundles it.
+            // Rynex AI Agent sends no telemetry; keep pi's install ping off even if a future version bundles it.
             "PI_TELEMETRY" to "0",
             "NODE_OPTIONS" to "--max-old-space-size=1024",
             // The Termux builds look under /data/data/com.termux; point them at ours.
@@ -96,11 +96,11 @@ object AgentRuntime {
             "PAGER" to "cat",
             "GIT_SSH_COMMAND" to "ssh -o UserKnownHostsFile=${home.path}/.ssh/known_hosts",
             // Linux container (see tool/box.sh); the rootfs is installed on demand.
-            "GRIPHUB_HOME" to home.path,
-            "GRIPHUB_FILES" to context.filesDir.path,
-            "GRIPHUB_ROOTFS" to File(context.filesDir, "linux/rootfs").path,
-            "GRIPHUB_PROOT" to File(nativeDir, "libproot.so").path,
-            "GRIPHUB_PROOT_LOADER" to File(nativeDir, "libproot_loader.so").path,
+            "RYNEX_HOME" to home.path,
+            "RYNEX_FILES" to context.filesDir.path,
+            "RYNEX_ROOTFS" to File(context.filesDir, "linux/rootfs").path,
+            "RYNEX_PROOT" to File(nativeDir, "libproot.so").path,
+            "RYNEX_PROOT_LOADER" to File(nativeDir, "libproot_loader.so").path,
         )
         if (caFile.length() > 0) {
             env["NODE_EXTRA_CA_CERTS"] = caFile.path
@@ -128,7 +128,7 @@ object AgentRuntime {
     }
 
     /**
-     * Runs [argv] in place of the host: for a server agent, `ssh ... griphub-attach`, whose stdin and stdout carry the
+     * Runs [argv] in place of the host: for a server agent, `ssh ... rynex-attach`, whose stdin and stdout carry the
      * same JSONL as the phone's own host (server_agent.md). The store key stays on the phone: the server has its own.
      */
     @Synchronized
@@ -142,7 +142,7 @@ object AgentRuntime {
         pb.environment().apply {
             putAll(env)
             putAll(extraEnv)
-            remove("GRIPHUB_STORE_KEY")
+            remove("RYNEX_STORE_KEY")
         }
         launch(pb)
     }

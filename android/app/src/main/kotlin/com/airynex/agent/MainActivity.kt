@@ -101,7 +101,7 @@ class MainActivity : FlutterFragmentActivity() {
                                 @Suppress("UNCHECKED_CAST")
                                 val extra = (call.arguments as? Map<String, String>) ?: emptyMap()
                                 // The store key goes to the agent host only, never to shells.
-                                AgentRuntime.start(applicationContext, extra + ("GRIPHUB_STORE_KEY" to SecureKey.hex(applicationContext)))
+                                AgentRuntime.start(applicationContext, extra + ("RYNEX_STORE_KEY" to SecureKey.hex(applicationContext)))
                                 runOnUiThread { result.success(AgentRuntime.paths(applicationContext)) }
                             } catch (e: Exception) {
                                 runOnUiThread { result.error("start_failed", e.message, null) }
@@ -270,7 +270,7 @@ class MainActivity : FlutterFragmentActivity() {
                             this,
                             call.argument<Int>("id") ?: 100,
                             call.argument<String>("channel") ?: Notifications.CHATS,
-                            call.argument<String>("title") ?: "GripHub AI Agent",
+                            call.argument<String>("title") ?: "Rynex AI Agent",
                             call.argument<String>("body") ?: "",
                             call.argument<Map<String, Any?>>("launch"),
                             actions,
@@ -393,7 +393,7 @@ class MainActivity : FlutterFragmentActivity() {
         val cache = cacheDir ?: return
         val cutoff = System.currentTimeMillis() - OLD_COPY_MS
         Thread {
-            for (name in listOf("paste", "shared", "griphub-paste")) {
+            for (name in listOf("paste", "shared", "rynex-paste")) {
                 try {
                     File(cache, name).listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
                 } catch (e: Exception) {
@@ -431,23 +431,23 @@ class MainActivity : FlutterFragmentActivity() {
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
             ?: "application/octet-stream"
 
-    /** Copies a file into Download/GripHub and returns where it went. MediaStore needs no storage permission. */
+    /** Copies a file into Download/Rynex and returns where it went. MediaStore needs no storage permission. */
     private fun saveToDownloads(file: File): String {
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, file.name)
                 put(MediaStore.Downloads.MIME_TYPE, mimeOf(file.name))
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/GripHub")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Rynex")
             }
             val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: throw IllegalStateException("Could not create the download")
             contentResolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
         } else {
             @Suppress("DEPRECATION")
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "GripHub")
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Rynex")
             dir.mkdirs()
             file.copyTo(File(dir, file.name), overwrite = true)
         }
-        return "Download/GripHub/${file.name}"
+        return "Download/Rynex/${file.name}"
     }
 }

@@ -101,7 +101,7 @@ String chatExportName(String title, DateTime at) {
   var slug = title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
   if (slug.length > 40) slug = slug.substring(0, 40).replaceAll(RegExp(r'-+$'), '');
   final stamp = '${at.year}${_two(at.month)}${_two(at.day)}-${_two(at.hour)}${_two(at.minute)}';
-  return 'griphub-${slug.isEmpty ? 'chat' : slug}-$stamp.md';
+  return 'rynex-${slug.isEmpty ? 'chat' : slug}-$stamp.md';
 }
 
 /// Text past this goes out as a file only: an Android share carries text in one transaction, which fails beyond about
@@ -146,7 +146,7 @@ Future<void> showMarkdownShare(
   final messenger = ScaffoldMessenger.maybeOf(context);
 
   Future<String> file() async {
-    final dir = Directory('${Directory.systemTemp.path}/griphub-export')..createSync(recursive: true);
+    final dir = Directory('${Directory.systemTemp.path}/rynex-export')..createSync(recursive: true);
     final f = File('${dir.path}/$fileName');
     await f.writeAsString(markdown);
     return f.path;
@@ -207,7 +207,7 @@ Future<void> showMarkdownShare(
                 SettingsRow(
                   icon: LucideIcons.download,
                   title: tr('Save to Downloads'),
-                  subtitle: 'Download/GripHub',
+                  subtitle: 'Download/Rynex',
                   onTap: () => run(sheet, () async {
                     final where = await agent.client.saveToDownloads(await file());
                     return '${tr('Saved to')} $where';

@@ -2,7 +2,7 @@
  * How the host talks to the app.
  *
  * On the phone the host is a child process of the app and talks over stdin/stdout. On a server it runs as a daemon that
- * outlives any connection and listens on a unix socket; the app reaches it through `ssh host griphub-attach`. This
+ * outlives any connection and listens on a unix socket; the app reaches it through `ssh host rynex-attach`. This
  * file is the part both share: a [Hub] that sends the host's records to whoever is connected, answers their commands,
  * and, in daemon mode, keeps a ring buffer of recent records so a client that dropped can pick up where it left off.
  *

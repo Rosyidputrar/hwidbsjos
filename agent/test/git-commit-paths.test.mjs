@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bundle } from "./helpers.mjs";
 
-process.env.GRIPHUB_STORE_KEY = "ab".repeat(32);
+process.env.RYNEX_STORE_KEY = "ab".repeat(32);
 const gitops = await bundle("gitops");
 
 let root;

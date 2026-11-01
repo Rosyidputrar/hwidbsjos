@@ -51,7 +51,7 @@ function session(script) {
 	let last = "";
 	let settle;
 	const s = {
-		model: { provider: "griphub", id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+		model: { provider: "rynex", id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
 		thinkingLevel: "medium",
 		get isStreaming() {
 			return streaming;

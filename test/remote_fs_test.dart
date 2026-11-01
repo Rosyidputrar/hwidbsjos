@@ -14,8 +14,8 @@ import 'support/fs_server.dart';
 void main() {
   final unavailable = FsServer.unavailable;
   if (unavailable != null) {
-    // CI sets GRIPHUB_REQUIRE_NODE_SIDE so that a broken setup fails instead of quietly skipping these tests.
-    if (Platform.environment['GRIPHUB_REQUIRE_NODE_SIDE'] != null) {
+    // CI sets RYNEX_REQUIRE_NODE_SIDE so that a broken setup fails instead of quietly skipping these tests.
+    if (Platform.environment['RYNEX_REQUIRE_NODE_SIDE'] != null) {
       test(
         'RemoteFs against the Node host',
         () => fail('the Node side is required here but unavailable: $unavailable'),
@@ -143,7 +143,7 @@ void main() {
         s.fs.write(ws('big'), Uint8List(100)),
         throwsA(isA<AgentError>().having((e) => e.code, 'code', 'too_large')),
       );
-      expect(Directory('${base.path}/ws').listSync().where((e) => e.path.contains('.griphub-up-')), isEmpty);
+      expect(Directory('${base.path}/ws').listSync().where((e) => e.path.contains('.rynex-up-')), isEmpty);
       expect(File(ws('big')).existsSync(), isFalse);
     });
 

@@ -234,7 +234,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                         leading: _SkillIcon(builtin: s.builtin, origin: s.source),
                         title: s.name,
                         subtitle: s.description,
-                        trailing: s.builtin ? Pill(tr('GripHub'), color: p.accent) : null,
+                        trailing: s.builtin ? Pill(tr('Rynex'), color: p.accent) : null,
                         onTap: () => _open(s),
                       ),
                   ],
@@ -327,7 +327,7 @@ class _SkillIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final o = origin.toLowerCase();
-    if (builtin || o == 'griphub') return IconTile(icon: LucideIcons.sparkles, color: p.accent);
+    if (builtin || o == 'rynex') return IconTile(icon: LucideIcons.sparkles, color: p.accent);
     if (o.contains('anthropic')) return IconTile(icon: SimpleIcons.anthropic, color: const Color(0xFFD97757));
     if (o.contains('skills.md')) return const IconTile(icon: LucideIcons.store, color: Color(0xFF14B8A6));
     if (o.contains('pi skills') || o.contains('pi-skills')) return IconTile(icon: LucideIcons.pi, color: p.accentAlt);

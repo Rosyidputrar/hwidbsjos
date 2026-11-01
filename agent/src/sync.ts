@@ -1,6 +1,6 @@
 /**
  * GitHub sync: chats, projects and app settings kept in a private repository
- * (<login>/griphub-sync) so another phone can pick them up after signing in.
+ * (<login>/rynex-sync) so another phone can pick them up after signing in.
  *
  * Each sync pulls first, then mirrors this phone into the repository and
  * pushes. Items another phone added are copied in; items this phone deleted
@@ -31,7 +31,7 @@ import { gitRun, type Integrations, run } from "./integrations.js";
 import type { CustomProviders } from "./providers.js";
 import { atomicWrite, isObject, keepBackup, loadStore, readJsonFile } from "./state.js";
 
-const REPO = "griphub-sync";
+const REPO = "rynex-sync";
 /** GitHub rejects files over 100 MB. */
 const MAX_FILE = 95 * 1024 * 1024;
 const SKIP_DIRS = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", ".gradle", "build", ".next", "target", ".dart_tool", "backups"]);
@@ -301,7 +301,7 @@ export class GitHubSync {
 					name: REPO,
 					private: true,
 					auto_init: true,
-					description: "GripHub AI Agent chats, projects and settings (synced by the app)",
+					description: "Rynex AI Agent chats, projects and settings (synced by the app)",
 				}),
 			});
 		}
@@ -559,7 +559,7 @@ export class GitHubSync {
 
 		writeFileSync(
 			join(this.dir, "README.md"),
-			"# GripHub AI Agent sync\n\nChats, projects and settings synced by the GripHub AI Agent app. Keep this repository private.\n" +
+			"# Rynex AI Agent sync\n\nChats, projects and settings synced by the Rynex AI Agent app. Keep this repository private.\n" +
 				"Provider keys and tokens are not stored here.\n",
 		);
 		return { items, skipped };

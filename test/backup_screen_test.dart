@@ -26,7 +26,7 @@ void main() {
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(PlatformBackend.method, (call) async {
       platform.add(call);
-      return call.method == 'saveToDownloads' ? '/storage/emulated/0/Download/GripHub/saved.zip' : null;
+      return call.method == 'saveToDownloads' ? '/storage/emulated/0/Download/Rynex/saved.zip' : null;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(PlatformBackend.method, null));
   });
@@ -108,7 +108,7 @@ void main() {
     final test = Process.runSync('unzip', ['-t', local]);
     expect(test.exitCode, 0, reason: '${test.stdout}');
     expect('${test.stdout}', contains('proj/a.txt'));
-    expect(find.textContaining('Saved to /storage/emulated/0/Download/GripHub/saved.zip'), findsOneWidget);
+    expect(find.textContaining('Saved to /storage/emulated/0/Download/Rynex/saved.zip'), findsOneWidget);
   }, skip: skip != null);
 
   testWidgets('a backup from the phone is sent to the server first, restored there, and the copy is cleaned up', (
@@ -187,17 +187,17 @@ void main() {
     var backups = <Map<String, Object?>>[];
     final backend = FakeBackend()
       ..onCommand = (c) => switch (c['type']) {
-        'auto_backup_status' => {'enabled': stored['key'] != null, 'backups': backups, 'dir': '/download/GripHub/auto'},
+        'auto_backup_status' => {'enabled': stored['key'] != null, 'backups': backups, 'dir': '/download/Rynex/auto'},
         'auto_backup_configure' => () {
           stored['key'] = c['key'];
           if (c['key'] == null) backups = [];
-          return {'enabled': c['key'] != null, 'backups': backups, 'dir': '/download/GripHub/auto'};
+          return {'enabled': c['key'] != null, 'backups': backups, 'dir': '/download/Rynex/auto'};
         }(),
         'auto_backup_now' => () {
           backups = [
-            {'name': 'auto-1.ghb', 'path': '/download/GripHub/auto/auto-1.ghb', 'at': 1700000000000, 'size': 4096},
+            {'name': 'auto-1.ryb', 'path': '/download/Rynex/auto/auto-1.ryb', 'at': 1700000000000, 'size': 4096},
           ];
-          return {'made': true, 'enabled': true, 'backups': backups, 'dir': '/download/GripHub/auto'};
+          return {'made': true, 'enabled': true, 'backups': backups, 'dir': '/download/Rynex/auto'};
         }(),
         'auto_backup_key' => {'key': stored['key']},
         _ => null,
@@ -224,7 +224,7 @@ void main() {
     await tester.pump();
     expect(backend.sent.any((c) => c['type'] == 'auto_backup_now'), isTrue, reason: 'a switch that waits an hour misleads');
     await tester.pump();
-    expect(find.textContaining('auto-1.ghb', findRichText: true), findsNothing); // the row shows time and size, not the name
+    expect(find.textContaining('auto-1.ryb', findRichText: true), findsNothing); // the row shows time and size, not the name
     expect(find.textContaining('Newest'), findsOneWidget);
 
     // The code can be seen again on this phone (and only here; a server refuses, host-side test).
@@ -244,11 +244,11 @@ void main() {
     expect(stored['key'], isNull);
   });
 
-  testWidgets('restoring a phone backup (.ghb) asks for the recovery code and says keys are not in it', (tester) async {
+  testWidgets('restoring a phone backup (.ryb) asks for the recovery code and says keys are not in it', (tester) async {
     String? restoredWith;
     final backend = FakeBackend()
       ..onCommand = (c) => switch (c['type']) {
-        'auto_backup_status' => {'enabled': false, 'backups': const [], 'dir': '/download/GripHub/auto'},
+        'auto_backup_status' => {'enabled': false, 'backups': const [], 'dir': '/download/Rynex/auto'},
         'backup_restore_server' => () {
           restoredWith = c['key'] as String?;
           return {'restored': 7, 'skipped': 0, 'keptSshKey': false, 'createdAt': 1700000000000};
@@ -257,7 +257,7 @@ void main() {
       };
     final agent = AgentController(AgentClient(backend: backend));
     backend.running = true;
-    await open(tester, agent, pick: () async => '/storage/emulated/0/Download/GripHub/auto/auto-9.ghb');
+    await open(tester, agent, pick: () async => '/storage/emulated/0/Download/Rynex/auto/auto-9.ryb');
     await tester.tap(find.text('Choose file'));
     await tester.pump();
     await tester.tap(find.text('Restore'));

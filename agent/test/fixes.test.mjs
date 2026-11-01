@@ -178,7 +178,7 @@ test("#2 container: a failed install leaves the working rootfs untouched", async
 	const { Container } = await bundle("container");
 	const files = tmp("files-");
 	const rootfs = join(files, "linux", "rootfs");
-	process.env.GRIPHUB_ROOTFS = rootfs;
+	process.env.RYNEX_ROOTFS = rootfs;
 	write(rootfs, "etc/os-release", "ID=debian");
 	write(rootfs, "usr/bin/mytool", "installed by the user");
 	writeFileSync(join(files, "linux", "container.json"), JSON.stringify({ distro: "debian" }));
@@ -193,7 +193,7 @@ test("#2 container: a failed install leaves the working rootfs untouched", async
 	assert.equal(existsSync(`${rootfs}.new`), false);
 	assert.ok(existsSync(join(files, "linux", "container.json")));
 	assert.ok(lines.some((l) => /current container is unchanged/.test(l)));
-	delete process.env.GRIPHUB_ROOTFS;
+	delete process.env.RYNEX_ROOTFS;
 });
 
 test("the default context limit follows the model's window: 65%, never under the floor", async () => {

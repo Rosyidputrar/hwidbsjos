@@ -9,17 +9,17 @@ import { bundle } from "./helpers.mjs";
 
 const { AGENTS_MARKER, agentsFileText, isManaged } = await bundle("agents-file");
 const here = dirname(fileURLToPath(import.meta.url));
-const PHONE_WS = "/data/user/0/id.griphub.agent/files/workspace";
+const PHONE_WS = "/data/user/0/com.airynex.agent/files/workspace";
 
 test("the phone's notes are byte for byte what the host wrote before server mode", () => {
 	const before = readFileSync(join(here, "fixtures", "agents-phone.md"), "utf8");
 	assert.equal(agentsFileText({ mode: "phone", workspace: PHONE_WS }), before);
-	// Any mode that is not "server" is the phone (an unset GRIPHUB_MODE on the phone, say).
+	// Any mode that is not "server" is the phone (an unset RYNEX_MODE on the phone, say).
 	assert.equal(agentsFileText({ mode: "", workspace: PHONE_WS, box: true }), before);
 });
 
 test("a server's notes describe the server, with or without the box", () => {
-	const ws = "/home/griphub/workspace";
+	const ws = "/home/rynex/workspace";
 	const inBox = agentsFileText({ mode: "server", workspace: ws, box: true });
 	const bare = agentsFileText({ mode: "server", workspace: ws, box: false });
 	for (const text of [inBox, bare]) {
@@ -28,7 +28,7 @@ test("a server's notes describe the server, with or without the box", () => {
 		assert.match(text, new RegExp(`The workspace directory is ${ws}\\.`));
 		// Nothing of the phone: no Android shell, no proot container, no device key.
 		assert.doesNotMatch(text, /Android|mksh|toybox|proot|\/system\/bin\/sh|id_ed25519/);
-		// What GripHub's agent relies on everywhere.
+		// What Rynex's agent relies on everywhere.
 		assert.match(text, /todo_write/);
 		assert.match(text, /pasted-text\.txt/);
 		assert.match(text, /\$CLOUDFLARE_API_TOKEN/);

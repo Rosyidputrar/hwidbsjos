@@ -151,7 +151,7 @@ class _BoxScreenState extends State<BoxScreen> {
       final ok = await _confirm(
         tr('Run the agent\'s commands on the server itself?'),
         tr(
-          'Without the box, every command the agent runs happens directly on the server, as the griphub user. The box is what keeps an apt install or a careless command from touching the server. Turn it off only if you know why.',
+          'Without the box, every command the agent runs happens directly on the server, as the rynex user. The box is what keeps an apt install or a careless command from touching the server. Turn it off only if you know why.',
         ),
         tr('Turn the box off'),
       );
@@ -386,7 +386,7 @@ class _BoxScreenState extends State<BoxScreen> {
                       Padding(
                         padding: const EdgeInsets.only(top: 14),
                         child: Text(
-                          '${tr('Limits')}: ${tr('memory')} ${c.limits['memory']} · ${tr('swap')} ${c.limits['swap']} · ${c.limits['cpus']} CPU. ${tr('Set in ~/.griphub/box.conf on the server; they apply when the container is next made.')}',
+                          '${tr('Limits')}: ${tr('memory')} ${c.limits['memory']} · ${tr('swap')} ${c.limits['swap']} · ${c.limits['cpus']} CPU. ${tr('Set in ~/.rynex/box.conf on the server; they apply when the container is next made.')}',
                           style: text.bodySmall,
                         ),
                       ),

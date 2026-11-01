@@ -11,7 +11,7 @@ import 'support/daemon.dart';
 
 /// The controller (what the screens read) over a server agent link that drops: the conversation on screen must come out
 /// right, and a dropped link must not look like a crash. The first three cases are ported from CoderRa's
-/// test/remote_controller_test.dart; the subagent cases are GripHub's (server_agent.md 4.1, 4.2).
+/// test/remote_controller_test.dart; the subagent cases are Rynex's (server_agent.md 4.1, 4.2).
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final skip = TestDaemon.skip;

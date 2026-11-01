@@ -66,7 +66,7 @@ class Updater extends ChangeNotifier {
   static final instance = Updater._();
 
   /// Set at build time (`--dart-define=UPDATE_REPO=owner/name`). Empty (the
-  /// GripHub default) disables self-update entirely: no repo, no checks.
+  /// Rynex default) disables self-update entirely: no repo, no checks.
   static const repo = String.fromEnvironment('UPDATE_REPO', defaultValue: '');
   static const _channel = MethodChannel('rynex/updater');
   static const _autoInterval = Duration(hours: 6);
@@ -168,7 +168,7 @@ class Updater extends ChangeNotifier {
       final req = await client.getUrl(Uri.parse('https://api.github.com/repos/$repo/releases/latest'));
       req.headers
         ..set(HttpHeaders.acceptHeader, 'application/vnd.github+json')
-        ..set(HttpHeaders.userAgentHeader, 'GripHub/$currentVersion');
+        ..set(HttpHeaders.userAgentHeader, 'Rynex/$currentVersion');
       final res = await req.close().timeout(const Duration(seconds: 20));
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode == 404) return null;

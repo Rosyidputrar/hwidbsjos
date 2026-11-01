@@ -1,5 +1,5 @@
 /**
- * GripHub AI Agent agent host.
+ * Rynex AI Agent agent host.
  *
  * Runs inside the bundled Node runtime on the device and exposes the pi SDK to
  * the Flutter app over JSONL on stdin/stdout. On a server (--listen, see
@@ -13,7 +13,7 @@
  * stdout is reserved for protocol records; logs go to stderr.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -89,8 +89,14 @@ type Command = { id?: number; type: string; [key: string]: any };
 const TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search", "web_fetch", "web_screenshot", "todo_write"];
 
 const agentDir = getAgentDir();
-const workspace = process.env.GRIPHUB_WORKSPACE ?? process.cwd();
-const stateDir = join(agentDir, "griphub");
+const workspace = process.env.RYNEX_WORKSPACE ?? process.cwd();
+const stateDir = join(agentDir, "rynex");
+// One-time rename from the pre-rebrand state folder, so an upgraded install
+// keeps its providers, settings and keys instead of starting empty.
+try {
+	const legacyState = join(agentDir, "griphub");
+	if (!existsSync(stateDir) && existsSync(legacyState)) renameSync(legacyState, stateDir);
+} catch { /* a failed rename must not stop the host; it starts empty instead */ }
 
 let modelRuntime: ModelRuntime;
 let settingsManager: SettingsManager;
@@ -135,18 +141,25 @@ function argValue(name: string): string | undefined {
  * and outlives its clients, which reach it over ssh. Unset on the phone, where the app spawned this process and talks
  * to it over stdin/stdout exactly as before.
  */
-const listenPath = argValue("--listen") ?? process.env.GRIPHUB_LISTEN;
+const listenPath = argValue("--listen") ?? process.env.RYNEX_LISTEN;
 
 /** "server" on a VPS, "phone" in the app's own process. A daemon is a server unless told otherwise. */
-const mode = process.env.GRIPHUB_MODE ?? (listenPath ? "server" : "phone");
+const mode = process.env.RYNEX_MODE ?? (listenPath ? "server" : "phone");
 
 /** A server agent: the daemon on a VPS. Everything that differs from the phone hangs off this. */
 const server = mode === "server";
 
 /** Where the host keeps its own small files on a server (`running` marker, the box). */
-const griphubDir = process.env.GRIPHUB_DIR ?? join(process.env.HOME ?? agentDir, ".griphub");
+const rynexDir = process.env.RYNEX_DIR ?? join(process.env.HOME ?? agentDir, ".rynex");
+// Same one-time rename for the server-side home folder (~/.griphub -> ~/.rynex).
+if (!process.env.RYNEX_DIR) {
+	try {
+		const legacyDir = join(process.env.HOME ?? agentDir, ".griphub");
+		if (!existsSync(rynexDir) && existsSync(legacyDir)) renameSync(legacyDir, rynexDir);
+	} catch { /* as above: never block startup on it */ }
+}
 /** Exists while the daemon runs and is removed by a clean shutdown; finding it at start means the last one crashed. */
-const runningMarker = join(griphubDir, "running");
+const runningMarker = join(rynexDir, "running");
 
 /** The `.stamp` next to this host (written with the agent bundle), or undefined when there is none. */
 function bundleStamp(): string | undefined {
@@ -175,8 +188,8 @@ const hub = new Hub({
 	bundleStamp: runningStamp,
 	handle: (cmd) => handle(cmd as Command),
 	// Only tests shorten these.
-	pingIntervalMs: Number(process.env.GRIPHUB_PING_MS) || undefined,
-	idleTimeoutMs: Number(process.env.GRIPHUB_IDLE_MS) || undefined,
+	pingIntervalMs: Number(process.env.RYNEX_PING_MS) || undefined,
+	idleTimeoutMs: Number(process.env.RYNEX_IDLE_MS) || undefined,
 });
 // The app that spawned us is connected from the first byte, so early records reach it.
 const stdio = listenPath ? undefined : hub.attach(stdioConn());
@@ -187,9 +200,9 @@ function send(record: object) {
 }
 
 /** The launcher that runs bash inside the rootless container on a server (server/box/box). */
-const boxScript = process.env.GRIPHUB_BOX ?? join(griphubDir, "bin", "box");
+const boxScript = process.env.RYNEX_BOX ?? join(rynexDir, "bin", "box");
 /** The rootless container the agent's shell runs in on a server. The phone's container is container.ts (proot). */
-const box = new PodmanBox({ script: boxScript, griphubDir });
+const box = new PodmanBox({ script: boxScript, rynexDir });
 
 const envBytes = (name: string) => {
 	const n = Number(process.env[name]);
@@ -201,9 +214,9 @@ const health = new Health({
 	path: workspace,
 	enforce: server,
 	limits: {
-		diskWarnBytes: envBytes("GRIPHUB_DISK_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskWarnBytes,
-		diskMinBytes: envBytes("GRIPHUB_DISK_MIN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskMinBytes,
-		memoryWarnBytes: envBytes("GRIPHUB_MEMORY_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.memoryWarnBytes,
+		diskWarnBytes: envBytes("RYNEX_DISK_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskWarnBytes,
+		diskMinBytes: envBytes("RYNEX_DISK_MIN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskMinBytes,
+		memoryWarnBytes: envBytes("RYNEX_MEMORY_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.memoryWarnBytes,
 	},
 	// Only a server tells anyone about it: on the phone `health` answers when asked, and nothing else changes.
 	onChange: server ? reportHealth : undefined,
@@ -357,10 +370,10 @@ async function buildSession(
 		// Limits come first, so a call past a limit is refused before it asks for approval.
 		// Approvals and plan mode only make sense with someone watching.
 		extensionFactories: [
-			{ name: "griphub-limits", factory: limitsExtension({ budgetError, stopped: opts.onLimit }), hidden: true },
-			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
+			{ name: "rynex-limits", factory: limitsExtension({ budgetError, stopped: opts.onLimit }), hidden: true },
+			...(opts.interactive ? [{ name: "rynex", factory: guard.extension, hidden: true }] : []),
 			// A server's background runs go on while nobody is there: what would need approval is refused instead.
-			...(opts.unattended ? [{ name: "griphub-unattended", factory: opts.unattended.extension, hidden: true }] : []),
+			...(opts.unattended ? [{ name: "rynex-unattended", factory: opts.unattended.extension, hidden: true }] : []),
 		],
 	});
 	await resourceLoader.reload();
@@ -448,9 +461,9 @@ async function buildSubagentSession(opts: SubagentSessionFactoryOptions) {
 		agentDir,
 		settingsManager,
 		extensionFactories: [
-			{ name: "griphub-limits", factory: limitsExtension({ budgetError, stopped: onLimit }), hidden: true },
-			{ name: "griphub-subagent-guard", factory: subGuard.extension, hidden: true },
-			{ name: "griphub-subagent-budget", factory: budgetExtension, hidden: true },
+			{ name: "rynex-limits", factory: limitsExtension({ budgetError, stopped: onLimit }), hidden: true },
+			{ name: "rynex-subagent-guard", factory: subGuard.extension, hidden: true },
+			{ name: "rynex-subagent-budget", factory: budgetExtension, hidden: true },
 		],
 	});
 	await resourceLoader.reload();
@@ -660,7 +673,7 @@ async function compactionDone(s: AgentSession) {
 let turnStartedAt: number | null = null;
 
 /** Session entry type that keeps a turn's duration with the chat. It is not a message: the model never sees it. */
-const TURN_TIME = "griphub_turn";
+const TURN_TIME = "rynex_turn";
 
 /** Keeps how long the turn took next to its last reply, so the chat shows it again when reopened. */
 function recordTurnTime(ms: number) {
@@ -711,7 +724,7 @@ function turnTimes(s: AgentSession): Map<number, number> {
 }
 
 /** Message type of a job's result in the chat: shown by the app as a notice, read by the model as a message. */
-const JOB_MESSAGE = "griphub_job";
+const JOB_MESSAGE = "rynex_job";
 
 /** Jobs that ended and have not called their chat back yet (it was busy, or another chat was open). */
 const finishedJobs: JobRecord[] = [];
@@ -834,7 +847,7 @@ async function tryFallback(error: string) {
  * (their sessions live in memory, not in chat files).
  */
 /** Only tests set this: what "spent today" says, so the budget can be reached without spending anything. */
-const TEST_SPENT = process.env.GRIPHUB_TEST_SPENT_CREDITS === undefined ? null : Number(process.env.GRIPHUB_TEST_SPENT_CREDITS);
+const TEST_SPENT = process.env.RYNEX_TEST_SPENT_USD === undefined ? null : Number(process.env.RYNEX_TEST_SPENT_USD);
 
 function spentToday(): number {
 	if (TEST_SPENT !== null && Number.isFinite(TEST_SPENT)) return TEST_SPENT;
@@ -1148,7 +1161,7 @@ async function deleteProject(path: string, deleteChats: boolean) {
  */
 function sharedBackupDir(): string {
 	const shared = "/storage/emulated/0/Download";
-	const dir = existsSync(shared) ? join(shared, "GripHub") : join(workspace, "backups");
+	const dir = existsSync(shared) ? join(shared, "Rynex") : join(workspace, "backups");
 	try {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, ".probe"), "");
@@ -1162,18 +1175,18 @@ function sharedBackupDir(): string {
 
 /** The phone's automatic backups go next to the manual ones, in a folder of their own (pruning only ever deletes there). */
 function phoneBackupDir(): string {
-	return process.env.GRIPHUB_PHONE_BACKUP_DIR ?? join(sharedBackupDir(), "auto");
+	return process.env.RYNEX_PHONE_BACKUP_DIR ?? join(sharedBackupDir(), "auto");
 }
 
 function backupTarget() {
 	const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
-	return join(sharedBackupDir(), `griphub-backup-${stamp}.zip`);
+	return join(sharedBackupDir(), `rynex-backup-${stamp}.zip`);
 }
 
 function createBackup(includeWorkspace: boolean) {
 	// Secrets (provider keys, tokens) are left out on purpose: the agent side
 	// only ever lists sessions/skills/prompts/settings/runs, and key material
-	// lives in the encrypted griphub/ store, which is not listed here.
+	// lives in the encrypted rynex/ store, which is not listed here.
 	const entries = [
 		...collectFiles(join(agentDir, "sessions"), agentDir),
 		...collectFiles(join(agentDir, "skills"), agentDir),
@@ -1181,7 +1194,7 @@ function createBackup(includeWorkspace: boolean) {
 		// pi's settings.json is NOT backed up: restore refuses it (a crafted file
 		// could reconfigure the agent on another phone), so including it only
 		// promised something a restore silently dropped.
-		...["AGENTS.md", "griphub/runs.json"]
+		...["AGENTS.md", "rynex/runs.json"]
 			.filter((f) => existsSync(join(agentDir, f)))
 			.map((f) => ({ name: f, data: readFileSync(join(agentDir, f)) })),
 	].map((e) => ({ name: `agent/${e.name}`, data: e.data }));
@@ -1209,7 +1222,7 @@ function createBackup(includeWorkspace: boolean) {
  */
 const RESTORE_AGENT_ALLOW = [
 	(rel: string) => rel === "AGENTS.md",
-	(rel: string) => rel === "griphub/runs.json",
+	(rel: string) => rel === "rynex/runs.json",
 	(rel: string) => rel.startsWith("sessions/"),
 	(rel: string) => rel.startsWith("skills/"),
 	(rel: string) => rel.startsWith("prompts/"),
@@ -1550,7 +1563,7 @@ async function handle(cmd: Command): Promise<unknown> {
 				const out = m;
 				if (m.role === "compactionSummary") return { ...out, cost: latestSummaryCost(s) };
 				const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
-				return ms === undefined ? out : { ...out, griphubTurnMs: ms };
+				return ms === undefined ? out : { ...out, rynexTurnMs: ms };
 			});
 		}
 		case "summarized_messages":
@@ -1965,7 +1978,7 @@ function taskLog(cmd: Command): Log {
 
 /**
  * Nothing is in flight: no reply being written, no background run queued or running, no subagent waiting, working or
- * stopping, and no approval waiting (chat or subagent). GripHub's subagents outlive the turn that started them, so the
+ * stopping, and no approval waiting (chat or subagent). Rynex's subagents outlive the turn that started them, so the
  * chat alone is not enough: restarting then would kill them (server_agent.md 4.9).
  */
 function isIdle(): boolean {
@@ -2019,7 +2032,7 @@ async function shutdown(code = 0) {
 }
 
 // Only tests shorten the poll.
-const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0), pollMs: Number(process.env.GRIPHUB_RESTART_POLL_MS) || undefined });
+const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0), pollMs: Number(process.env.RYNEX_RESTART_POLL_MS) || undefined });
 
 // ---------------------------------------------------------------------------
 // Startup
@@ -2038,7 +2051,7 @@ async function main() {
 	});
 	// A server host stuck in one loop never answers and never exits, so the service manager has nothing to restart:
 	// a watchdog thread kills it after two minutes without a sign of life (watchdog.ts).
-	if (server) startWatchdog({ staleMs: Number(process.env.GRIPHUB_WATCHDOG_MS) || 120_000 });
+	if (server) startWatchdog({ staleMs: Number(process.env.RYNEX_WATCHDOG_MS) || 120_000 });
 	// A public tunnel (ssh -R) outlives its parent process: stop tunnels on
 	// every shutdown path, not just stdin end. (A SIGKILL orphan cannot be
 	// reaped by the app — the OS or user must kill that ssh.)
@@ -2069,23 +2082,23 @@ async function main() {
 	templates = new Templates(agentDir);
 	templates.seed(join(stateDir, "seeded-templates.json"));
 	checkpoints = new Checkpoints(join(stateDir, "checkpoints"));
-	container = new Container(process.env.GRIPHUB_FILES ?? join(agentDir, "..", "..", ".."));
+	container = new Container(process.env.RYNEX_FILES ?? join(agentDir, "..", "..", ".."));
 	mcp = new Mcp(
 		join(stateDir, "mcp.json"),
 		() => send({ type: "mcp", servers: mcp.summary() }),
 		server ? { shell: "/bin/sh", box: () => (box.available ? boxScript : "/bin/sh") } : undefined,
 	);
-	// Automatic backups on both sides, differently placed (autobackup.ts): a server keeps its own in ~/.griphub and
+	// Automatic backups on both sides, differently placed (autobackup.ts): a server keeps its own in ~/.rynex and
 	// the app fetches the newest to the phone; the phone writes its own straight into the shared Download folder, the
 	// one place that survives the app (and, synced or copied off the phone, the phone itself). Secrets stay out there,
 	// and the key is shown once as a recovery code: a backup must not need the phone it was made on.
 	autoBackup = new AutoBackup({
-		dir: server ? join(griphubDir, "backups") : phoneBackupDir(),
+		dir: server ? join(rynexDir, "backups") : phoneBackupDir(),
 		configFile: join(stateDir, "auto-backup.json"),
 		agentDir,
 		workspace,
 		home: process.env.HOME ?? agentDir,
-		intervalMs: Number(process.env.GRIPHUB_BACKUP_MS) || undefined,
+		intervalMs: Number(process.env.RYNEX_BACKUP_MS) || undefined,
 		noSecrets: !server,
 		log: (m) => log(m),
 	});
@@ -2095,9 +2108,9 @@ async function main() {
 	fsService = new Fs([
 		{ path: workspace },
 		{ path: join(agentDir, "skills"), readOnly: true },
-		...(server ? [{ path: join(griphubDir, "backups"), readOnly: true }] : []),
+		...(server ? [{ path: join(rynexDir, "backups"), readOnly: true }] : []),
 	]);
-	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.GRIPHUB_PREVIEW_IDLE_MS) || undefined });
+	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.RYNEX_PREVIEW_IDLE_MS) || undefined });
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
 	modelRuntime = await ModelRuntime.create();
@@ -2107,7 +2120,7 @@ async function main() {
 	// either (see SettingsManager); the app's own inline extension is
 	// unaffected, it is not a project extension.
 	settingsManager = SettingsManager.create(workspace, agentDir, { projectTrusted: false });
-	// pi keeps the prompt cache warm with extra 1-token requests. On GripHub
+	// pi keeps the prompt cache warm with extra 1-token requests. On Rynex
 	// each re-reads the whole cached prompt at the full rate (one opus warm-up
 	// cost ~1.3 credits), so they cost more than the cache saves. Off unless
 	// the user turned it on themselves.
@@ -2146,7 +2159,7 @@ async function main() {
 	if (server && integrations.settings.timeZone) process.env.TZ = integrations.settings.timeZone;
 	// The app's update copies this host's folder only; the box launcher and its files come in it and are put in place here.
 	if (server) {
-		const replaced = syncLauncher({ hostDir, griphubDir, warn: (m) => log("launcher:", m) });
+		const replaced = syncLauncher({ hostDir, rynexDir, warn: (m) => log("launcher:", m) });
 		if (replaced.length) log("launcher updated:", replaced.join(", "));
 	}
 	if (server) {
@@ -2200,7 +2213,7 @@ async function main() {
 	const readyRecord = { type: "ready", version: VERSION };
 	if (listenPath) {
 		// A daemon that was killed leaves its marker behind; finding it means the last run did not end cleanly.
-		mkdirSync(griphubDir, { recursive: true, mode: 0o700 });
+		mkdirSync(rynexDir, { recursive: true, mode: 0o700 });
 		if (existsSync(runningMarker)) {
 			send({ type: "notice", message: "The host was restarted unexpectedly (it was stopped without shutting down)." });
 			void notifier.send("restarted", "Host restarted unexpectedly", { priority: 4, tags: ["warning"] });

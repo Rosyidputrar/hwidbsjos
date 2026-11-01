@@ -82,7 +82,7 @@ export class Notifier {
 		const bad = checkConfig(config);
 		if (bad) return { ok: false, reason: "config", detail: bad };
 		try {
-			const res = await this.post(config, "Test notification", { tags: ["bell"], message: "Notifications from GripHub arrive on this phone." });
+			const res = await this.post(config, "Test notification", { tags: ["bell"], message: "Notifications from Rynex arrive on this phone." });
 			return res.ok ? { ok: true } : { ok: false, reason: "http", detail: String(res.status) };
 		} catch (e) {
 			return { ok: false, reason: "network", detail: (e as Error).message };
@@ -99,7 +99,7 @@ export class Notifier {
 		return (this.o.fetch ?? fetch)(`${config.url.replace(/\/+$/, "")}/${encodeURIComponent(config.topic)}`, {
 			method: "POST",
 			headers,
-			body: options.message ?? "Open GripHub to see.",
+			body: options.message ?? "Open Rynex to see.",
 			signal: AbortSignal.timeout(5000),
 		});
 	}

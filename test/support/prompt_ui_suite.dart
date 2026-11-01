@@ -31,7 +31,7 @@ void promptAndNewChatSuite(FsVariant variant) {
 
   String p(String rel) => '${dir.path}/$rel';
 
-  /// What preparePrompt put in the project's `.attachments` folder, by the name it was attached under (GripHub copies
+  /// What preparePrompt put in the project's `.attachments` folder, by the name it was attached under (Rynex copies
   /// every attachment, pictures too, as `<time>_<index>_<name>` so two files with the same name never collide).
   Map<String, String> copied() {
     final d = Directory(p('project/.attachments'));

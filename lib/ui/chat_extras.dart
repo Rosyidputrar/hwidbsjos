@@ -102,7 +102,7 @@ class LongPasteFormatter extends TextInputFormatter {
 /// Writes pasted text to a file and returns it as an attachment. Synchronous: it is a paste (kilobytes),
 /// and the chip should be there the moment the field stays empty.
 Attachment pastedAttachment(String text) {
-  final dir = Directory('${Directory.systemTemp.path}/griphub-paste/${DateTime.now().microsecondsSinceEpoch}')
+  final dir = Directory('${Directory.systemTemp.path}/rynex-paste/${DateTime.now().microsecondsSinceEpoch}')
     ..createSync(recursive: true);
   final file = File('${dir.path}/$pastedName')..writeAsStringSync(text);
   return Attachment(file.path, pastedName, mime: 'text/plain');
@@ -120,7 +120,7 @@ Attachment pastedImageAttachment(Uint8List bytes, String mime) {
     'image/gif' => 'gif',
     _ => 'png',
   };
-  final dir = Directory('${Directory.systemTemp.path}/griphub-paste/${DateTime.now().microsecondsSinceEpoch}')
+  final dir = Directory('${Directory.systemTemp.path}/rynex-paste/${DateTime.now().microsecondsSinceEpoch}')
     ..createSync(recursive: true);
   final file = File('${dir.path}/$pastedImageStem.$ext')..writeAsBytesSync(bytes);
   return Attachment(file.path, '$pastedImageStem.$ext', mime: mime);

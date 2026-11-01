@@ -397,7 +397,7 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        tr('Schedules run while GripHub AI Agent is alive; a persistent notification keeps it running.'),
+                        tr('Schedules run while Rynex AI Agent is alive; a persistent notification keeps it running.'),
                         style: text.bodySmall?.copyWith(color: p.muted),
                       ),
                     ),

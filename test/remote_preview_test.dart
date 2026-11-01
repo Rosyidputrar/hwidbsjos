@@ -130,7 +130,7 @@ void main() {
     test('the forwards of a server are dropped when its setup is applied again', () async {
       final port = await devServer('x');
       final local = await agent.remote.forwards!.open(port);
-      agent.remote.configure(setup: setup, store: RemoteProfileStore(File('${app.path}/.griphub/remote.json')));
+      agent.remote.configure(setup: setup, store: RemoteProfileStore(File('${app.path}/.rynex/remote.json')));
       await Future<void>.delayed(const Duration(milliseconds: 300));
       await expectLater(fetch('http://127.0.0.1:$local/'), throwsA(anything));
     });

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { bundle, waitFor } from "./helpers.mjs";
 
 // secure.ts refuses to write tokens in plaintext; it reads the key once, at import.
-process.env.GRIPHUB_STORE_KEY = "ab".repeat(32);
+process.env.RYNEX_STORE_KEY = "ab".repeat(32);
 const { Integrations } = await bundle("integrations");
 
 const realFetch = globalThis.fetch;

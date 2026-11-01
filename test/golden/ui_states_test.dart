@@ -533,7 +533,7 @@ void textScaleTests() {
   for (final look in const [Look(textScale: 2.0), Look(language: 'id', textScale: 2.0, width: 360)]) {
     testWidgets('UI-22: the chat and Settings are laid out at 2x text (${look.name})', (tester) async {
       FakeHost();
-      final agent = newAgent()..model = ModelInfo({'provider': 'griphub', 'id': 'mock', 'name': 'Mock'});
+      final agent = newAgent()..model = ModelInfo({'provider': 'rynex', 'id': 'mock', 'name': 'Mock'});
       await pumpLook(tester, look, ChatScreen(agent: agent), height: 1400);
       await frames(tester);
       collectLayoutErrors(tester, 'chat ${look.name}');
@@ -545,7 +545,7 @@ void textScaleTests() {
 
   testWidgets('UI-22: golden at 2x text: the chat', (tester) async {
     FakeHost();
-    final agent = newAgent()..model = ModelInfo({'provider': 'griphub', 'id': 'mock', 'name': 'Mock'});
+    final agent = newAgent()..model = ModelInfo({'provider': 'rynex', 'id': 'mock', 'name': 'Mock'});
     await pumpLook(tester, const Look(textScale: 2.0), ChatScreen(agent: agent));
     await frames(tester);
     await loadImages(tester);

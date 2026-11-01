@@ -37,17 +37,17 @@ void main() {
     final key = remote.profile!.backupKey!;
     expect(key, matches(RegExp(r'^[0-9a-f]{64}$')));
     // Kept with the profile, so it is there after the app restarts.
-    expect(RemoteProfileStore(File('${rig.app.path}/.griphub/remote.json')).load()!.backupKey, key);
+    expect(RemoteProfileStore(File('${rig.app.path}/.rynex/remote.json')).load()!.backupKey, key);
     expect(remote.autoBackup!['enabled'], isTrue);
 
     final fetched = await remote.backupNow(force: true);
     expect(fetched, isNotNull);
     expect(fetched!.path, startsWith(remote.backupsDir.path));
     // Turning it on also made one in the background; the newest is the one fetched.
-    final serverCopy = (Directory('${rig.daemon.home.path}/.griphub/backups')
+    final serverCopy = (Directory('${rig.daemon.home.path}/.rynex/backups')
             .listSync()
             .whereType<File>()
-            .where((f) => f.path.endsWith('.ghb'))
+            .where((f) => f.path.endsWith('.ryb'))
             .toList()
           ..sort((a, b) => b.path.compareTo(a.path)))
         .first;

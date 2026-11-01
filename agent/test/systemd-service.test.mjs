@@ -8,13 +8,13 @@ import { before, test } from "node:test";
 import { build } from "esbuild";
 import { dial, tempDir } from "./helpers.mjs";
 
-// server/griphub-hostd.service, run for real as a systemd *user* service: the same file the bootstrap installs, with
+// server/rynex-hostd.service, run for real as a systemd *user* service: the same file the bootstrap installs, with
 // only the paths changed to a throwaway home. Checks what the unit promises: it starts the daemon, restarts it when it
 // exits (host_restart) or is killed, stops it cleanly, applies its memory limit, and stays quiet until the host has
 // been copied over. Skipped where there is no systemd user manager (most CI containers). Ported from CoderRa's
 // agent/test/systemd_service.test.ts (types stripped); server_agent.md, phase 3.
 
-const UNIT_FILE = fileURLToPath(new URL("../../server/griphub-hostd.service", import.meta.url));
+const UNIT_FILE = fileURLToPath(new URL("../../server/rynex-hostd.service", import.meta.url));
 const BUILD = fileURLToPath(new URL(`../build/systemd-host-${process.pid}`, import.meta.url));
 const HOST_BUNDLE = join(BUILD, "host.mjs");
 const SKILLS = fileURLToPath(new URL("../skills", import.meta.url));
@@ -55,7 +55,7 @@ async function waitFor(what, ok, ms = 20_000) {
 
 /** Installs the unit under a unique name for a throwaway home, and removes it afterwards. */
 function installUnit(t, { withHost = true } = {}) {
-	const name = `griphub-hostd-test-${process.pid}-${Date.now().toString(36)}.service`;
+	const name = `rynex-hostd-test-${process.pid}-${Date.now().toString(36)}.service`;
 	const dir = join(homedir(), ".config", "systemd", "user");
 	const path = join(dir, name);
 	// Registered before the throwaway home is created: hooks run in the order they were added, and the service has to be
@@ -68,13 +68,13 @@ function installUnit(t, { withHost = true } = {}) {
 	});
 
 	const home = tempDir(t, "gh-svc-");
-	mkdirSync(join(home, ".griphub", "host"), { recursive: true });
+	mkdirSync(join(home, ".rynex", "host"), { recursive: true });
 	if (withHost) {
-		copyFileSync(HOST_BUNDLE, join(home, ".griphub", "host", "host.mjs"));
-		cpSync(SKILLS, join(home, ".griphub", "host", "skills"), { recursive: true });
-		symlinkSync(AGENT_MODULES, join(home, ".griphub", "host", "node_modules"));
+		copyFileSync(HOST_BUNDLE, join(home, ".rynex", "host", "host.mjs"));
+		cpSync(SKILLS, join(home, ".rynex", "host", "skills"), { recursive: true });
+		symlinkSync(AGENT_MODULES, join(home, ".rynex", "host", "node_modules"));
 	}
-	writeFileSync(join(home, ".griphub", "env"), `GRIPHUB_STORE_KEY=${"ab".repeat(32)}\n`, { mode: 0o600 });
+	writeFileSync(join(home, ".rynex", "env"), `RYNEX_STORE_KEY=${"ab".repeat(32)}\n`, { mode: 0o600 });
 
 	const text = readFileSync(UNIT_FILE, "utf8")
 		.replaceAll("%h", home)
@@ -84,7 +84,7 @@ function installUnit(t, { withHost = true } = {}) {
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(path, text);
 	ctl("daemon-reload");
-	return { name, home, sock: join(home, ".griphub", "host.sock") };
+	return { name, home, sock: join(home, ".rynex", "host.sock") };
 }
 
 /** Connects, reads the greeting, returns the daemon's epoch (it changes with every new process). */
@@ -104,7 +104,7 @@ async function epochOf(sock) {
 test("the unit file passes systemd's own checks", { skip: SKIP }, (t) => {
 	const dir = tempDir(t);
 	const text = readFileSync(UNIT_FILE, "utf8").replace("/usr/local/bin/node", process.execPath);
-	const copy = join(dir, "griphub-hostd.service");
+	const copy = join(dir, "rynex-hostd.service");
 	writeFileSync(copy, text);
 	chmodSync(copy, 0o644);
 	const r = spawnSync("systemd-analyze", ["--user", "verify", copy], { encoding: "utf8" });

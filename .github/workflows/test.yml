@@ -54,7 +54,7 @@ jobs:
       - name: Test
         working-directory: agent
         env:
-          GRIPHUB_REQUIRE_SSHD: "1"
+          RYNEX_REQUIRE_SSHD: "1"
         run: npm test
 
   server:
@@ -113,5 +113,5 @@ jobs:
       # Those tests must run here, not skip: a missing Node side or sshd fails them.
       - name: Test
         env:
-          GRIPHUB_REQUIRE_NODE_SIDE: "1"
+          RYNEX_REQUIRE_NODE_SIDE: "1"
         run: flutter test

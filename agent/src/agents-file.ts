@@ -9,7 +9,7 @@
 
 import { BASH_TIMEOUT_SECONDS } from "./limits.js";
 
-export const AGENTS_MARKER = "<!-- griphub:managed (delete this line to keep your own edits) -->";
+export const AGENTS_MARKER = "<!-- rynex:managed (delete this line to keep your own edits) -->";
 
 export interface AgentsFileOptions {
 	/** "server" for the daemon on a VPS, anything else for the phone. */
@@ -26,7 +26,7 @@ export function agentsFileText({ mode, workspace, box = false }: AgentsFileOptio
 /**
  * Whether the file is ours to rewrite. The user deletes the marker line to keep their own edits. (The host also used to
  * claim any file starting the way ours does, which made deleting the marker useless: our own text without the marker
- * starts that way too. Every file GripHub wrote carries the marker, so the marker alone decides.)
+ * starts that way too. Every file Rynex wrote carries the marker, so the marker alone decides.)
  */
 export function isManaged(current: string): boolean {
 	return current.includes(AGENTS_MARKER);
@@ -36,7 +36,7 @@ function phoneText(workspace: string): string {
 	return `${AGENTS_MARKER}
 # Environment
 
-You are running inside GripHub AI Agent, an Android app, on the user's phone.
+You are running inside Rynex AI Agent, an Android app, on the user's phone.
 
 - The shell is Android's /system/bin/sh (mksh) with toybox utilities, not bash.
   Prefer POSIX sh syntax. There is no sudo, apt or pkg.
@@ -96,7 +96,7 @@ function serverText(workspace: string, box: boolean): string {
 	return `${AGENTS_MARKER}
 # Environment
 
-You are running inside GripHub AI Agent on a Linux server. The user talks to you from the GripHub app on their phone
+You are running inside Rynex AI Agent on a Linux server. The user talks to you from the Rynex app on their phone
 and may disconnect at any time; you keep running while they are away, and they see everything when they return.
 
 - Your file tools (read, write, edit, grep, find, ls) work directly on the server's disk.

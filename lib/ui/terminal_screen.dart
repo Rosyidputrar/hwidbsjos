@@ -81,7 +81,7 @@ class ShellSession {
       return _startRemote(agent, env, cwd, title, linux, rejoin);
     }
     // mksh reads $ENV for interactive shells: a short prompt and a few aliases.
-    final rc = File('$home/.griphubrc');
+    final rc = File('$home/.rynexrc');
     rc.writeAsStringSync(r'''
 PS1='${PWD##*/} $ '
 alias ll='ls -la'
@@ -116,10 +116,10 @@ alias gs='git status'
     final setup = agent.remote.setup!;
     final kind = linux ? 'box' : 'sh';
     var n = 1;
-    while (sessions.any((s) => !s.exited && s.remoteSession == 'griphub-$kind-$n')) {
+    while (sessions.any((s) => !s.exited && s.remoteSession == 'rynex-$kind-$n')) {
       n++;
     }
-    final name = rejoin ?? 'griphub-$kind-$n';
+    final name = rejoin ?? 'rynex-$kind-$n';
     final argv = setup.terminalArgv(cwd: cwd, session: name, box: linux);
     final shellEnv = {...env, 'TERM': 'xterm-256color'};
     final pty = Pty.start(

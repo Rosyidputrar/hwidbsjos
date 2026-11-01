@@ -15,7 +15,7 @@ String trHost(String message) {
   if (stop == null || numbers == null) return tr(message);
   switch (stop) {
     case LimitStop.budget:
-      return tr('Daily budget of {cap} credits reached ({spent} credits spent today). Raise it in Settings → Usage.')
+      return tr('Daily budget of \${cap} reached (\${spent} spent today). Raise it in Settings → Usage.')
           .replaceAll('{cap}', localNumber(numbers[0]))
           .replaceAll('{spent}', localNumber(numbers[1]));
     case LimitStop.toolCalls:
@@ -127,7 +127,7 @@ const _id = <String, String>{
   'AI': 'AI',
   'About': 'Tentang',
   'Powered by': 'Ditenagai oleh',
-  'Connect GripHub': 'Hubungkan GripHub',
+  'Connect Rynex': 'Hubungkan Rynex',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
   'You sent': 'Kamu mengirim',
@@ -160,7 +160,6 @@ const _id = <String, String>{
   '{n} rows': '{n} baris',
   'Page {n} of {total}': 'Halaman {n} dari {total}',
   'Approvals are prompts for common risky actions, not a security boundary: a model can still reach things they do not list. Open only what you trust.': 'Persetujuan adalah pertanyaan sebelum tindakan berisiko yang umum, bukan batas keamanan: model masih bisa menjangkau hal yang tidak ada di daftarnya. Buka hanya yang kamu percaya.',
-  'Daily budget of {cap} credits reached ({spent} credits spent today). Raise it in Settings → Usage.': 'Batas harian {cap} kredit tercapai (terpakai {spent} hari ini). Naikkan di Pengaturan → Pemakaian.',
   'Stopped after {n} tool calls in one request.': 'Berhenti setelah {n} panggilan tool dalam satu permintaan.',
   'Raise limit': 'Naikkan batas',
   'May contain secrets: not included unless you tick it': 'Mungkin berisi rahasia: tidak ikut kecuali kamu mencentangnya',
@@ -170,26 +169,18 @@ const _id = <String, String>{
   'The agent will run every command, edit any file and use every tool without asking. This stays on for all chats until you turn it off in Settings > Approvals.': 'Agent akan menjalankan setiap perintah, mengedit file apa pun, dan memakai semua tool tanpa bertanya. Tetap aktif untuk semua chat sampai kamu mematikannya di Pengaturan > Persetujuan.',
   'Permissions bypassed: the agent acts without asking, in every chat.': 'Izin dilewati: agent bertindak tanpa bertanya, di semua chat.',
   'The key was not accepted. Check that you copied all of it, with no spaces.': 'Key ditolak. Pastikan tersalin utuh, tanpa spasi.',
-  'GripHub did not answer. Check your connection and try again.': 'GripHub tidak menjawab. Periksa koneksi lalu coba lagi.',
-  'GripHub could not load the models. Try again in a moment.': 'GripHub belum bisa memuat model. Coba lagi sebentar lagi.',
   "Offline: can't stop it from here. It stops by itself when it finishes; reconnect to stop it now.": 'Offline: tidak bisa dihentikan dari sini. Agent berhenti sendiri saat selesai; sambungkan lagi untuk menghentikannya sekarang.',
   'Not connected. The agent is still waiting for your answer: reconnect to answer.': 'Tidak tersambung. Agent masih menunggu jawabanmu: sambungkan lagi untuk menjawab.',
   'models available': 'model tersedia',
-  'GripHub connected': 'GripHub terhubung',
   'Save & load models': 'Simpan & muat model',
   'Enter your API key first.': 'Masukkan API key kamu dulu.',
   'Remove API key': 'Hapus API key',
   'Remove API key?': 'Hapus API key?',
   'The agent cannot use any model until you add a key again.':
       'Agent tidak bisa memakai model apa pun sampai kamu memasukkan key lagi.',
-  'Get a key at griphubrouter.web.id': 'Dapatkan key di griphubrouter.web.id',
   'Provider': 'Provider',
-  'Add your GripHub Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through GripHub.':
-      'Masukkan API key GripHub Router kamu dan dapatkan Claude, GPT, Gemini, DeepSeek, dan lainnya \u2014 semua lewat GripHub.',
-  'This build only connects to GripHub Router. Paste your API key and the models load automatically.':
-      'Build ini hanya terhubung ke GripHub Router. Tempel API key kamu dan model akan dimuat otomatis.',
-  'This build only connects to GripHub Router. One API key unlocks every model it serves.':
-      'Build ini hanya terhubung ke GripHub Router. Satu API key membuka semua model yang disajikannya.',
+  'Add your Rynex Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through Rynex.':
+      'Masukkan API key Rynex Router kamu dan dapatkan Claude, GPT, Gemini, DeepSeek, dan lainnya \u2014 semua lewat Rynex.',
 
   'Repositories': 'Repositori',
   'Accounts & servers': 'Akun & server',
@@ -234,7 +225,7 @@ const _id = <String, String>{
   // (The old '... and keys in one file' subtitle was removed: backups do
   // not contain keys, so claiming otherwise contradicted the backup screen.)
   'App lock': 'Kunci aplikasi',
-  'Fingerprint or screen lock when opening GripHub AI Agent': 'Sidik jari atau kunci layar saat membuka GripHub AI Agent',
+  'Fingerprint or screen lock when opening Rynex AI Agent': 'Sidik jari atau kunci layar saat membuka Rynex AI Agent',
   'Text size': 'Ukuran teks',
   'Compact layout': 'Tata letak ringkas',
   'Tighter spacing, more on screen': 'Jarak lebih rapat, lebih banyak konten',
@@ -245,9 +236,9 @@ const _id = <String, String>{
   'Large': 'Besar',
   'Huge': 'Sangat besar',
   // Lock screen
-  'GripHub AI Agent is locked': 'GripHub AI Agent terkunci',
+  'Rynex AI Agent is locked': 'Rynex AI Agent terkunci',
   'Unlock': 'Buka kunci',
-  'Unlock GripHub AI Agent': 'Buka kunci GripHub AI Agent',
+  'Unlock Rynex AI Agent': 'Buka kunci Rynex AI Agent',
   'No screen lock is set on this phone.': 'Belum ada kunci layar di HP ini.',
   // Chat
   'Attach': 'Lampirkan',
@@ -323,12 +314,12 @@ const _id = <String, String>{
   'Each chat can have its own folder to work in.': 'Setiap chat bisa punya folder kerjanya sendiri.',
   'Recent projects': 'Proyek terbaru',
   // App updates
-  'Installing the update closes GripHub AI Agent and stops the current run.':
-      'Memasang pembaruan akan menutup GripHub AI Agent dan menghentikan proses yang sedang berjalan.',
+  'Installing the update closes Rynex AI Agent and stops the current run.':
+      'Memasang pembaruan akan menutup Rynex AI Agent dan menghentikan proses yang sedang berjalan.',
   'Wait': 'Tunggu',
   'Install anyway': 'Tetap pasang',
-  'Allow GripHub AI Agent to install apps, then come back. The install continues on its own.':
-      'Izinkan GripHub AI Agent memasang aplikasi, lalu kembali. Pemasangan berlanjut otomatis.',
+  'Allow Rynex AI Agent to install apps, then come back. The install continues on its own.':
+      'Izinkan Rynex AI Agent memasang aplikasi, lalu kembali. Pemasangan berlanjut otomatis.',
   'Cancel the download?': 'Batalkan unduhan?',
   'What was downloaded so far is deleted. You can start again any time.':
       'Bagian yang sudah terunduh akan dihapus. Kamu bisa mulai lagi kapan saja.',
@@ -340,12 +331,12 @@ const _id = <String, String>{
   'Downloading': 'Mengunduh',
   'Update ready to install': 'Pembaruan siap dipasang',
   'Download failed': 'Unduhan gagal',
-  'GripHub AI Agent is up to date': 'GripHub AI Agent sudah versi terbaru',
+  'Rynex AI Agent is up to date': 'Rynex AI Agent sudah versi terbaru',
   'App updates': 'Pembaruan aplikasi',
   'Installed': 'Terpasang',
   'Starting…': 'Memulai…',
-  'You can leave GripHub AI Agent; the download continues in the background.':
-      'Kamu boleh keluar dari GripHub AI Agent; unduhan tetap berjalan di latar belakang.',
+  'You can leave Rynex AI Agent; the download continues in the background.':
+      'Kamu boleh keluar dari Rynex AI Agent; unduhan tetap berjalan di latar belakang.',
   "What's new": 'Yang baru',
   'Check for updates automatically': 'Periksa pembaruan otomatis',
   'Update now': 'Perbarui sekarang',
@@ -417,8 +408,6 @@ const _id = <String, String>{
   'Built in, no key needed': 'Bawaan, tanpa key',
   'The agent has web_search and web_fetch tools (DuckDuckGo, then Brave). Keys below are used first.':
       'Agent punya tool web_search dan web_fetch (DuckDuckGo, lalu Brave). Key di bawah dipakai lebih dulu.',
-  'The agent has web_search and web_fetch tools. GripHub search below runs first with the search models below, then the keys below, then DuckDuckGo.':
-      'Agent punya tool web_search dan web_fetch. Pencarian GripHub di bawah jalan duluan dengan model search di bawah, lalu key di bawah, lalu DuckDuckGo.',
   'web_search via Brave': 'web_search lewat Brave',
   'web_search via Tavily': 'web_search lewat Tavily',
   'web_search via TinyFish': 'web_search lewat TinyFish',
@@ -426,9 +415,9 @@ const _id = <String, String>{
   'OpenAI search model': 'Model search OpenAI',
   'Anthropic search model': 'Model search Anthropic',
   'Allow the agent to search the web in this project': 'Izinkan agent mencari di web dalam proyek ini',
-  'Responses API · GPT models · uses the saved GripHub key': 'Responses API · model GPT · pakai key GripHub yang tersimpan',
+  'Responses API · GPT models · uses the saved Rynex key': 'Responses API · model GPT · pakai key Rynex yang tersimpan',
   'Anthropic search': 'Pencarian Anthropic',
-  'Messages API · Claude models · uses the saved GripHub key': 'Messages API · model Claude · pakai key GripHub yang tersimpan',
+  'Messages API · Claude models · uses the saved Rynex key': 'Messages API · model Claude · pakai key Rynex yang tersimpan',
   'Optional API keys give faster, more reliable results. Add several to use them in turn:':
       'API key opsional membuat hasil lebih cepat dan andal. Tambahkan beberapa agar dipakai bergantian:',
   'Crawl': 'Crawl',
@@ -539,8 +528,6 @@ const _id = <String, String>{
   'Paste as text': 'Tempel sebagai teks',
   'This turn': 'Giliran ini',
   'subagent': 'subagent',
-  'No GripHub price is known for this model, so only its tokens are shown.':
-      'Harga GripHub untuk model ini tidak diketahui, jadi hanya tokennya yang ditampilkan.',
   "Couldn't reach the remote; showing the branches on this phone.":
       'Remote tidak terjangkau; menampilkan branch yang ada di HP ini.',
   'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':
@@ -583,10 +570,8 @@ const _id = <String, String>{
   'Remove container': 'Hapus container',
   'Frees the space; workspace files stay': 'Mengosongkan ruang; file workspace tetap ada',
   'Daily budget': 'Anggaran harian',
-  'GripHub credit': 'Kredit GripHub',
   'Top usage': 'Pemakaian terbanyak',
   'Account suspended': 'Akun ditangguhkan',
-  '1 credit = Rp 300 · prices as of Oct 2026': 'Kurs 1 kredit = Rp 300 · tarif per Okt 2026',
   'No limit': 'Tanpa batas',
   'This chat': 'Chat ini',
   'Limits': 'Batas',
@@ -619,8 +604,6 @@ const _id = <String, String>{
   'Paste': 'Tempel',
   'Continue': 'Lanjut',
   'Reload': 'Muat ulang',
-  'Sign in to a provider or add an API key: Anthropic, OpenAI, Gemini, OpenRouter and more.':
-      'Masuk ke provider atau tambahkan API key: Anthropic, OpenAI, Gemini, OpenRouter, dan lainnya.',
   'No changes': 'Tidak ada perubahan',
   'No models yet. Connect a provider to see its models here.':
       'Belum ada model. Hubungkan provider untuk melihat modelnya di sini.',
@@ -685,8 +668,8 @@ const _id = <String, String>{
   'New schedule': 'Jadwal baru',
   'Run a prompt every few hours, daily, or when a labelled GitHub issue appears.':
       'Jalankan prompt tiap beberapa jam, harian, atau saat muncul issue GitHub berlabel.',
-  'Schedules run while GripHub AI Agent is alive; a persistent notification keeps it running.':
-      'Jadwal berjalan selama GripHub AI Agent hidup; notifikasi permanen menjaganya tetap jalan.',
+  'Schedules run while Rynex AI Agent is alive; a persistent notification keeps it running.':
+      'Jadwal berjalan selama Rynex AI Agent hidup; notifikasi permanen menjaganya tetap jalan.',
   'Open chat': 'Buka chat',
   'Run now': 'Jalankan sekarang',
   'Interval': 'Interval',
@@ -818,7 +801,7 @@ const _id = <String, String>{
   'min ago': 'mnt lalu',
   'h ago': 'jam lalu',
   'Sync to GitHub?': 'Sinkronkan ke GitHub?',
-  'GripHub AI Agent creates a private repository griphub-sync in your GitHub account and keeps your chats, projects and settings there.': 'GripHub AI Agent membuat repository private griphub-sync di akun GitHub kamu dan menyimpan chat, proyek, serta pengaturan di sana.',
+  'Rynex AI Agent creates a private repository rynex-sync in your GitHub account and keeps your chats, projects and settings there.': 'Rynex AI Agent membuat repository private rynex-sync di akun GitHub kamu dan menyimpan chat, proyek, serta pengaturan di sana.',
   'Provider keys and tokens are never uploaded. Chats can still contain anything you pasted into them, so keep the repository private.': 'Key provider dan token tidak pernah diunggah. Chat tetap bisa berisi apa pun yang pernah kamu tempel, jadi biarkan repository-nya private.',
   'Turn on': 'Nyalakan',
   'GitHub sync': 'Sinkron GitHub',
@@ -859,12 +842,8 @@ const _id = <String, String>{
       'File environment (.env) ikut disimpan, jadi undo juga mengembalikannya.',
   'These chats were deleted on another phone. Delete them here too, or keep them (they will no longer sync).':
       'Chat ini dihapus di perangkat lain. Hapus juga di sini, atau biarkan (tidak lagi tersinkron).',
-  'A special build powered by GripHub Router \u2014 Claude, GPT, Gemini, DeepSeek and more behind one API key. This app talks to GripHub only: add your key and start building.':
-      'Build spesial yang ditenagai GripHub Router \u2014 Claude, GPT, Gemini, DeepSeek, dan lainnya di balik satu API key. Aplikasi ini hanya terhubung ke GripHub: masukkan API key kamu dan mulai berkarya.',
   'Maintains this modified build: custom providers, GitHub releases and in-app updates, GitHub sync.':
       'Mengelola versi modifikasi ini: provider kustom, rilis GitHub dan update di dalam app, serta sinkron GitHub.',
-  'Projects live in the GripHub AI Agent workspace. To bring in files from your phone, open a project and use Files → Import from phone.': 'Proyek disimpan di workspace GripHub AI Agent. Untuk memasukkan file dari HP, buka sebuah proyek lalu pakai File → Impor dari HP.',
-  'To work in Download, Documents or any other folder on your phone, GripHub AI Agent needs "All files access". Turn it on for GripHub AI Agent on the next screen, then come back.': 'Untuk bekerja di Download, Documents, atau folder lain di HP, GripHub AI Agent butuh izin "Akses semua file". Nyalakan untuk GripHub AI Agent di layar berikutnya, lalu kembali ke sini.',
   'GitHub sync is off': 'Sinkron GitHub mati',
   // Notifications
   'Task done': 'Task selesai',
@@ -988,11 +967,9 @@ const _id = <String, String>{
   'Writes outside the project folder': 'Menulis di luar folder proyek',
   'Writes inside a .git folder: git runs what is written there': 'Menulis di dalam folder .git: git menjalankan apa yang tertulis di sana',
   'External tool from an MCP server': 'Tool eksternal dari server MCP',
-  'This starts a subagent that works on its own and spends credits':
-      'Ini memulai subagent yang bekerja sendiri dan memakai kredit',
+  'This starts a subagent that works on its own and spends money':
+      'Ini memulai subagent yang bekerja sendiri dan memakai biaya',
   'Set a daily limit?': 'Atur batas harian?',
-  'The agent stops starting requests once a day\'s spend reaches it. 1 credit = Rp 300. You can change it later in Settings, under Usage & budget.':
-      'Agent berhenti memulai permintaan begitu pengeluaran sehari mencapainya. 1 kredit = Rp 300. Bisa diubah nanti di Pengaturan, di Pemakaian & anggaran.',
   'a day': 'per hari',
   'No daily limit: tap to set one': 'Tanpa batas harian: ketuk untuk mengatur',
   'No cost limit: a subagent keeps spending until its time limit or your daily budget stops it. Up to 3 run at once.':
@@ -1002,12 +979,10 @@ const _id = <String, String>{
   'Approval required for every change': 'Setiap perubahan butuh persetujuan',
   'Enter a number, like 2 or 1.5': 'Masukkan angka, misalnya 2 atau 1,5',
   'Advanced': 'Lanjutan',
-  'Built-in GripHub app': 'App bawaan GripHub',
+  'Built-in Rynex app': 'App bawaan Rynex',
   'credits': 'kredit',
   '{n} per day': '{n} per hari',
   'Earliest batch expires {date} ({n})': 'Batch paling cepat kedaluwarsa {date} ({n})',
-  'Estimated from the rates of 25 Oct 2026 · total ≈ {rp} · the exact figure is on the GripHub credit card above':
-      'Perkiraan dari tarif 25 Okt 2026 · total ≈ {rp} · angka pasti ada di kartu Kredit GripHub di atas',
   'Cost per day': 'Biaya per hari',
   'Tokens per day': 'Token per hari',
   'Peak': 'Puncak',
@@ -1125,9 +1100,6 @@ const _id = <String, String>{
   // Image generation
   'Generate image': 'Buat gambar',
   'Generate an image': 'Buat gambar',
-  'Connect GripHub first': 'Hubungkan GripHub dulu',
-  'Image generation uses the same GripHub API key as chat. Add it once, then come back here.':
-      'Buat gambar memakai API key GripHub yang sama dengan chat. Tambahkan sekali, lalu kembali ke sini.',
   'Prompt': 'Prompt',
   'A blue paper plane, flat icon': 'Sebuah pesawat kertas biru, ikon datar',
   'Generation takes 20–120 seconds. You are billed per image, only when it succeeds.':
@@ -1140,7 +1112,6 @@ const _id = <String, String>{
   'Describe the image first.': 'Jelaskan dulu gambarnya.',
   'Pick a model first.': 'Pilih dulu modelnya.',
   'The endpoint returned no image data': 'Endpoint tidak mengembalikan data gambar',
-  'The API key was rejected. Check the key in GripHub settings.': 'API key ditolak. Periksa key di pengaturan GripHub.',
   'The image endpoint is not available for this provider.': 'Endpoint gambar tidak tersedia untuk provider ini.',
   'Taking longer than 3 minutes. The image may still have been created; try again in a moment.':
       'Sudah lebih dari 3 menit. Gambarnya mungkin tetap berhasil dibuat; coba lagi sebentar lagi.',
@@ -1148,17 +1119,12 @@ const _id = <String, String>{
   'Could not save the image.': 'Gambar gagal disimpan.',
   'Share': 'Bagikan',
   'History': 'Riwayat',
-  'Make pictures with GripHub image models': 'Buat gambar dengan model gambar GripHub',
+  'Make pictures with Rynex image models': 'Buat gambar dengan model gambar Rynex',
   // Tahap 4: strings that used to bypass tr() or had no Indonesian entry.
-  // Welcome carousel, rewritten for GripHub.
-  'GripHub AI Agent': 'GripHub AI Agent',
-  'One GripHub key, every AI model.': 'Satu kunci GripHub, semua model AI.',
+  // Welcome carousel, rewritten for Rynex.
+  'Rynex AI Agent': 'Rynex AI Agent',
   '50+ models,\none key': '50+ model,\nsatu kunci',
-  'Claude, GPT, Gemini, DeepSeek and more, paid with GripHub credits — 1 credit = Rp 300.':
-      'Claude, GPT, Gemini, DeepSeek, dan lainnya, dibayar dengan kredit GripHub — 1 kredit = Rp 300.',
   'Add your key\nto start': 'Tambahkan kuncimu\nuntuk memulai',
-  'Paste your GripHub Router API key. The model list loads itself — nothing else to configure.':
-      'Tempel API key GripHub Router-mu. Daftar model termuat sendiri — tidak ada lagi yang perlu diatur.',
   'Next': 'Lanjut',
   'Android shell': 'Shell Android',
   'Confirm deploy': 'Konfirmasi deploy',
@@ -1189,8 +1155,8 @@ const _id = <String, String>{
   'credit': 'kredit',
   'Folder': 'Folder',
   'No upstream': 'Tanpa upstream',
-  "The agent stops starting new requests once today's spend reaches this, in GripHub credits. Leave empty for no limit.":
-      'Agent berhenti memulai request baru begitu pengeluaran hari ini mencapai batas ini, dalam kredit GripHub. Kosongkan untuk tanpa batas.',
+  "The agent stops starting new requests once today's spend reaches this, in Rynex credits. Leave empty for no limit.":
+      'Agent berhenti memulai request baru begitu pengeluaran hari ini mencapai batas ini, dalam kredit Rynex. Kosongkan untuk tanpa batas.',
   'Branch: gh-pages — your working branch is not touched.': 'Branch: gh-pages — branch kerjamu tidak disentuh.',
   'Only this folder is uploaded (no .env, dotfiles, node_modules, symlinks).':
       'Hanya folder ini yang diunggah (tanpa .env, dotfile, node_modules, symlink).',
@@ -1298,7 +1264,6 @@ const _id = <String, String>{
   'No time limit': 'Tanpa batas waktu',
   'Cost limit': 'Batas biaya',
   'Time limit': 'Batas waktu',
-  'Credits, e.g. 40': 'Kredit, mis. 40',
   'Minutes, e.g. 45': 'Menit, mis. 45',
   'A subagent stops at its next step once its estimated cost reaches the limit.': 'Subagent berhenti di langkah berikutnya begitu perkiraan biayanya mencapai batas.',
   'Counted from when the subagent starts; it then stops with a partial report.': 'Dihitung sejak subagent mulai; lalu berhenti dengan laporan parsial.',
@@ -1338,19 +1303,16 @@ const _id = <String, String>{
   'Provider keys, tokens and app settings are not included; set them up again after a restore.': 'Key provider, token, dan pengaturan aplikasi tidak disertakan; atur ulang setelah restore.',
   'Chats, skills and schedules in one file': 'Chat, skill, dan jadwal dalam satu file',
   '{name} was changed outside the editor, probably by the agent. Overwrite replaces those changes with yours; Reload drops your edits and shows the new file.': '{name} diubah di luar editor, kemungkinan oleh agent. Timpa mengganti perubahan itu dengan milik Anda; Muat ulang membuang editan Anda dan menampilkan file terbaru.',
-  '1 credit = Rp 300': '1 kredit = Rp 300',
   '1 request': '1 request',
   '{n} requests': '{n} request',
   '{n} images': '{n} gambar',
   'Charged by model': 'Tagihan per model',
   'Cost so far': 'Biaya sejauh ini',
-  'Credit is running low. Top up at griphubrouter.web.id to keep the agent working.': 'Kredit hampir habis. Isi ulang di griphubrouter.web.id agar agent tetap bisa bekerja.',
   "Each request costs at least its model's minimum (floor). Failed requests are not charged.": 'Setiap request ditagih minimal sebesar harga minimum (floor) modelnya. Request yang gagal tidak ditagih.',
   'Estimated cost': 'Perkiraan biaya',
-  "Estimated from this phone's chats at GripHub's live rates and minimums · total ≈ {rp}. What was actually charged is in the account card above.": 'Perkiraan dari chat di HP ini dengan tarif dan harga minimum GripHub terkini · total ≈ {rp}. Tagihan sebenarnya ada di kartu akun di atas.',
-  "Estimated per request at GripHub's live rate, including cache and each model's minimum; the exact charge is in Usage.": 'Perkiraan per request dengan tarif GripHub terkini, termasuk cache dan harga minimum tiap model; tagihan pastinya ada di Pemakaian.',
+  "Estimated from this phone's chats at Rynex's live rates and minimums · total ≈ {rp}. What was actually charged is in the account card above.": 'Perkiraan dari chat di HP ini dengan tarif dan harga minimum Rynex terkini · total ≈ {rp}. Tagihan sebenarnya ada di kartu akun di atas.',
+  "Estimated per request at Rynex's live rate, including cache and each model's minimum; the exact charge is in Usage.": 'Perkiraan per request dengan tarif Rynex terkini, termasuk cache dan harga minimum tiap model; tagihan pastinya ada di Pemakaian.',
   'From cache': 'Dari cache',
-  'GripHub account': 'Akun GripHub',
   'Minimum': 'Minimum',
   'Models are up to date ({n}).': 'Model sudah terbaru ({n}).',
   'No thinking': 'Tanpa berpikir',
@@ -1362,7 +1324,6 @@ const _id = <String, String>{
   'Recent requests': 'Request terakhir',
   'Show all': 'Tampilkan semua',
   'Show less': 'Tampilkan lebih sedikit',
-  'The budget counts what GripHub charged your account today (WIB), plus work still running.': 'Budget menghitung tagihan GripHub ke akun kamu hari ini (WIB), ditambah pekerjaan yang masih berjalan.',
   'This phone': 'HP ini',
   'Tokens billed': 'Token ditagih',
   'Update models': 'Perbarui model',
@@ -1378,13 +1339,8 @@ const _id = <String, String>{
   '{a} of the {b} daily budget': '{a} dari budget harian {b}',
   '{n} ({m} at the minimum)': '{n} ({m} kena harga minimum)',
   '{n} ({m}% cache)': '{n} ({m}% cache)',
-  '{n} credits / 1M': '{n} kredit / 1jt',
-  '{n} credits / 1M tokens': '{n} kredit / 1jt token',
   '{n} expire {date}': '{n} kedaluwarsa {date}',
   '{n}% cache': '{n}% cache',
-  'GripHub Router: ': 'GripHub Router: ',
-  'No GripHub key saved': 'Belum ada key GripHub tersimpan',
-  'GripHub Router is rate limiting; try again shortly': 'GripHub Router sedang membatasi request; coba lagi sebentar lagi',
   // Server agent (server_agent.md)
   'Phone': 'HP',
   'Reconnecting': 'Menyambung ulang',
@@ -1423,7 +1379,6 @@ const _id = <String, String>{
   'The disk is almost full. New work is refused until space is freed.': 'Disk hampir penuh. Pekerjaan baru ditolak sampai ada ruang kosong.',
   'Disk space is getting low.': 'Ruang disk mulai sedikit.',
   '1 · Set up the server': '1 · Siapkan server',
-  'On the server (Ubuntu or Debian) run bootstrap.sh from the server/ folder of the GripHub repository, as root, with this app\'s key:': 'Di server (Ubuntu atau Debian), jalankan bootstrap.sh dari folder server/ repositori GripHub sebagai root, dengan kunci app ini:',
   'Server address (name or IP)': 'Alamat server (nama atau IP)',
   'command': 'perintah',
   '2 · Paste the setup code': '2 · Tempel kode setup',
@@ -1461,9 +1416,9 @@ const _id = <String, String>{
   'Set up; this phone runs the agent': 'Sudah disiapkan; HP ini yang menjalankan agent',
   'Run the agent on your own VPS, around the clock': 'Jalankan agent di VPS Anda sendiri, 24 jam',
   'Connected. The agent is running on the server.': 'Tersambung. Agent berjalan di server.',
-  'Connected, but the agent is not running on the server. Start it with: systemctl --user start griphub-hostd (as the griphub user), or press Install / update.': 'Tersambung, tetapi agent tidak berjalan di server. Jalankan dengan: systemctl --user start griphub-hostd (sebagai user griphub), atau tekan Pasang / perbarui.',
+  'Connected, but the agent is not running on the server. Start it with: systemctl --user start rynex-hostd (as the rynex user), or press Install / update.': 'Tersambung, tetapi agent tidak berjalan di server. Jalankan dengan: systemctl --user start rynex-hostd (sebagai user rynex), atau tekan Pasang / perbarui.',
   'Connected. The agent is not installed on the server yet: press Install / update.': 'Tersambung. Agent belum dipasang di server: tekan Pasang / perbarui.',
-  'Connected, but the server is not set up (no griphub-attach). Run the server script on it first; the app shows the command.': 'Tersambung, tetapi server belum disiapkan (tidak ada griphub-attach). Jalankan dulu skrip server di sana; app menampilkan perintahnya.',
+  'Connected, but the server is not set up (no rynex-attach). Run the server script on it first; the app shows the command.': 'Tersambung, tetapi server belum disiapkan (tidak ada rynex-attach). Jalankan dulu skrip server di sana; app menampilkan perintahnya.',
   'Connected, but the server answered something unexpected.': 'Tersambung, tetapi server menjawab hal yang tidak terduga.',
   'The server did not accept this app\'s key. Run the server script with this app\'s public key (the app shows the command).': 'Server tidak menerima kunci app ini. Jalankan skrip server dengan kunci publik app ini (app menampilkan perintahnya).',
   // Files on the server (server_agent.md, phase 5)
@@ -1499,7 +1454,7 @@ const _id = <String, String>{
   'Doing this now stops the command it is running.': 'Melakukan ini sekarang menghentikan perintah yang sedang dijalankannya.',
   'Do it anyway': 'Tetap lakukan',
   "Run the agent's commands on the server itself?": 'Jalankan perintah agent langsung di server?',
-  'Without the box, every command the agent runs happens directly on the server, as the griphub user. The box is what keeps an apt install or a careless command from touching the server. Turn it off only if you know why.': 'Tanpa box, setiap perintah agent berjalan langsung di server sebagai user griphub. Box-lah yang menjaga apt install atau perintah ceroboh agar tidak menyentuh server. Matikan hanya jika Anda tahu alasannya.',
+  'Without the box, every command the agent runs happens directly on the server, as the rynex user. The box is what keeps an apt install or a careless command from touching the server. Turn it off only if you know why.': 'Tanpa box, setiap perintah agent berjalan langsung di server sebagai user rynex. Box-lah yang menjaga apt install atau perintah ceroboh agar tidak menyentuh server. Matikan hanya jika Anda tahu alasannya.',
   'Turn the box off': 'Matikan box',
   'Rebuild the box image?': 'Bangun ulang image box?',
   "Builds the image again from the Containerfile on the server (a few minutes) and then throws the current container away, so the next command starts a fresh one. Anything installed inside it with apt is lost; the workspace and the box's home folder are kept.": 'Membangun image lagi dari Containerfile di server (beberapa menit), lalu membuang container yang sekarang sehingga perintah berikutnya memulai yang baru. Apa pun yang dipasang di dalamnya dengan apt hilang; workspace dan folder home box tetap.',
@@ -1531,7 +1486,7 @@ const _id = <String, String>{
   'Its ssh and git settings, history and saved files': 'Pengaturan ssh dan git, riwayat, dan file yang disimpan',
   'memory': 'memori',
   'swap': 'swap',
-  'Set in ~/.griphub/box.conf on the server; they apply when the container is next made.': 'Diatur di ~/.griphub/box.conf di server; berlaku saat container dibuat berikutnya.',
+  'Set in ~/.rynex/box.conf on the server; they apply when the container is next made.': 'Diatur di ~/.rynex/box.conf di server; berlaku saat container dibuat berikutnya.',
   'Not started yet': 'Belum dinyalakan',
   'Not built': 'Belum dibangun',
   'Unknown': 'Tidak diketahui',
@@ -1583,7 +1538,7 @@ const _id = <String, String>{
   'Restarting the agent failed: {error}': 'Gagal menjalankan ulang agent: {error}',
   'Saving goes back to the agent on this phone until the new server is tested and switched on. The current server keeps its chats and keeps running.': 'Menyimpan akan kembali ke agent di HP ini sampai server baru dites dan dinyalakan. Server yang sekarang tetap menyimpan chat-nya dan tetap berjalan.',
   'Test the connection and install the agent first': 'Tes koneksi dan pasang agent dulu',
-  'That is not a setup code. It starts with "griphub1:" and the server script prints it at the end.': 'Itu bukan kode setup. Kode setup diawali "griphub1:" dan dicetak skrip server di bagian akhir.',
+  'That is not a setup code. It starts with "rynex1:" and the server script prints it at the end.': 'Itu bukan kode setup. Kode setup diawali "rynex1:" dan dicetak skrip server di bagian akhir.',
   'The address in the setup code is not valid: "{value}".': 'Alamat di kode setup tidak valid: "{value}".',
   'The agent is restarting.': 'Agent sedang dijalankan ulang.',
   'The agent on this phone is working. Switching now stops it.': 'Agent di HP ini sedang bekerja. Beralih sekarang akan menghentikannya.',
@@ -1594,7 +1549,7 @@ const _id = <String, String>{
   'The server script could not tell its address. Run it again with --address <name or IP of the server>.': 'Skrip server tidak bisa mengetahui alamatnya. Jalankan lagi dengan --address <nama atau IP server>.',
   'The setup code has no host key, so the app could not tell your server from an impostor. Install openssh-server on the server and run the script again.': 'Kode setup tidak berisi host key, jadi app tidak bisa membedakan server Anda dari peniru. Pasang openssh-server di server lalu jalankan skripnya lagi.',
   'The setup code is damaged.': 'Kode setup rusak.',
-  'The setup code is damaged. Copy the whole line again, from "griphub1:" to the end.': 'Kode setup rusak. Salin lagi seluruh barisnya, dari "griphub1:" sampai akhir.',
+  'The setup code is damaged. Copy the whole line again, from "rynex1:" to the end.': 'Kode setup rusak. Salin lagi seluruh barisnya, dari "rynex1:" sampai akhir.',
   'The setup command is the setup file and that line in one paste. Or send the file to the server (for example with an SFTP app) and run that line next to it.': 'Perintah setup berisi file setup dan baris itu dalam satu tempelan. Atau kirim file-nya ke server (misalnya lewat app SFTP) lalu jalankan baris itu di folder yang sama.',
   'The user name in the setup code is not valid: "{value}".': 'Nama pengguna di kode setup tidak valid: "{value}".',
   'There is no agent bundle to copy ({path} is missing).': 'Tidak ada bundle agent untuk disalin ({path} tidak ada).',
@@ -1681,7 +1636,7 @@ const _id = <String, String>{
   '"Host key" warning': 'Peringatan "host key"',
   'Do not continue unless you reinstalled the server; then run the setup again and paste the new code.': 'Jangan lanjutkan kecuali Anda memang memasang ulang server; lalu jalankan setup lagi dan tempel kode yang baru.',
   'This phone was lost': 'HP ini hilang',
-  'On the server, remove the line ending in griphub-app from /home/griphub/.ssh/authorized_keys. Then set up the new phone with the setup command.': 'Di server, hapus baris yang berakhiran griphub-app dari /home/griphub/.ssh/authorized_keys. Lalu siapkan HP baru dengan perintah setup.',
+  'On the server, remove the line ending in rynex-app from /home/rynex/.ssh/authorized_keys. Then set up the new phone with the setup command.': 'Di server, hapus baris yang berakhiran rynex-app dari /home/rynex/.ssh/authorized_keys. Lalu siapkan HP baru dengan perintah setup.',
   "This kind of link can't be opened.": 'Jenis link ini tidak bisa dibuka.',
   'Open this link outside the app?': 'Buka link ini di luar aplikasi?',
   'It opens in your browser.': 'Link akan dibuka di browser.',
@@ -1735,8 +1690,8 @@ const _id = <String, String>{
   // Automatic server backup
   'Automatic server backup': 'Backup otomatis server',
   'Automatic backup on this phone': 'Backup otomatis di HP ini',
-  'Every hour when something changed: chats, projects, skills and schedules, encrypted into Download/GripHub/auto (the newest three). API keys and accounts are never in it. To survive a lost phone, the folder must leave it — a sync app or a copy — and the recovery code must be written down somewhere safe.':
-      'Setiap jam bila ada yang berubah: chat, proyek, skill, dan jadwal, terenkripsi ke Download/GripHub/auto (tiga terbaru). Kunci API dan akun tidak pernah ikut. Agar selamat saat HP hilang, foldernya harus keluar dari HP — aplikasi sinkronisasi atau salinan — dan kode pemulihan dicatat di tempat aman.',
+  'Every hour when something changed: chats, projects, skills and schedules, encrypted into Download/Rynex/auto (the newest three). API keys and accounts are never in it. To survive a lost phone, the folder must leave it — a sync app or a copy — and the recovery code must be written down somewhere safe.':
+      'Setiap jam bila ada yang berubah: chat, proyek, skill, dan jadwal, terenkripsi ke Download/Rynex/auto (tiga terbaru). Kunci API dan akun tidak pernah ikut. Agar selamat saat HP hilang, foldernya harus keluar dari HP — aplikasi sinkronisasi atau salinan — dan kode pemulihan dicatat di tempat aman.',
   'Could not read the backup status': 'Status backup tidak terbaca',
   'Turn automatic backups off?': 'Matikan backup otomatis?',
   'The backups made so far are deleted, and the recovery code stops working.': 'Backup yang sudah dibuat dihapus, dan kode pemulihan berhenti berlaku.',
@@ -1794,14 +1749,14 @@ const _id = <String, String>{
       'Pasang aplikasi ntfy, langganan topik yang persis sama dengan yang tampil di layar server, lalu pakai "Kirim notifikasi uji". Notifikasi hanya datang saat aplikasi ditutup atau di latar belakang.',
   'Its reason is under Settings > Backup & restore. Usually the disk is full; free some space and use "Back up now".':
       'Alasannya ada di Pengaturan > Backup & pulihkan. Biasanya disk penuh; kosongkan sebagian lalu pakai "Backup sekarang".',
-  'Memory, swap and CPUs for the box are set in ~/.griphub/box.conf on the server.':
-      'Memori, swap dan CPU untuk box diatur di ~/.griphub/box.conf di server.',
+  'Memory, swap and CPUs for the box are set in ~/.rynex/box.conf on the server.':
+      'Memori, swap dan CPU untuk box diatur di ~/.rynex/box.conf di server.',
   'Notifications do not arrive':
       'Notifikasi tidak masuk',
-  'On the server, as root, paste it into the terminal. It takes a few minutes and prints a setup code (griphub1:…). Run it again any time: it only repairs and updates.':
-      'Di server, sebagai root, tempel ke terminal. Prosesnya beberapa menit lalu mencetak setup code (griphub1:…). Boleh dijalankan lagi kapan saja: hanya memperbaiki dan memperbarui.',
-  'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the griphub account, without the box\'s walls. Leave it on unless the box cannot be built, or its commands hang (see When something goes wrong).':
-      'Nyala: setiap perintah agent berjalan di dalam box. Mati: perintah langsung berjalan di server sebagai akun griphub, tanpa dinding box. Biarkan menyala kecuali box tidak bisa dibangun, atau perintahnya macet (lihat Bila ada masalah).',
+  'On the server, as root, paste it into the terminal. It takes a few minutes and prints a setup code (rynex1:…). Run it again any time: it only repairs and updates.':
+      'Di server, sebagai root, tempel ke terminal. Prosesnya beberapa menit lalu mencetak setup code (rynex1:…). Boleh dijalankan lagi kapan saja: hanya memperbaiki dan memperbarui.',
+  'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the rynex account, without the box\'s walls. Leave it on unless the box cannot be built, or its commands hang (see When something goes wrong).':
+      'Nyala: setiap perintah agent berjalan di dalam box. Mati: perintah langsung berjalan di server sebagai akun rynex, tanpa dinding box. Biarkan menyala kecuali box tidak bisa dibangun, atau perintahnya macet (lihat Bila ada masalah).',
   'Background jobs': 'Pekerjaan latar',
   'this chat': 'chat ini',
   "These accounts are the server's: the agent there signs in to them, so what you connect on this phone's own agent does not carry over.":
@@ -1841,8 +1796,8 @@ const _id = <String, String>{
       'Backup otomatis gagal',
   'The box':
       'Box',
-  'The box is a container (rootless Podman) on your server where the agent\'s commands run. Root inside it is only the griphub account outside, so a command cannot touch the rest of the server.':
-      'Box adalah container (Podman rootless) di server tempat perintah agent berjalan. Root di dalamnya hanyalah akun griphub di luar, jadi perintah tidak bisa menyentuh bagian server lainnya.',
+  'The box is a container (rootless Podman) on your server where the agent\'s commands run. Root inside it is only the rynex account outside, so a command cannot touch the rest of the server.':
+      'Box adalah container (Podman rootless) di server tempat perintah agent berjalan. Root di dalamnya hanyalah akun rynex di luar, jadi perintah tidak bisa menyentuh bagian server lainnya.',
   'The box is switched on but its image is not built yet. Build it in Settings > The agent\'s box, or turn the box off there to run commands on the server itself.':
       'Box menyala tetapi image-nya belum dibangun. Bangun di Pengaturan > Box agent, atau matikan box di sana agar perintah berjalan langsung di server.',
   'The key is made on this phone and given to the server: the server needs it to write backups. A copy that leaves the phone or the server cannot be read without it.':
@@ -1880,6 +1835,11 @@ const _id = <String, String>{
   'This chat passed {n} tokens, the limit set in Settings > Usage.': 'Chat ini melewati {n} token, batas yang diatur di Pengaturan > Usage.',
   'Could not summarize the context': 'Konteks gagal diringkas',
   'Summary stopped': 'Ringkasan dihentikan',
+  'Daily budget of \${cap} reached (\${spent} spent today). Raise it in Settings → Usage.':
+      'Batas harian sebesar \${cap} tercapai (terpakai \${spent} hari ini). Naikkan di Pengaturan → Pemakaian.',
+  'Made by seseegy': 'Dibuat oleh seseegy',
+  'An AI coding agent on your phone. Bring your own provider: sign in with an account, use an API key, or point Rynex at your own server.':
+      'Agent coding AI di HP kamu. Pakai providermu sendiri: masuk dengan akun, gunakan kunci API, atau arahkan Rynex ke servermu sendiri.',
   'API key': 'Kunci API',
   'Add endpoint': 'Tambah endpoint',
   'Any server speaking one of these APIs: Ollama, LM Studio, vLLM, a proxy or your own gateway.': 'Server mana pun yang memakai salah satu API ini: Ollama, LM Studio, vLLM, proxy, atau gateway milikmu.',

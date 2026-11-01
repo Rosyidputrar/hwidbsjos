@@ -12,7 +12,7 @@ import { bundle, tempDir } from "./helpers.mjs";
 
 const { Hub, LineBuffer, listenOnSocket } = await bundle("transport");
 
-// The whole path from the phone to the daemon, with a real sshd: ssh -> sshd -> griphub-attach -> the daemon's socket.
+// The whole path from the phone to the daemon, with a real sshd: ssh -> sshd -> rynex-attach -> the daemon's socket.
 // The sshd is a private one started here, as the current user, on a loopback port, with throwaway keys. The key is
 // authorised with the exact restrictions server/bootstrap.sh gives the app's key (read from that file, so the two
 // cannot drift apart).
@@ -30,9 +30,9 @@ const hasSsh = (() => {
 })();
 const SKIP = !SSHD || !hasSsh ? "needs sshd and the ssh client" : false;
 // CI installs sshd for these; there a missing one is a broken setup, not a reason to skip.
-if (SKIP && process.env.GRIPHUB_REQUIRE_SSHD === "1") throw new Error(`GRIPHUB_REQUIRE_SSHD is set, but this machine ${SKIP}`);
+if (SKIP && process.env.RYNEX_REQUIRE_SSHD === "1") throw new Error(`RYNEX_REQUIRE_SSHD is set, but this machine ${SKIP}`);
 
-const ATTACH = fileURLToPath(new URL("../../server/griphub-attach", import.meta.url));
+const ATTACH = fileURLToPath(new URL("../../server/rynex-attach", import.meta.url));
 const BOOTSTRAP = fileURLToPath(new URL("../../server/bootstrap.sh", import.meta.url));
 const KEY_OPTIONS = /^KEY_OPTIONS='(.*)'$/m.exec(readFileSync(BOOTSTRAP, "utf8"))?.[1] ?? "";
 
@@ -100,7 +100,7 @@ async function startSshd(t) {
 
 /** Starts the real attach program on the far side of ssh. */
 function sshAttach(t, s, sock) {
-	const child = spawn("ssh", [...s.sshArgs(), s.target, `env GRIPHUB_SOCK=${sock} ${process.execPath} ${ATTACH}`], { stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawn("ssh", [...s.sshArgs(), s.target, `env RYNEX_SOCK=${sock} ${process.execPath} ${ATTACH}`], { stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => void child.kill("SIGKILL"));
 	const records = [];
 	let stderr = "";

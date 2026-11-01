@@ -55,7 +55,7 @@ class FakeBackend implements AgentBackend {
         say(hello);
         say({'type': 'ready', 'version': 'test'});
       } else if (plan == null) {
-        stderr('griphub-attach: cannot connect to /x/host.sock: the host is not running (ECONNREFUSED)');
+        stderr('rynex-attach: cannot connect to /x/host.sock: the host is not running (ECONNREFUSED)');
         exit(3);
       }
     });
