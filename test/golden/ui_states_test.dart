@@ -208,7 +208,7 @@ void statusBarTests() {
       final before = Appearance.instance.value;
       addTearDown(() => Appearance.instance.value = before);
       Appearance.instance.value = mode;
-      await tester.pumpWidget(GripHubApp(agent: newAgent()));
+      await tester.pumpWidget(RynexApp(agent: newAgent()));
       await tester.pump(const Duration(milliseconds: 300));
       // The app's own region, above every screen (onboarding and the boot screens have no AppBar).
       final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(find.byType(AnnotatedRegion<SystemUiOverlayStyle>).first);

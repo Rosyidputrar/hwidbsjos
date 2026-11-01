@@ -27,7 +27,7 @@ void main() {
 }
 
 class RynexApp extends StatelessWidget {
-  const GripHubApp({super.key, required this.agent});
+  const RynexApp({super.key, required this.agent});
   final AgentController agent;
 
   @override
