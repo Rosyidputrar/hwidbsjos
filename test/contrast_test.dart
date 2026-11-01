@@ -63,8 +63,8 @@ void accentTextTests() {
   });
 
   test('UI-09: an accent that already reads is used as it is, and only the text colour changes', () {
-    final violet = Palette.light.copyWith(accent: accentChoices[0].$1);
-    expect(violet.accentText, violet.accent, reason: 'violet passes as it is');
+    final indigo = Palette.light.copyWith(accent: accentChoices[7].$1);
+    expect(indigo.accentText, indigo.accent, reason: 'indigo passes as it is');
     final green = Palette.light.copyWith(accent: accentChoices[2].$1);
     expect(contrast(green.accent, Palette.light.bg), lessThan(4.5), reason: 'green really did fail as text');
     expect(green.accentText, isNot(green.accent));

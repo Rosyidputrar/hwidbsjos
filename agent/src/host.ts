@@ -2120,10 +2120,10 @@ async function main() {
 	// either (see SettingsManager); the app's own inline extension is
 	// unaffected, it is not a project extension.
 	settingsManager = SettingsManager.create(workspace, agentDir, { projectTrusted: false });
-	// pi keeps the prompt cache warm with extra 1-token requests. On Rynex
-	// each re-reads the whole cached prompt at the full rate (one opus warm-up
-	// cost ~1.3 credits), so they cost more than the cache saves. Off unless
-	// the user turned it on themselves.
+	// pi keeps the prompt cache warm with extra 1-token requests. Each one
+	// re-reads the whole cached prompt at the full rate, so on a paid provider
+	// they cost more than the cache saves. Off unless the user turned it on
+	// themselves.
 	if ((settingsManager as any).globalSettings?.cacheWarming === undefined) {
 		settingsManager.setCacheWarmingMode("off");
 		await settingsManager.flush();

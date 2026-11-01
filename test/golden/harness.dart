@@ -101,7 +101,7 @@ class FakeHost {
     'compactAt': stored['compactAt'],
     'compactAtShare': 0.65,
     'compactAtFloor': 300000,
-    'subagentCreditLimit': stored['subagentCreditLimit'] ?? 50,
+    'subagentCostLimit': stored['subagentCostLimit'] ?? 5,
     'subagentMinutesLimit': stored['subagentMinutesLimit'] ?? 30,
     'subagentApprovalMode': stored['subagentApprovalMode'] ?? stored['approvalMode'] ?? 'ask_risky',
     'subagentNotifyDone': stored['subagentNotifyDone'] ?? true,

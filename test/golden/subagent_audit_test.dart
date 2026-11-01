@@ -169,17 +169,17 @@ void main() {
       expect(find.textContaining('No time limit'), findsOneWidget);
     });
 
-    testWidgets('16. custom field is prefilled; decimals work for credits, minutes say why not', (tester) async {
+    testWidgets('16. custom field is prefilled; decimals work for dollars, minutes say why not', (tester) async {
       host = FakeHost(); // inside the fake-async zone, or replies never arrive
-      host.stored['subagentCreditLimit'] = 37;
+      host.stored['subagentCostLimit'] = 37;
       await pumpSettings(tester);
-      await tester.tap(find.text('Custom: 37 credits'));
+      await tester.tap(find.text('Custom: \$37'));
       await settle(tester);
       expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, '37');
       await tester.enterText(find.byType(TextField), '2.5');
       await tester.tap(find.text('Use'));
       await settle(tester);
-      expect(host.stored['subagentCreditLimit'], 2.5);
+      expect(host.stored['subagentCostLimit'], 2.5);
       await tester.tap(find.text('Custom').last);
       await settle(tester);
       await tester.enterText(find.byType(TextField), '2.5');
@@ -213,9 +213,9 @@ void main() {
       host = FakeHost(); // inside the fake-async zone, or replies never arrive
       final agent = agentWithSubagents();
       await pumpLook(tester, const Look(), Scaffold(body: SubagentCard(state: agent.subagentStore['d-done']!, agent: agent)));
-      expect(find.text('2 tools • 2m 50s • ~0.14 credits'), findsOneWidget);
+      expect(find.text('2 tools • 2m 50s • ~\$0.14'), findsOneWidget);
       await pumpLook(tester, const Look(language: 'id'), Scaffold(body: SubagentCard(state: agent.subagentStore['d-done']!, agent: agent)));
-      expect(find.text('2 tool • 2 mnt 50 dtk • ~0,14 kredit'), findsOneWidget);
+      expect(find.text('2 tool • 2 mnt 50 dtk • ~\$0.14'), findsOneWidget);
     });
 
     testWidgets('11. a card that needs approval is warning-coloured and can be answered in place', (tester) async {
@@ -252,7 +252,7 @@ void main() {
       host = FakeHost(); // inside the fake-async zone, or replies never arrive
       final agent = agentWithSubagents();
       await pumpLook(tester, const Look(), Scaffold(body: SubagentSheet(state: agent.subagentStore['d-done']!, agent: agent)), height: 1700);
-      expect(find.text('2 tools • 2m 50s • 15k tokens • ~0.14 credits'), findsOneWidget);
+      expect(find.text('2 tools • 2m 50s • 15k tokens • ~\$0.14'), findsOneWidget);
       expect(find.textContaining('## '), findsNothing);
       expect(find.text('Ringkasan'), findsOneWidget);
     });

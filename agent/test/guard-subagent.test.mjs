@@ -1,5 +1,5 @@
-// A subagent works on its own and spends credits and time (up to 50 credits and 30 minutes each, three at once, about
-// Rp 45,000), but nothing in its call looks risky, so in the default mode it started without a word (UX-08). The first
+// A subagent works on its own and spends money and time (up to $5 and 30 minutes each by default, three at once),
+// but nothing in its call looks risky, so in the default mode it started without a word (UX-08). The first
 // one of a chat is now asked about; the person's yes covers the rest of that chat.
 import { test } from "node:test";
 import assert from "node:assert/strict";

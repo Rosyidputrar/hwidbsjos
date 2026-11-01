@@ -11,7 +11,7 @@ import 'package:rynex/ui/usage_screen.dart';
 
 import 'harness.dart';
 
-const _budget = 'Daily budget of 5 credits reached (5.02 credits spent today). Raise it in Settings → Usage.';
+const _budget = 'Daily budget of \$5 reached (\$5.02 spent today). Raise it in Settings → Usage.';
 
 void main() {
   setUpAll(loadAppFonts);
@@ -24,17 +24,17 @@ void main() {
     expect(limitStopOf(_budget), LimitStop.budget);
     expect(limitStopOf('Stopped after 150 tool calls in one request.'), LimitStop.toolCalls);
     expect(limitStopOf('The background job ended.'), isNull);
-    expect(limitStopOf('Daily budget of five credits reached'), isNull);
+    expect(limitStopOf('Daily budget of five dollars reached'), isNull);
   });
 
   test('said in the app\'s language, with its number format', () {
     expect(trHost(_budget), _budget, reason: 'English as it is');
     applyLook(const Look(language: 'id'));
-    expect(trHost(_budget), 'Batas harian 5 kredit tercapai (terpakai 5,02 hari ini). Naikkan di Pengaturan → Pemakaian.');
+    expect(trHost(_budget), 'Batas harian sebesar \$5 tercapai (terpakai \$5,02 hari ini). Naikkan di Pengaturan → Pemakaian.');
     expect(trHost('Stopped after 150 tool calls in one request.'), 'Berhenti setelah 150 panggilan tool dalam satu permintaan.');
     expect(trHost('Something the host said'), 'Something the host said', reason: 'other text is left as it is');
     // The same text as an error that came back from a command (checkBudget throws it).
-    expect(friendlyError(AgentError(_budget)), 'Batas harian 5 kredit tercapai (terpakai 5,02 hari ini). Naikkan di Pengaturan → Pemakaian.');
+    expect(friendlyError(AgentError(_budget)), 'Batas harian sebesar \$5 tercapai (terpakai \$5,02 hari ini). Naikkan di Pengaturan → Pemakaian.');
   });
 
   testWidgets('the chat shows a budget stop as an error, with Raise limit that opens Usage', (tester) async {
@@ -46,7 +46,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     final entry = agent.entries.whereType<NoticeEntry>().single;
     expect(entry.error, isTrue, reason: 'drawn as an error, not a muted hint');
-    expect(find.textContaining('Batas harian 5 kredit tercapai (terpakai 5,02 hari ini)'), findsOneWidget);
+    expect(find.textContaining('Batas harian sebesar \$5 tercapai (terpakai \$5,02 hari ini)'), findsOneWidget);
     expect(find.text('Naikkan batas'), findsOneWidget);
     await tester.tap(find.text('Naikkan batas'));
     await tester.pumpAndSettle(const Duration(milliseconds: 100));

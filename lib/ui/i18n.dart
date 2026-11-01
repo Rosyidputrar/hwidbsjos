@@ -141,6 +141,8 @@ const _id = <String, String>{
   'Time': 'Waktu',
   'Open photo': 'Buka foto',
   'Open file': 'Buka file',
+  'Lime': 'Hijau limau',
+  'Indigo': 'Nila',
   'Violet': 'Ungu',
   'Blue': 'Biru',
   'Green': 'Hijau',

@@ -93,7 +93,7 @@ function manager(session) {
 		send: (r) => sent.push(r),
 		wireEvent: (e) => e,
 		createSession: async () => session,
-		limits: () => ({ creditLimit: 0, minutesLimit: 0, approvalMode: "auto" }),
+		limits: () => ({ costLimit: 0, minutesLimit: 0, approvalMode: "auto" }),
 	});
 	return { m, sent };
 }

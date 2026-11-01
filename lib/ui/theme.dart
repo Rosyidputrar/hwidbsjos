@@ -97,9 +97,11 @@ class Palette extends ThemeExtension<Palette> {
     muted: Color(0xFF64646E),
     faint: Color(0xFFA1A1AA),
     inverse: Color(0xFFFFFFFF),
-    danger: Color(0xFFE5484D),
-    success: Color(0xFF2F9E6B),
-    warning: Color(0xFFE5700F),
+    // Rynex's light red/green/orange, darkened one step: as shipped they read
+    // 2.9-3.6:1 on the page, under the 4.5:1 small-text bar the app holds.
+    danger: Color(0xFFC03C41),
+    success: Color(0xFF247A52),
+    warning: Color(0xFFA9530B),
     accent: Color(0xFF3F8F1C),
     accentAlt: Color(0xFF3E63DD),
     glass: Color(0xEBFFFFFF),

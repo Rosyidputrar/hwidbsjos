@@ -40,7 +40,7 @@ Map<String, dynamic> subRecord(
   Duration? finished,
   String? tool,
   String? args,
-  double? credits,
+  double? cost,
   String? report,
   String? error,
   String? stopReason,
@@ -67,7 +67,7 @@ Map<String, dynamic> subRecord(
   'timeline': ?timeline,
   'inputTokens': 12000,
   'outputTokens': 3400,
-  'credits': credits,
+  'cost': cost,
   'report': report,
   'error': error,
   'stopReason': stopReason,
@@ -142,7 +142,7 @@ AgentController agentWithSubagents() {
       toolCallId: 'call-a',
       tool: 'read',
       args: 'lib/ui/chat_screen.dart',
-      credits: 0.06,
+      cost: 0.06,
       tools: sampleTools,
       timeline: sampleTimeline,
       queue: [
@@ -151,7 +151,7 @@ AgentController agentWithSubagents() {
       ],
     ),
   );
-  start(subRecord('b-approval', profile: 'full', tool: 'bash', args: 'rm -rf build && flutter build apk', credits: 0.02));
+  start(subRecord('b-approval', profile: 'full', tool: 'bash', args: 'rm -rf build && flutter build apk', cost: 0.02));
   store.applyRecord({
     'type': 'subagent_approval_request',
     'subagentId': 'b-approval',
@@ -163,13 +163,13 @@ AgentController agentWithSubagents() {
   });
   start(subRecord('c-queued', status: 'queued', started: Duration.zero));
   store['c-queued']!.startedAt = null;
-  start(subRecord('g-stopping', status: 'stopping', tool: 'bash', args: 'npm test', credits: 0.3, tools: sampleTools.take(2).toList()));
+  start(subRecord('g-stopping', status: 'stopping', tool: 'bash', args: 'npm test', cost: 0.3, tools: sampleTools.take(2).toList()));
   final done = subRecord(
     'd-done',
     status: 'done',
     started: const Duration(minutes: 3, seconds: 20),
     finished: const Duration(seconds: 30),
-    credits: 0.14,
+    cost: 0.14,
     tools: sampleTools.take(2).toList(),
     report: report,
   );
@@ -189,8 +189,8 @@ AgentController agentWithSubagents() {
     status: 'stopped',
     started: const Duration(minutes: 31),
     finished: const Duration(seconds: 50),
-    credits: 50.4,
-    stopReason: 'The subagent cost limit was reached (50 credits).',
+    cost: 50.4,
+    stopReason: 'The subagent cost limit was reached (\$50.4).',
     stopCode: 'credit',
     report: 'Laporan parsial: baru membandingkan **dua** framework.',
     tools: sampleTools.take(1).toList(),
@@ -253,7 +253,7 @@ void main() {
       await settingsAgent(
         tester,
         const Look(),
-        stored: {'subagentCreditLimit': 37.5, 'subagentMinutesLimit': 45, 'subagentApprovalMode': 'auto'},
+        stored: {'subagentCostLimit': 37.5, 'subagentMinutesLimit': 45, 'subagentApprovalMode': 'auto'},
       );
       await tester.tap(find.textContaining('Custom').first);
       await frames(tester);
@@ -266,7 +266,7 @@ void main() {
       await settingsAgent(
         tester,
         const Look(dark: true, language: 'id'),
-        stored: {'subagentCreditLimit': 0, 'subagentMinutesLimit': 0},
+        stored: {'subagentCostLimit': 0, 'subagentMinutesLimit': 0},
       );
       await tester.tap(find.text('Kustom').last);
       await frames(tester);

@@ -310,7 +310,7 @@ export class Integrations {
 			// saved, and said "built-in" for a build that has none.
 			githubClientId: (this.settings.githubClientId ?? "").trim(),
 			githubClientIdBuiltIn: !!GITHUB_CLIENT_ID,
-			subagentCostLimit: subagentCostLimit ?? 50,
+			subagentCostLimit: subagentCostLimit ?? 5,
 			subagentMinutesLimit: subagentMinutesLimit ?? 30,
 			subagentApprovalMode: subagentApprovalMode ?? approvalMode ?? "ask_risky",
 			// False while subagents follow the chat's approval mode (no override saved).

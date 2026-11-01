@@ -97,7 +97,7 @@ function manager(make) {
 			s.opts = opts;
 			return s;
 		},
-		limits: () => ({ creditLimit: 0, minutesLimit: 0, approvalMode: "ask_risky" }),
+		limits: () => ({ costLimit: 0, minutesLimit: 0, approvalMode: "ask_risky" }),
 	});
 	return { m, sent };
 }
@@ -149,7 +149,7 @@ test("a subagent waiting for an approval nobody answers stops waiting at its tim
 			s.opts = opts;
 			return s;
 		},
-		limits: () => ({ creditLimit: 0, minutesLimit: 1, approvalMode: "ask_risky" }),
+		limits: () => ({ costLimit: 0, minutesLimit: 1, approvalMode: "ask_risky" }),
 	});
 	const rec = m.start(parent, "Bersihkan build", "full");
 	for (let i = 0; i < 10; i++) await turn();
@@ -234,7 +234,7 @@ test("stopping a subagent while its session is still being made: it never gets t
 					resolve(s);
 				};
 			}),
-		limits: () => ({ creditLimit: 0, minutesLimit: 0, approvalMode: "auto" }),
+		limits: () => ({ costLimit: 0, minutesLimit: 0, approvalMode: "auto" }),
 	});
 	for (const force of [true, false]) {
 		const rec = m.start(parent, `Mulai lalu stop (${force})`, "read");

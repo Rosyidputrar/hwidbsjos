@@ -1,6 +1,6 @@
 /**
  * API keys for the search services: several per service, used in turn, and set aside for a while when one is
- * rate-limited, out of credits or rejected, so the next one takes over.
+ * rate-limited, out of quota or rejected, so the next one takes over.
  */
 
 /** A request a key couldn't serve, with the HTTP status that says why. */
