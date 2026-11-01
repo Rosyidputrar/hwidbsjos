@@ -15,24 +15,6 @@ class ModelInfo {
   int? get maxTokens => (json['maxTokens'] as num?)?.toInt();
   bool get acceptsImages => (json['input'] as List?)?.contains('image') ?? false;
   String get key => '$provider/$id';
-
-  /// GripHub pricing, when the host knows it (router.ts): credits per 1M
-  /// tokens, the per-request minimum, a running promo, and availability.
-  ModelPricing? get pricing => json['pricing'] is Map ? ModelPricing((json['pricing'] as Map).cast<String, dynamic>()) : null;
-}
-
-class ModelPricing {
-  ModelPricing(this.json);
-  final Map<String, dynamic> json;
-  double? get credits => (json['credits'] as num?)?.toDouble();
-  double? get list => (json['list'] as num?)?.toDouble();
-  double? get floor => (json['floor'] as num?)?.toDouble();
-  String? get promo => json['promo'] as String?;
-  DateTime? get promoEndsAt => DateTime.tryParse(json['promoEndsAt'] as String? ?? '');
-  bool get available => json['available'] != false;
-
-  /// A promo that has not ended yet.
-  bool get onPromo => list != null && (promoEndsAt == null || promoEndsAt!.isAfter(DateTime.now()));
 }
 
 /// Favorite models in the order they were starred, not catalog order. Keys
@@ -92,6 +74,10 @@ class CustomModel {
 
   /// False when the endpoint says effort levels make no difference.
   bool get effort => json['effort'] != false;
+
+  /// USD per 1M tokens (pi's cost shape), when the endpoint's catalog gave
+  /// prices; pi prices this model's usage from it.
+  Map<String, dynamic>? get cost => (json['cost'] as Map?)?.cast<String, dynamic>();
 
   /// A copy with reasoning or vision switched by hand, for endpoints that don't say.
   CustomModel copyWith({bool? reasoning, bool? vision}) => CustomModel({
@@ -272,9 +258,9 @@ class CompactionEntry extends ChatEntry {
   int? tokensBefore;
   int? tokensAfter;
 
-  /// What the summary cost: it is a model request too. Null when unknown (the host's estimate has no price for the
-  /// model, or the chat is from before the host said).
-  double? credits;
+  /// What the summary cost in USD (pi's own price for the request). Null
+  /// when unknown (the model carries no pricing, or the chat is old).
+  double? cost;
 
   /// How long it took, once it ended.
   Duration? took;
@@ -472,39 +458,34 @@ class PartialJsonReader {
   }
 }
 
-/// One model request: its tokens as pi reports them, and the host's GripHub estimate for it
-/// (agent/src/pricing.ts messageCost; [credits] null when the price is unknown or it went to another provider).
+/// One model request: its tokens and cost as pi reports them (the cost is
+/// pi's own, from the model's pricing; null when the model has none).
 class RequestUsage {
   const RequestUsage({
     this.input = 0,
     this.output = 0,
     this.cacheRead = 0,
     this.cacheWrite = 0,
-    this.credits,
-    this.floored = false,
+    this.cost,
   });
 
   final int input;
   final int output;
   final int cacheRead;
   final int cacheWrite;
-  final double? credits;
-
-  /// Billed at the model's per-request minimum.
-  final bool floored;
+  final double? cost;
 
   static RequestUsage? fromMessage(Map<String, dynamic> message) {
     final u = message['usage'];
     if (u is! Map) return null;
     int n(Object? v) => (v as num?)?.toInt() ?? 0;
-    final cost = message['griphubCost'];
+    final c = u['cost'];
     return RequestUsage(
       input: n(u['input']),
       output: n(u['output']),
       cacheRead: n(u['cacheRead']),
       cacheWrite: n(u['cacheWrite']),
-      credits: cost is Map ? (cost['credits'] as num?)?.toDouble() : null,
-      floored: cost is Map && cost['floored'] == true,
+      cost: c is Map ? (c['total'] as num?)?.toDouble() : null,
     );
   }
 }
@@ -514,31 +495,29 @@ class RequestUsage {
 class TurnCost {
   TurnCost(Iterable<RequestUsage> requests, {this.subagentCalls = const []}) {
     var unknown = false;
-    var credits = 0.0;
+    var total = 0.0;
     for (final r in requests) {
       this.requests++;
-      if (r.floored) floored++;
       input += r.input;
       output += r.output;
       cacheRead += r.cacheRead;
       cacheWrite += r.cacheWrite;
-      if (r.credits == null) {
+      if (r.cost == null) {
         unknown = true;
       } else {
-        credits += r.credits!;
+        total += r.cost!;
       }
     }
     // One request of unknown price makes the total unknown: never a made-up number.
-    this.credits = unknown || this.requests == 0 ? null : credits;
+    cost = unknown || this.requests == 0 ? null : total;
   }
 
   int requests = 0;
-  int floored = 0;
   int input = 0;
   int output = 0;
   int cacheRead = 0;
   int cacheWrite = 0;
-  late final double? credits;
+  double? cost;
 
   /// Tool call ids of the subagents this turn started.
   final List<String> subagentCalls;

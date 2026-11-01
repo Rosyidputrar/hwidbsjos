@@ -50,7 +50,7 @@ void main() {
         'result': {
           'tokensBefore': 320000,
           'estimatedTokensAfter': 24000,
-          'griphubCost': {'credits': 0.42, 'floored': false},
+          'cost': 0.42,
         },
       },
     });
@@ -58,7 +58,7 @@ void main() {
     expect(c.running, isFalse);
     expect(c.error, isNull);
     expect([c.tokensBefore, c.tokensAfter], [320000, 24000]);
-    expect(c.credits, 0.42, reason: 'a summary is a paid request too');
+    expect(c.cost, 0.42, reason: 'a summary is a paid request too');
   });
 
   testWidgets('a summary that failed says why', (tester) async {
@@ -71,12 +71,12 @@ void main() {
     });
     host.emit({
       'type': 'event',
-      'event': {'type': 'compaction_end', 'reason': 'threshold', 'aborted': false, 'errorMessage': 'Compaction failed: 402 credits'},
+      'event': {'type': 'compaction_end', 'reason': 'threshold', 'aborted': false, 'errorMessage': 'Compaction failed: provider error'},
     });
     await frames(tester, 2);
     final c = agent.entries.single as CompactionEntry;
     expect(c.limit, isNull, reason: "pi's own, near the model's limit");
-    expect(c.error, 'Compaction failed: 402 credits');
+    expect(c.error, 'Compaction failed: provider error');
   });
 
   test("a summary read back from the chat's history", () {
@@ -85,12 +85,12 @@ void main() {
       'role': 'compactionSummary',
       'summary': '…',
       'tokensBefore': 410000,
-      'griphubCost': {'credits': 1.5, 'floored': false},
+      'cost': 1.5,
     });
     final c = agent.entries.single as CompactionEntry;
-    expect([c.running, c.tokensBefore, c.startedAt, c.credits], [false, 410000, null, 1.5]);
+    expect([c.running, c.tokensBefore, c.startedAt, c.cost], [false, 410000, null, 1.5]);
     agent.addHistoryMessage({'role': 'compactionSummary', 'summary': '…', 'tokensBefore': 9000});
-    expect((agent.entries.last as CompactionEntry).credits, isNull, reason: 'a chat from before the host said');
+    expect((agent.entries.last as CompactionEntry).cost, isNull, reason: 'a chat from before the host said');
   });
 
   for (final look in _looks) {
@@ -102,11 +102,11 @@ void main() {
         ..took = const Duration(seconds: 14)
         ..tokensBefore = 320000
         ..tokensAfter = 24000
-        ..credits = 0.42;
+        ..cost = 0.42;
       final failed = CompactionEntry(startedAt: goldenNow.subtract(const Duration(seconds: 3)))
         ..running = false
         ..took = const Duration(seconds: 3)
-        ..error = 'Compaction failed: 402 credits';
+        ..error = 'Compaction failed: provider error';
       await pumpLook(
         tester,
         look,
@@ -184,7 +184,7 @@ void main() {
       final host = FakeHost()..answers['summarized_messages'] = (_) => saved;
       final agent = newAgent();
       final done = CompactionEntry(running: false, tokensBefore: 410000);
-      final failed = CompactionEntry(running: false)..error = 'Compaction failed: 402 credits';
+      final failed = CompactionEntry(running: false)..error = 'Compaction failed: provider error';
       await pumpLook(
         tester,
         const Look(),

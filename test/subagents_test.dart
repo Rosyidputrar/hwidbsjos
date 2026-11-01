@@ -17,7 +17,7 @@ Map<String, dynamic> started({String id = 'sub-1', String parent = 'chat-1.jsonl
     'queue': [],
     'inputTokens': 0,
     'outputTokens': 0,
-    'credits': null,
+    'cost': null,
   },
 };
 
@@ -82,14 +82,14 @@ void main() {
         'queue': [],
         'inputTokens': 100,
         'outputTokens': 200,
-        'credits': 1.5,
+        'cost': 1.5,
         'report': 'LAPORAN',
       },
     });
     final s = store['sub-1']!;
     expect(s.isTerminal, isTrue);
     expect(s.report, 'LAPORAN');
-    expect(s.credits, 1.5);
+    expect(s.cost, 1.5);
   });
 
   test('queue records replace the list; approval request and dismiss toggle', () {
@@ -150,10 +150,10 @@ void main() {
       'reason': 'r',
       'key': 'k',
     });
-    final fin = (started()['subagent'] as Map<String, dynamic>)..addAll({'status': 'stopped', 'stopCode': 'credit', 'finishedAt': 3000});
+    final fin = (started()['subagent'] as Map<String, dynamic>)..addAll({'status': 'stopped', 'stopCode': 'cost', 'finishedAt': 3000});
     store.applyRecord({'type': 'subagent_finished', 'subagent': fin});
     expect(store['sub-1']!.approval, isNull);
-    expect(store['sub-1']!.stopCode, SubagentStopCode.credit);
+    expect(store['sub-1']!.stopCode, SubagentStopCode.cost);
     store.applyRecord({'type': 'subagent_status', 'subagentId': 'sub-1', 'status': 'running'});
     expect(store['sub-1']!.status, SubagentStatus.stopped);
   });

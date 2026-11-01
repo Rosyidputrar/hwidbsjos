@@ -801,7 +801,7 @@ class _ChatScreenState extends State<ChatScreen> {
               modelLabel: agent.modelLabel,
               subagentCard: placed.cardFor,
               subagentCost: (id) => switch (agent.subagentStore.all.where((s) => s.toolCallId == id).firstOrNull) {
-                final s? => (credits: s.credits),
+                final s? => (cost: s.cost),
                 null => null,
               },
               footer: footers[i],

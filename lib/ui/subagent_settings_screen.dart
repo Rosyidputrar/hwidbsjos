@@ -12,32 +12,32 @@ import 'kit.dart';
 import 'theme.dart';
 
 /// Default limits, mirrored from the host (integrations.ts publicSettings).
-const subagentDefaultCredits = 50.0;
+const subagentDefaultCost = 5.0;
 const subagentDefaultMinutes = 30.0;
 
 /// Longest time limit the custom field accepts (a day).
 const _maxMinutes = 1440;
 
 /// Highest cost limit the custom field accepts.
-const _maxCredits = 100000;
+const _maxCost = 10000;
 
-String _credits(double v) => '${localNumber(formatCredits(v))} ${tr('credits')}';
+String _usd(double v) => formatUsd(v);
 String _minutes(double v) => '${v.toInt()} ${tr('min')}';
 
-/// One line for both limits ("50 credits • 30 min", "No cost limit • No time limit"),
+/// One line for both limits ("$5 • 30 min", "No cost limit • No time limit"),
 /// shared by this screen and its row in Settings.
 /// What the limits add up to, in words: each subagent's own ceiling, and that three run at once.
 String subagentSpendNote(AppSettings? s) {
-  final cost = s?.subagentCreditLimit ?? subagentDefaultCredits;
+  final cost = s?.subagentCostLimit ?? subagentDefaultCost;
   return cost == 0
       ? tr('No cost limit: a subagent keeps spending until its time limit or your daily budget stops it. Up to 3 run at once.')
-      : tr('Each subagent can spend up to {n}, and up to 3 run at once. Costs are estimates.').replaceAll('{n}', _credits(cost));
+      : tr('Each subagent can spend up to {n}, and up to 3 run at once. Costs are estimates.').replaceAll('{n}', _usd(cost));
 }
 
 String subagentLimitsSummary(AppSettings? s) {
-  final cost = s?.subagentCreditLimit ?? subagentDefaultCredits;
+  final cost = s?.subagentCostLimit ?? subagentDefaultCost;
   final time = s?.subagentMinutesLimit ?? subagentDefaultMinutes;
-  return '${cost == 0 ? tr('No cost limit') : _credits(cost)} • ${time == 0 ? tr('No time limit') : _minutes(time)}';
+  return '${cost == 0 ? tr('No cost limit') : _usd(cost)} • ${time == 0 ? tr('No time limit') : _minutes(time)}';
 }
 
 /// The chat's approval modes, labelled like Settings → Agent behaviour.
@@ -102,7 +102,7 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
       listenable: it,
       builder: (context, _) {
         final s = it.settings;
-        final cost = s?.subagentCreditLimit ?? subagentDefaultCredits;
+        final cost = s?.subagentCostLimit ?? subagentDefaultCost;
         final time = s?.subagentMinutesLimit ?? subagentDefaultMinutes;
         final chatMode = s?.approvalMode ?? agent.approvalMode;
         final saving = _approvalSaving;
@@ -154,12 +154,12 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
               _LimitChooser(
                 key: const ValueKey('cost'),
                 value: cost,
-                presets: const [10, 25, 50],
-                format: _credits,
-                hint: tr('Credits, e.g. 40'),
+                presets: const [1, 5, 10],
+                format: _usd,
+                hint: tr('USD, e.g. 2.50'),
                 decimals: true,
-                max: _maxCredits.toDouble(),
-                onSave: (v) => _save({'subagentCreditLimit': v}),
+                max: _maxCost.toDouble(),
+                onSave: (v) => _save({'subagentCostLimit': v}),
               ),
               Padding(
                 padding: EdgeInsets.fromLTRB(4, gap - 4, 4, 0),
@@ -393,7 +393,7 @@ class _LimitChooserState extends State<_LimitChooser> {
       if (_open) {
         // Start from the current value; a preset is a fine starting point too.
         final v = widget.value;
-        _field.text = v == 0 ? '' : localNumber(widget.decimals ? formatCredits(v) : '${v.toInt()}');
+        _field.text = v == 0 ? '' : localNumber(widget.decimals ? formatNumber(v) : '${v.toInt()}');
         _field.selection = TextSelection(baseOffset: 0, extentOffset: _field.text.length);
       }
     });
@@ -417,7 +417,7 @@ class _LimitChooserState extends State<_LimitChooser> {
     } else if (!widget.decimals && v != v.roundToDouble()) {
       error = tr('Enter a whole number of minutes, 1 or more.');
     } else if (v > widget.max) {
-      error = tr('At most {n}.').replaceAll('{n}', localNumber(formatCredits(widget.max)));
+      error = tr('At most {n}.').replaceAll('{n}', localNumber(formatNumber(widget.max)));
     }
     if (error != null) {
       setState(() => _error = error);

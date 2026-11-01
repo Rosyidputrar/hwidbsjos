@@ -10,19 +10,19 @@ import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
 import 'errors.dart';
-import 'griphub_screen.dart';
-import '../agent/pricing.dart';
+import 'settings_screen.dart';
 import 'i18n.dart';
 import 'kit.dart';
 import 'theme.dart';
 
-/// Image generation through GripHub Router's OpenAI-compatible Images API.
+/// Image generation through an OpenAI-compatible Images API on one of the
+/// user's own providers.
 ///
 /// The API key never touches this layer: the on-device host calls
-/// `POST {base}/images/generations` with the saved GripHub key and returns
-/// the base64 PNG. Generation takes 20–120s and is billed only on success,
-/// so there is no auto-retry: a timed-out request may already have produced
-/// (and billed) an image server-side.
+/// `POST {base}/images/generations` with the provider's saved key and
+/// returns the base64 PNG. Generation takes 20–120s and is billed only on
+/// success, so there is no auto-retry: a timed-out request may already have
+/// produced (and billed) an image server-side.
 class ImageGenScreen extends StatefulWidget {
   const ImageGenScreen({super.key, required this.agent});
   final AgentController agent;
@@ -31,7 +31,7 @@ class ImageGenScreen extends StatefulWidget {
   State<ImageGenScreen> createState() => _ImageGenScreenState();
 }
 
-/// Built-in image models, used until GripHub's own list (/v1/models) loads.
+/// Well-known image models, offered until the provider's own list loads.
 const _fallbackModels = ['gpt-image', 'gemini-3.1-flash-image'];
 const _sizes = [
   ('1024x1024', '1024 × 1024', 1.0),
@@ -67,10 +67,12 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
   final _customModel = TextEditingController();
   String _model = _fallbackModels.first;
 
-  /// GripHub's image models with their price per image (id -> credits, normal price).
-  List<({String id, String name, double? credits, double? list})> _models = [
-    for (final m in _fallbackModels) (id: m, name: m, credits: null, list: null),
-  ];
+  /// The chosen provider's image models (its catalog's kind:"image" ones).
+  List<({String id, String name})> _models = [for (final m in _fallbackModels) (id: m, name: m)];
+
+  /// Custom providers with a saved key; image generation runs on one of them.
+  List<CustomProvider> _providers = const [];
+  String? _providerId;
   bool _custom = false;
   String _size = _sizes.first.$1;
   bool _busy = false;
@@ -119,31 +121,35 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
       providers = const [];
     }
     await _loadHistory();
-    final hasKey = providers.any((p) => p.id == 'griphub' && p.hasKey);
+    final keyed = providers.where((p) => p.hasKey).toList();
     if (mounted) {
       setState(() {
-        _hasKey = hasKey;
+        _providers = keyed;
+        _providerId = keyed.isEmpty ? null : keyed.first.id;
+        _hasKey = _providerId != null;
         _loading = false;
       });
     }
-    if (!hasKey) return;
+    if (_providerId != null) await _loadImageModels();
+  }
+
+  /// The chosen provider's image models; an endpoint whose catalog does not
+  /// tag any keeps the well-known list (and the custom-id field still works).
+  Future<void> _loadImageModels() async {
+    final providerId = _providerId;
+    if (providerId == null) return;
     try {
-      final list = await agent.integrations.griphubImageModels();
+      final list = await agent.client.call<List>('image_models', {'providerId': providerId});
       if (!mounted || list.isEmpty) return;
       setState(() {
         _models = [
           for (final m in list)
-            (
-              id: m['id'] as String,
-              name: m['name'] as String? ?? m['id'] as String,
-              credits: (m['credits'] as num?)?.toDouble(),
-              list: (m['list'] as num?)?.toDouble(),
-            ),
+            (id: (m as Map)['id'] as String, name: m['name'] as String? ?? m['id'] as String),
         ];
         if (!_models.any((m) => m.id == _model)) _model = _models.first.id;
       });
     } catch (_) {
-      // Offline or an older host: the built-in list stays.
+      // Offline or an older host: the current list stays.
     }
   }
 
@@ -219,6 +225,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
     });
     try {
       final data = await agent.client.call<Map<String, dynamic>>('custom_provider_images_generate', {
+        'providerId': _providerId,
         'model': model,
         'prompt': prompt,
         'size': _size,
@@ -263,7 +270,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
   }
 
   String _readable(String message) {
-    if (message.contains('401')) return tr('The API key was rejected. Check the key in GripHub settings.');
+    if (message.contains('401')) return tr('The API key was rejected. Check the provider key in Settings.');
     if (message.contains('404')) return tr('The image endpoint is not available for this provider.');
     if (message.toLowerCase().contains('timeout') || message.toLowerCase().contains('timed out')) {
       return tr('Taking longer than 3 minutes. The image may still have been created; try again in a moment.');
@@ -377,10 +384,10 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(tr('Connect GripHub first'), style: text.titleMedium),
+                        Text(tr('Connect a provider first'), style: text.titleMedium),
                         const SizedBox(height: 6),
                         Text(
-                          tr('Image generation uses the same GripHub API key as chat. Add it once, then come back here.'),
+                          tr('Image generation uses one of your saved providers and its API key. Connect one once, then come back here.'),
                           style: text.bodyMedium?.copyWith(color: p.muted),
                         ),
                         const SizedBox(height: 14),
@@ -389,7 +396,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                           icon: LucideIcons.keyRound,
                           onPressed: () async {
                             final ok = await Navigator.of(context).push<bool>(
-                              MaterialPageRoute(builder: (_) => GripHubScreen(agent: agent)),
+                              MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)),
                             );
                             if (ok == true) _load();
                           },
@@ -417,6 +424,28 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                   style: text.bodySmall?.copyWith(color: p.muted),
                 ),
                 const SizedBox(height: 20),
+                if (_providers.length > 1) ...[
+                  Text(tr('Provider'), style: text.titleSmall),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final provider in _providers)
+                        _OptionChip(
+                          label: provider.name,
+                          selected: _providerId == provider.id,
+                          onTap: _busy
+                              ? null
+                              : () {
+                                  setState(() => _providerId = provider.id);
+                                  _loadImageModels();
+                                },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                ],
                 Text(tr('Model'), style: text.titleSmall),
                 const SizedBox(height: 8),
                 Wrap(
@@ -426,9 +455,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                   children: [
                     for (final m in _models)
                       _OptionChip(
-                        label: m.credits == null
-                            ? m.name
-                            : '${m.name} · ${tr('{n} credits').replaceAll('{n}', localNumber(formatCredits(m.credits!)))}',
+                        label: m.name,
                         selected: !_custom && _model == m.id,
                         onTap: _busy
                             ? null
@@ -516,7 +543,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                                 onPressed: () async {
                                   final path = _resultFile != null && _imagesDir != null
                                       ? '${_imagesDir!.path}/$_resultFile'
-                                      : await _writeTemp(_result!, 'griphub-image.png');
+                                      : await _writeTemp(_result!, 'rynex-image.png');
                                   if (path != null) await _saveToDownloads(path);
                                 },
                                 icon: const Icon(LucideIcons.download, size: 16),
@@ -529,7 +556,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                                 onPressed: () async {
                                   final path = _resultFile != null && _imagesDir != null
                                       ? '${_imagesDir!.path}/$_resultFile'
-                                      : await _writeTemp(_result!, 'griphub-image.png');
+                                      : await _writeTemp(_result!, 'rynex-image.png');
                                   if (path != null) await _share(path);
                                 },
                                 icon: const Icon(LucideIcons.share2, size: 16),

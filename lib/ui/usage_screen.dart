@@ -7,10 +7,8 @@ import '../agent/clock.dart';
 import '../agent/features.dart';
 import '../agent/integrations.dart' show AppSettings;
 import '../agent/pricing.dart';
-import '../agent/router_account.dart';
 import 'errors.dart';
 import 'kit.dart';
-import 'subagent_card.dart' show thinkingLabel;
 import 'i18n.dart';
 import 'theme.dart';
 
@@ -29,41 +27,12 @@ String _compact(num n) {
 
 num _num(Object? o) => o is num ? o : 0;
 
-/// Credits with at most 2 decimals, trailing zeros trimmed (80.38, 1, 0.15), in the app's number format.
-String _creditsFmt(num v) => localNumber(v.toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), ''));
-
-/// An amount with its unit, the same way everywhere on the screen ("7.350 kredit", "0,978 kredit").
-String _creditText(num v, {bool precise = false}) =>
-    '${precise ? localNumber(formatCredits(v)) : _creditsFmt(v)} ${tr(v == 1 ? 'credit' : 'credits')}';
-
 /// Numbers line up and share the body font (the mono face made a few figures look like code).
 const _figures = [FontFeature.tabularFigures()];
 
-/// Rupiah with dot thousands (Rp 24.114).
-String _rp(num v) {
-  final s = v.round().toString();
-  return 'Rp ${s.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}';
-}
-
-/// Local date in short form, months in the app's language (30 Okt 2026 / 30 Oct 2026).
-String _dateId(DateTime t) {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const monthsId = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-  final d = t.toLocal();
-  return '${d.day} ${(Appearance.instance.language == 'id' ? monthsId : months)[d.month - 1]} ${d.year}';
-}
-
-/// Time of day, 24 h (08.29 / 08:29).
-String _clock(DateTime t) {
-  final d = t.toLocal();
-  final sep = Appearance.instance.language == 'id' ? '.' : ':';
-  return '${d.hour.toString().padLeft(2, '0')}$sep${d.minute.toString().padLeft(2, '0')}';
-}
-
-/// GripHub credit and usage. The account card, today's spend and the
-/// per-model and per-request lists are the router's own figures (what was
-/// charged); the per-day chart is estimated from this phone's chats (the
-/// router has no per-day history), and says so.
+/// Usage and limits. Every figure is pi's own accounting from this
+/// device's chats: per-day and per-model cost and tokens, the open chat's
+/// context, the daily budget and the summary limit.
 class UsageScreen extends StatefulWidget {
   const UsageScreen({super.key, required this.agent});
   final AgentController agent;
@@ -80,10 +49,6 @@ class _UsageScreenState extends State<UsageScreen> {
   List<UsageRow>? _rows;
   Map<String, dynamic>? _session;
   Object? _error;
-  RouterAccount? _account;
-  Object? _accountError;
-  bool _loadingAccount = false;
-  bool _allRequests = false;
 
   /// Counts reads of the rows, so one that comes back after a newer one (the same period asked twice: a pull to refresh
   /// over a slow first read) cannot overwrite it. The period check alone only guards against another period's tab.
@@ -94,9 +59,7 @@ class _UsageScreenState extends State<UsageScreen> {
   @override
   void initState() {
     super.initState();
-    _account = agent.integrations.router;
     _load();
-    _loadAccount();
     agent.features.sessionStats().then((s) {
       if (mounted) setState(() => _session = s);
     }, onError: (_) {});
@@ -125,21 +88,6 @@ class _UsageScreenState extends State<UsageScreen> {
       _rows = null;
     });
     _load();
-  }
-
-  Future<void> _loadAccount({bool force = false}) async {
-    setState(() {
-      _accountError = null;
-      _loadingAccount = true;
-    });
-    try {
-      final a = await agent.integrations.routerAccount(force: force);
-      if (mounted) setState(() => _account = a);
-    } catch (e) {
-      if (mounted) setState(() => _accountError = e);
-    } finally {
-      if (mounted) setState(() => _loadingAccount = false);
-    }
   }
 
   num get _budget => _num(agent.integrations.settings?.json['dailyBudget']);
@@ -249,63 +197,23 @@ class _UsageScreenState extends State<UsageScreen> {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final rows = _rows;
-    final a = _account;
     return Scaffold(
       appBar: AppBar(
         title: Text(tr('Usage')),
         actions: [
           IconButton(
             tooltip: tr('Refresh'),
-            onPressed: _loadingAccount
-                ? null
-                : () {
-                    _loadAccount(force: true);
-                    _load();
-                  },
-            icon: _loadingAccount
-                ? const BusySpinner(size: 18)
-                : const Icon(LucideIcons.refreshCw),
+            onPressed: _load,
+            icon: const Icon(LucideIcons.refreshCw),
           ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () async {
-          await Future.wait([_load(), _loadAccount(force: true)]);
-        },
+        onRefresh: _load,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
           children: [
-            SectionLabel(tr('GripHub account'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
-            AccountCard(
-              account: a,
-              error: _accountError,
-              budget: _budget.toDouble(),
-              onRetry: () => _loadAccount(force: true),
-            ),
-            if (a != null && a.byModel.isNotEmpty) ...[
-              SectionLabel(tr('Charged by model')),
-              _byModelReal(context, a),
-            ],
-            if (a != null && a.requests.isNotEmpty) ...[
-              SectionLabel(
-                tr('Recent requests'),
-                trailing: a.requests.length > 8
-                    ? TextButton(
-                        onPressed: () => setState(() => _allRequests = !_allRequests),
-                        child: Text(tr(_allRequests ? 'Show less' : 'Show all')),
-                      )
-                    : null,
-              ),
-              RequestList(requests: _allRequests ? a.requests : a.requests.take(8).toList()),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-                child: Text(
-                  tr('Each request costs at least its model\'s minimum (floor). Failed requests are not charged.'),
-                  style: text.bodySmall,
-                ),
-              ),
-            ],
-            SectionLabel(tr('This phone')),
+            SectionLabel(tr('This phone'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
             Align(
               alignment: Alignment.centerLeft,
               child: PillSegments<int>(
@@ -333,7 +241,7 @@ class _UsageScreenState extends State<UsageScreen> {
                   title: tr('Daily budget'),
                   subtitle: _budget == 0
                       ? tr('No limit')
-                      : tr('{n} per day').replaceAll('{n}', _creditText(_budget, precise: true)),
+                      : tr('{n} per day').replaceAll('{n}', formatUsd(_budget)),
                   onTap: _editBudget,
                 ),
                 SettingsRow(
@@ -351,7 +259,7 @@ class _UsageScreenState extends State<UsageScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
               child: Text(
-                tr('The budget counts what GripHub charged your account today (WIB), plus work still running.'),
+                tr('The budget counts what the agent spent today (WIB) at each model\'s own prices, plus work still running.'),
                 style: text.bodySmall,
               ),
             ),
@@ -361,36 +269,13 @@ class _UsageScreenState extends State<UsageScreen> {
     );
   }
 
-  Widget _byModelReal(BuildContext context, RouterAccount a) {
-    final text = Theme.of(context).textTheme;
-    final models = a.byModel.where((m) => m.credits > 0 || m.requests > 0).take(8).toList();
-    return SettingsGroup(
-      children: [
-        for (final m in models)
-          SettingsRow(
-            leading: BrandTile(id: m.model, size: 30),
-            title: m.model,
-            subtitle: [
-              m.requests == 1 ? tr('1 request') : tr('{n} requests').replaceAll('{n}', _compact(m.requests)),
-              if (m.images > 0) tr('{n} images').replaceAll('{n}', '${m.images}') else '${_compact(m.tokens)} ${tr('tokens')}',
-            ].join(' · '),
-            trailing: Text(_creditText(m.credits, precise: true), style: text.titleSmall?.copyWith(fontFeatures: _figures)),
-          ),
-      ],
-    );
-  }
-
   List<Widget> _summary(BuildContext context, List<UsageRow> rows) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    // GripHub credits by the router's rule, per request (host-side); pi's own
-    // cost only for other providers that report one. Unknown prices show "—".
+    // Cost is pi's own, summed from the chat files. When no model in the
+    // period carries pricing, the chart falls back to tokens.
     final piCost = rows.fold<double>(0, (a, r) => a + r.cost);
-    final priced = rows.where((r) => r.credits != null);
-    final estimatedTotal = priced.fold<double>(0, (a, r) => a + r.credits!);
-    final hasEstimate = priced.isNotEmpty;
-    final showPiCost = piCost > 0 && !hasEstimate;
-    final showEstimate = hasEstimate;
+    final hasCost = piCost > 0;
 
     final tokens = rows.fold<int>(0, (a, r) => a + r.tokens);
     final cached = rows.fold<int>(0, (a, r) => a + r.cacheRead + r.cacheWrite);
@@ -404,26 +289,24 @@ class _UsageScreenState extends State<UsageScreen> {
     final perDay = {for (final d in days) d: 0.0};
     for (final r in rows) {
       if (perDay.containsKey(r.day)) {
-        final v = showEstimate ? (r.credits ?? 0) : showPiCost ? r.cost : r.tokens.toDouble();
+        final v = hasCost ? r.cost : r.tokens.toDouble();
         perDay[r.day] = perDay[r.day]! + v;
       }
     }
 
-    final byModel = <String, ({String provider, String model, int tokens, double cost, double? credits})>{};
+    final byModel = <String, ({String provider, String model, int tokens, double cost})>{};
     for (final r in rows) {
       final k = '${r.provider}/${r.model}';
       final prev = byModel[k];
-      final prevCredits = prev == null ? 0.0 : prev.credits;
       byModel[k] = (
         provider: r.provider,
         model: r.model,
         tokens: (prev?.tokens ?? 0) + r.tokens,
         cost: (prev?.cost ?? 0) + r.cost,
-        credits: prevCredits == null || r.credits == null ? null : prevCredits + r.credits!,
       );
     }
     final models = byModel.values.toList()
-      ..sort((a, b) => showEstimate ? (b.credits ?? -1).compareTo(a.credits ?? -1) : b.tokens.compareTo(a.tokens));
+      ..sort((a, b) => hasCost ? b.cost.compareTo(a.cost) : b.tokens.compareTo(a.tokens));
 
     return [
       Row(
@@ -432,12 +315,8 @@ class _UsageScreenState extends State<UsageScreen> {
             child: _StatCard(
               icon: LucideIcons.coins,
               color: p.accent,
-              label: tr(showEstimate ? 'Estimated cost' : 'Cost'),
-              value: showEstimate
-                  ? _creditText(estimatedTotal, precise: true)
-                  : showPiCost
-                  ? _money(piCost)
-                  : '—',
+              label: tr('Cost'),
+              value: hasCost ? _money(piCost) : '—',
             ),
           ),
           const SizedBox(width: 10),
@@ -463,24 +342,14 @@ class _UsageScreenState extends State<UsageScreen> {
           ),
         ],
       ),
-      SectionLabel(tr(showPiCost || showEstimate ? 'Cost per day' : 'Tokens per day')),
+      SectionLabel(tr(hasCost ? 'Cost per day' : 'Tokens per day')),
       SurfaceCard(
         child: _BarChart(
           values: [for (final d in days) perDay[d]!],
           labels: days,
-          format: showEstimate ? (v) => _creditText(v, precise: true) : showPiCost ? _money : _compact,
+          format: hasCost ? _money : _compact,
         ),
       ),
-      if (showEstimate)
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
-            tr(
-              'Estimated from this phone\'s chats at GripHub\'s live rates and minimums · total ≈ {rp}. What was actually charged is in the account card above.',
-            ).replaceAll('{rp}', _rp(estimatedTotal * kRupiahPerCredit)),
-            style: text.bodySmall,
-          ),
-        ),
       SectionLabel(tr('By model')),
       if (models.isEmpty)
         SurfaceCard(child: Text(tr('No requests in this period.'), style: text.bodySmall))
@@ -493,11 +362,7 @@ class _UsageScreenState extends State<UsageScreen> {
                 title: m.model.isEmpty ? 'unknown' : m.model,
                 subtitle: '${m.provider} · ${_compact(m.tokens)} ${tr('tokens')}',
                 trailing: Text(
-                  showEstimate
-                      ? (m.credits == null ? '—' : '~${_creditText(m.credits!, precise: true)}')
-                      : showPiCost
-                      ? _money(m.cost)
-                      : '—',
+                  hasCost ? _money(m.cost) : '—',
                   style: text.titleSmall?.copyWith(fontFeatures: _figures),
                 ),
               ),
@@ -567,260 +432,6 @@ class _UsageScreenState extends State<UsageScreen> {
           ],
         ],
       ),
-    );
-  }
-}
-
-/// The account: balance, today's spend against the budget, credit expiring
-/// next, and a low-balance warning. Every figure is the router's own.
-class AccountCard extends StatelessWidget {
-  const AccountCard({super.key, required this.account, this.error, this.budget = 0, this.onRetry});
-  final RouterAccount? account;
-  final Object? error;
-  final VoidCallback? onRetry;
-  final double budget;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final text = Theme.of(context).textTheme;
-    final a = account;
-    if (a == null) {
-      return SurfaceCard(
-        child: error != null
-            ? ErrorNotice(error: error, onRetry: onRetry)
-            : const Center(child: BusySpinner(size: 20)),
-      );
-    }
-    final low = a.lowBalance;
-    final next = a.nextExpiry;
-    final left = a.daysLeft();
-    final usedFraction = a.granted > 0 ? (a.used / a.granted).clamp(0, 1).toDouble() : 0.0;
-    final soon = next?.expiresAt != null && next!.expiresAt!.difference(clock()).inDays < 7;
-    return SurfaceCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              IconTile(icon: LucideIcons.wallet, color: low ? p.danger : p.accent),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_creditText(a.balance, precise: true), style: text.titleLarge?.copyWith(fontFeatures: _figures)),
-                    Text(
-                      '≈ ${_rp(a.balance * kRupiahPerCredit)}${left == null ? '' : ' · ${tr('about {n} days at your pace').replaceAll('{n}', left < 1 ? '<1' : '${left.round()}')}'}',
-                      style: text.bodySmall?.copyWith(fontFeatures: _figures),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (low) ...[
-            const SizedBox(height: 10),
-            _Banner(icon: LucideIcons.triangleAlert, color: p.danger, text: tr('Credit is running low. Top up at griphubrouter.web.id to keep the agent working.')),
-          ],
-          if (a.suspended) ...[
-            const SizedBox(height: 10),
-            _Banner(
-              icon: LucideIcons.ban,
-              color: p.danger,
-              text: a.suspendedUntil != null ? '${tr('Account suspended')} · ${_dateId(a.suspendedUntil!)}' : tr('Account suspended'),
-            ),
-          ],
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _Figure(
-                  label: tr('Today'),
-                  value: _creditText(a.spentToday, precise: true),
-                  note: a.spentTodayReal ? null : tr('estimate'),
-                ),
-              ),
-              Expanded(child: _Figure(label: tr('Used in total'), value: _creditText(a.used))),
-            ],
-          ),
-          if (budget > 0) ...[
-            const SizedBox(height: 10),
-            Text(
-              tr('{a} of the {b} daily budget').replaceAll('{a}', _creditText(a.spentToday, precise: true)).replaceAll('{b}', _creditText(budget, precise: true)),
-              style: text.bodySmall,
-            ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(Radii.pill),
-              child: LinearProgressIndicator(
-                value: (a.spentToday / budget).clamp(0, 1).toDouble(),
-                minHeight: 6,
-                backgroundColor: p.border,
-                color: a.spentToday >= budget ? p.danger : (a.spentToday > budget * 0.8 ? p.warning : p.accent),
-              ),
-            ),
-          ] else if (a.granted > 0) ...[
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(Radii.pill),
-              child: LinearProgressIndicator(
-                value: usedFraction,
-                minHeight: 6,
-                backgroundColor: p.border,
-                color: low ? p.danger : p.accent,
-              ),
-            ),
-          ],
-          if (next?.expiresAt != null) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Icon(LucideIcons.clock, size: 14, color: soon ? p.warning : p.muted),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    tr('{n} expire {date}').replaceAll('{n}', _creditText(next!.credits, precise: true)).replaceAll('{date}', _dateId(next.expiresAt!)),
-                    style: text.bodySmall?.copyWith(color: soon ? p.warning : null),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 10),
-          Text(
-            [
-              tr('Updated {time}').replaceAll('{time}', formatAgo(a.fetchedAt)),
-              if (a.source != 'user-usage') tr('limited data'),
-              if (error != null) tr('offline, showing the last figures'),
-              tr('1 credit = Rp 300'),
-            ].join(' · '),
-            style: text.bodySmall?.copyWith(color: error != null ? p.warning : null),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Figure extends StatelessWidget {
-  const _Figure({required this.label, required this.value, this.note});
-  final String label;
-  final String value;
-  final String? note;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(note == null ? label : '$label · $note', style: text.bodySmall),
-        const SizedBox(height: 2),
-        Text(value, style: text.titleMedium?.copyWith(fontFeatures: _figures)),
-      ],
-    );
-  }
-}
-
-class _Banner extends StatelessWidget {
-  const _Banner({required this.icon, required this.color, required this.text});
-  final IconData icon;
-  final Color color;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.1),
-      borderRadius: BorderRadius.circular(Radii.md),
-      border: Border.all(color: color.withValues(alpha: 0.35)),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 16, color: color)),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color))),
-      ],
-    ),
-  );
-}
-
-/// The router's request log: model, time, tokens, what it cost, and whether
-/// the model's minimum (floor) applied or the request failed (not charged).
-class RequestList extends StatelessWidget {
-  const RequestList({super.key, required this.requests});
-  final List<RouterRequest> requests;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final text = Theme.of(context).textTheme;
-    return SettingsGroup(
-      children: [
-        for (final r in requests)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Icon(
-                    !r.ok
-                        ? LucideIcons.circleX
-                        : r.isSearch
-                        ? LucideIcons.search
-                        : r.isImage
-                        ? LucideIcons.image
-                        : LucideIcons.messageSquare,
-                    size: 16,
-                    color: r.ok ? p.muted : p.danger,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(r.model, style: text.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 2),
-                      Text(
-                        [
-                          _clock(r.at),
-                          if (r.isSearch) tr('web search'),
-                          if (!r.isImage) '${_compact(r.inputTokens + r.outputTokens)} ${tr('tokens')}',
-                          if (r.inputTokens > 0 && r.cacheReadTokens > 0)
-                            tr('{n}% cache').replaceAll('{n}', '${(r.cacheReadTokens / r.inputTokens * 100).round()}'),
-                          if (r.thinkingEffort case final e?) thinkingLabel(e),
-                        ].join(' · '),
-                        style: text.bodySmall?.copyWith(fontFeatures: _figures),
-                      ),
-                      if (!r.ok && r.error != null)
-                        Text(r.error!, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodySmall?.copyWith(color: p.danger)),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      r.ok ? _creditText(r.credits ?? 0, precise: true) : tr('Not charged'),
-                      style: text.titleSmall?.copyWith(fontFeatures: _figures, color: r.ok ? null : p.muted),
-                    ),
-                    if (r.ok && r.floor != null) ...[
-                      const SizedBox(height: 4),
-                      Pill(tr('Minimum'), color: p.warning),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-      ],
     );
   }
 }
@@ -953,7 +564,7 @@ class _BudgetDialogState extends State<_BudgetDialog> {
         children: [
           Text(
             tr(
-              'The agent stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.',
+              'The agent stops starting new requests once today\'s spend reaches this, in USD. Leave empty for no limit.',
             ),
           ),
           const SizedBox(height: 14),
@@ -963,7 +574,7 @@ class _BudgetDialogState extends State<_BudgetDialog> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
             onSubmitted: (_) => _save(),
-            decoration: InputDecoration(suffixText: tr('credits'), hintText: tr('No limit'), errorText: _problem),
+            decoration: InputDecoration(prefixText: r'$ ', hintText: tr('No limit'), errorText: _problem),
           ),
         ],
       ),

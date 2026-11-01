@@ -1,15 +1,15 @@
-/// GripHub credit formatting. Prices and costs are computed by the host
-/// (agent/src/router.ts and pricing.ts) from the router's live rates and
-/// per-request floors; the app only displays them.
+/// Money formatting. Costs are pi's own figures in USD, computed by the
+/// host from each model's pricing (see agent/src/providers.ts); the app
+/// only displays them.
 library;
 
-/// Rupiah value of one GripHub credit.
-const double kRupiahPerCredit = 300;
+/// Compact USD formatting: adaptive decimals, trailing zeros trimmed.
+/// 0.10545 -> "$0.105", 0.0079 -> "$0.0079", 658.69 -> "$659".
+String formatUsd(num v) => v < 0 ? '-${formatUsd(-v)}' : '\$${formatNumber(v)}';
 
-/// Compact credit formatting: adaptive decimals, trailing zeros trimmed.
-/// 0.10545 -> "0.105", 0.0079 -> "0.0079", 658.69 -> "659".
-String formatCredits(num v) {
-  if (v == 0) return '0';
+/// A plain compact number with adaptive decimals (no unit), for editable
+/// fields: 0.10545 -> "0.105", 658.69 -> "659".
+String formatNumber(num v) {
   final abs = v.abs();
   final digits = abs >= 100 ? 0 : abs >= 1 ? 2 : abs >= 0.01 ? 3 : 4;
   var s = v.toStringAsFixed(digits);

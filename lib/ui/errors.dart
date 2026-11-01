@@ -50,3 +50,22 @@ String friendlyError(Object? e) {
   final text = '$e'.replaceFirst(RegExp(r'^Exception: '), '').trim();
   return text.isEmpty ? fallback : tr(text);
 }
+
+/// What to tell the user when connecting with a key fails (UX-03): a mistyped
+/// or half-pasted key, the commonest first-run failure, must not show the
+/// provider's raw HTTP reply. Statuses and JSON bodies are for a log; the
+/// person reads what happened and what to do, in their language.
+String keyProblem(Object e) {
+  final raw = e is AgentError ? e.message : '$e';
+  final lower = raw.toLowerCase();
+  if (RegExp(r'^\s*(401|403)\b').hasMatch(raw) || lower.contains('invalid api key') || lower.contains('incorrect api key')) {
+    return tr('The key was not accepted. Check that you copied all of it, with no spaces.');
+  }
+  if (lower.contains('timeout') || lower.contains('timed out') || lower.contains('aborted') || lower.contains('fetch failed')) {
+    return tr('The provider did not answer. Check your connection and try again.');
+  }
+  if (e is AgentError && e.code == 'offline') return friendlyError(e);
+  // Some other status: the number and the provider's JSON are for a log, not for a first-time user.
+  if (RegExp(r'^\s*\d{3}\b').hasMatch(raw)) return tr('The provider answered with an error. Try again in a moment.');
+  return e is AgentError ? tr(raw) : friendlyError(e);
+}

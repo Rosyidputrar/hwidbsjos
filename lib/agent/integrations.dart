@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 
 import 'agent_client.dart';
 import 'clock.dart';
-import 'router_account.dart';
 
 class GithubAccount {
   GithubAccount(this.json);
@@ -226,8 +225,8 @@ class AppSettings {
   bool get tinyfishSearch => json['tinyfishSearch'] != false;
   String get approvalMode => json['approvalMode'] as String? ?? 'ask_risky';
 
-  /// Subagent limits (global for all subagents); credit 0 = no limit.
-  double get subagentCreditLimit => (json['subagentCreditLimit'] as num?)?.toDouble() ?? 50;
+  /// Subagent limits (global for all subagents); a cost of 0 = no limit.
+  double get subagentCostLimit => (json['subagentCostLimit'] as num?)?.toDouble() ?? 5;
   double get subagentMinutesLimit => (json['subagentMinutesLimit'] as num?)?.toDouble() ?? 30;
   String get subagentApprovalMode => json['subagentApprovalMode'] as String? ?? approvalMode;
   bool get subagentNotifyDone => json['subagentNotifyDone'] != false;
@@ -605,31 +604,6 @@ class Integrations extends ChangeNotifier {
     );
     notifyListeners();
   }
-
-  /// GripHub account credit balance from /v1/credits, via the saved key.
-  Future<Map<String, dynamic>> griphubCredits() async =>
-      (await client.call<Map>('griphub_credits')).cast<String, dynamic>();
-
-  /// GripHub Router account data (balance, today, recent requests, rates);
-  /// [force] skips the host's 30-second cache.
-  Future<RouterAccount> routerAccount({bool force = false}) async {
-    final r = RouterAccount((await client.call<Map>('router_account', {'force': force})).cast<String, dynamic>());
-    router = r;
-    notifyListeners();
-    return r;
-  }
-
-  /// The last account data fetched this run (null until then).
-  RouterAccount? router;
-
-  /// Re-reads GripHub's model list; returns how many models it has now.
-  Future<Map<String, dynamic>> refreshGripHubModels() async =>
-      (await client.call<Map>('griphub_models_refresh')).cast<String, dynamic>();
-
-  /// GripHub's image models with their per-image price.
-  Future<List<Map<String, dynamic>>> griphubImageModels() async => [
-    for (final m in await client.call<List>('griphub_image_models')) (m as Map).cast<String, dynamic>(),
-  ];
 
   /// Search1API credits left per key, in the order of [AppSettings.keys]; null where the check failed.
   Future<List<({int? credits, String? error})>> s1Usage() async => [

@@ -7,7 +7,7 @@ import 'package:rynex/agent/agent_controller.dart';
 import 'package:rynex/agent/models.dart';
 import 'package:rynex/ui/chat_screen.dart';
 import 'package:rynex/ui/code_view.dart';
-import 'package:rynex/ui/griphub_screen.dart';
+import 'package:rynex/ui/settings_screen.dart';
 import 'package:rynex/ui/kit.dart';
 import 'package:rynex/ui/onboarding.dart';
 import 'package:rynex/ui/settings_hub.dart';
@@ -145,13 +145,13 @@ void firstRunTests() {
   }
 
   for (final look in const [Look(language: 'id', width: 320, textScale: 1.3), Look(width: 320, textScale: 2.0)]) {
-    testWidgets('UI-03: the API key screen fits ${look.name}', (tester) async {
+    testWidgets('UI-03: the providers screen fits ${look.name}', (tester) async {
       final host = FakeHost();
       host.answers['custom_providers'] = (_) => <Object>[];
-      await pumpLook(tester, look, GripHubScreen(agent: newAgent()), height: 1400);
+      await pumpLook(tester, look, SettingsScreen(agent: newAgent()), height: 1400);
       await tester.pump(const Duration(milliseconds: 200));
       collectLayoutErrors(tester, look.name);
-      expectNoOverflow('the API key screen');
+      expectNoOverflow('the providers screen');
     });
   }
 }

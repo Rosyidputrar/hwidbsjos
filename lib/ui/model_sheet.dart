@@ -6,7 +6,6 @@ import '../agent/models.dart';
 import 'errors.dart';
 import 'settings_screen.dart';
 import 'i18n.dart';
-import '../agent/pricing.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -182,11 +181,7 @@ class _ModelTile extends StatelessWidget {
       if (model.reasoning) tr('reasoning'),
       if (model.acceptsImages) tr('vision'),
     ].join('  ·  ');
-    final price = model.pricing;
-    final available = price?.available ?? true;
-    final text = Theme.of(context).textTheme;
     return ListTile(
-      enabled: available,
       onTap: saving != null ? null : () => onPick(model),
       title: Text(model.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Column(
@@ -194,35 +189,7 @@ class _ModelTile extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (details.isNotEmpty) Text(details),
-          if (!available)
-            Text(tr('Not available right now'), style: text.bodySmall?.copyWith(color: p.danger))
-          else if (price != null && price.credits != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text(
-                    [
-                      tr('{n} credits / 1M').replaceAll('{n}', localNumber(formatCredits(price.credits!))),
-                      if (price.floor != null) tr('min {n} per request').replaceAll('{n}', localNumber(formatCredits(price.floor!))),
-                    ].join('  ·  '),
-                    style: text.bodySmall,
-                  ),
-                  if (price.onPromo)
-                    Pill(
-                      price.promoEndsAt == null
-                          ? tr('Promo · normally {n}').replaceAll('{n}', localNumber(formatCredits(price.list!)))
-                          : tr('Promo until {date} · normally {n}')
-                                .replaceAll('{date}', '${price.promoEndsAt!.toLocal().day}/${price.promoEndsAt!.toLocal().month}')
-                                .replaceAll('{n}', localNumber(formatCredits(price.list!))),
-                      color: p.success,
-                    ),
-                ],
-              ),
-            ),
+          if (details.isNotEmpty) Text(details),
         ],
       ),
       // The star is its own button, so tapping it never selects the model.

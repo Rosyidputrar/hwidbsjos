@@ -1035,7 +1035,7 @@ class AgentController extends ChangeNotifier {
             ..error = e['errorMessage'] as String?
             ..tokensBefore = (result?['tokensBefore'] as num?)?.toInt()
             ..tokensAfter = (result?['estimatedTokensAfter'] as num?)?.toInt()
-            ..credits = _credits(result?['griphubCost']);
+            ..cost = (result?['cost'] as num?)?.toDouble();
         }
       case 'session_info_changed':
         sessionName = e['name'] as String?;
@@ -1124,7 +1124,7 @@ class AgentController extends ChangeNotifier {
       case 'compactionSummary':
         entries.add(
           CompactionEntry(running: false, tokensBefore: (m['tokensBefore'] as num?)?.toInt())
-            ..credits = _credits(m['griphubCost']),
+            ..cost = (m['cost'] as num?)?.toDouble(),
         );
       // A background job's result: the host's message to the agent, shown as a notice of the job's end.
       case 'custom' when m['customType'] == 'griphub_job':
@@ -1144,9 +1144,6 @@ class AgentController extends ChangeNotifier {
     }
     return (entries: entries, tools: tools);
   }
-
-  /// The credits of a host cost estimate (`griphubCost`), or null.
-  static double? _credits(Object? cost) => cost is Map ? (cost['credits'] as num?)?.toDouble() : null;
 
   void _applyDelta(Map<String, dynamic> d) {
     final entry = _streaming ??= _lastAssistant();

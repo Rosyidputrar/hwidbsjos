@@ -1,11 +1,11 @@
-// UX-08: spending had no limit until one was set, and nothing said so: a new key started with none, the subagent card
-// did not say what a subagent may spend, and the Usage row read the same either way. A first key now offers a daily
-// limit (with what it means in rupiah), and the limits say what they are.
+// UX-08: spending had no limit until one was set, and nothing said so: a new connection started with none, the
+// subagent card did not say what a subagent may spend, and the Usage row read the same either way. A first
+// connection now offers a daily limit, and the limits say what they are (in USD, at each model's own prices).
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rynex/agent/integrations.dart';
 import 'package:rynex/ui/daily_limit_offer.dart';
-import 'package:rynex/ui/griphub_screen.dart';
+import 'package:rynex/ui/settings_screen.dart';
 import 'package:rynex/ui/settings_hub.dart';
 import 'package:rynex/ui/subagent_settings_screen.dart';
 
@@ -58,20 +58,21 @@ void main() {
       });
     }
 
-    testWidgets('says there is no limit and what each choice costs in rupiah', (tester) async {
+    testWidgets('says there is no limit and what each choice costs', (tester) async {
       await open(tester);
       expect(find.text('Set a daily limit?'), findsOneWidget);
-      expect(find.text('10 credits · Rp 3.000 a day'), findsOneWidget);
-      expect(find.text('25 credits · Rp 7.500 a day'), findsOneWidget);
-      expect(find.text('100 credits · Rp 30.000 a day'), findsOneWidget);
+      expect(find.text('\$1 a day'), findsOneWidget);
+      expect(find.text('\$2.5 a day'), findsOneWidget);
+      expect(find.text('\$5 a day'), findsOneWidget);
+      expect(find.text('\$10 a day'), findsOneWidget);
       expect(find.text('No limit'), findsOneWidget);
     });
 
     testWidgets('a choice is saved as the daily budget', (tester) async {
       final (host, result) = await open(tester);
-      await tester.tap(find.text('25 credits · Rp 7.500 a day'));
-      expect(await result(), 25);
-      expect(host.sent('settings_set').single['settings'], {'dailyBudget': 25.0});
+      await tester.tap(find.text('\$2.5 a day'));
+      expect(await result(), 2.5);
+      expect(host.sent('settings_set').single['settings'], {'dailyBudget': 2.5});
     });
 
     testWidgets('No limit leaves things as they were, and saves nothing', (tester) async {
@@ -104,69 +105,74 @@ void main() {
     }
   });
 
-  group('after the first key', () {
-    Future<FakeHost> save(WidgetTester tester, {required bool hadKey, double budget = 0}) async {
+  group('after the first connection', () {
+    Future<FakeHost> save(WidgetTester tester, {required bool hadProvider, double budget = 0}) async {
       final host = FakeHost();
       host.stored['dailyBudget'] = budget;
-      host.answers['custom_providers'] = (_) => hadKey
+      host.answers['custom_providers'] = (_) => hadProvider
           ? [
-              {'id': 'griphub', 'name': 'GripHub Router', 'baseUrl': 'x', 'hasKey': true, 'models': <Object>[]},
+              {'id': 'test', 'name': 'Test', 'baseUrl': 'https://x.test/v1', 'api': 'openai-completions', 'hasKey': true, 'models': <Object>[]},
             ]
           : <Object>[];
-      host.answers['custom_provider_fetch_models'] = (_) => <Object>[];
       host.answers['custom_provider_save'] = (_) => null;
       host.answers['providers'] = (_) => <Object>[];
       host.answers['models'] = (_) => <Object>[];
       host.answers['state'] = (_) => <String, dynamic>{};
-      await pumpLook(tester, const Look(), GripHubScreen(agent: newAgent()), height: 1200);
+      await pumpLook(tester, const Look(), SettingsScreen(agent: newAgent()), height: 1200);
       await tester.pump(const Duration(milliseconds: 200));
-      await tester.enterText(find.byType(TextField).first, 'sk-good-key');
-      await tester.tap(find.text('Save & load models'));
+      await tester.tap(find.text('Add'));
+      await frames(tester);
+      // The providers screen has a search field of its own behind the sheet; scope to the sheet.
+      final fields = find.descendant(of: find.byType(BottomSheet), matching: find.byType(TextField));
+      await tester.enterText(fields.at(0), 'Test');
+      await tester.enterText(fields.at(1), 'https://x.test/v1');
+      await tester.enterText(fields.at(3), 'm1');
+      await tester.tap(find.widgetWithText(FilledButton, 'Add endpoint'));
       await frames(tester, 14);
       return host;
     }
 
-    testWidgets('saving a first key offers a daily limit', (tester) async {
-      await save(tester, hadKey: false);
+    testWidgets('saving a first endpoint offers a daily limit', (tester) async {
+      await save(tester, hadProvider: false);
       expect(find.text('Set a daily limit?'), findsOneWidget);
     });
 
-    testWidgets('replacing a key that was already there does not ask again', (tester) async {
-      await save(tester, hadKey: true);
+    testWidgets('connecting when one was already there does not ask again', (tester) async {
+      await save(tester, hadProvider: true);
       expect(find.text('Set a daily limit?'), findsNothing);
     });
 
-    testWidgets('a first key with a limit already set does not ask either', (tester) async {
-      await save(tester, hadKey: false, budget: 20);
+    testWidgets('a first connection with a limit already set does not ask either', (tester) async {
+      await save(tester, hadProvider: false, budget: 20);
       expect(find.text('Set a daily limit?'), findsNothing);
     });
   });
 
   group('the limits say what they are', () {
     test('a subagent: its ceiling, and three at once', () {
-      expect(subagentSpendNote(AppSettings(const {'subagentCreditLimit': 50})), 'Each subagent can spend up to 50 credits, and up to 3 run at once. Costs are estimates.');
-      expect(subagentSpendNote(AppSettings(const {'subagentCreditLimit': 0})), startsWith('No cost limit: a subagent keeps spending'));
-      expect(subagentSpendNote(null), contains('50 credits'), reason: 'the default, before settings load');
+      expect(subagentSpendNote(AppSettings(const {'subagentCostLimit': 5})), 'Each subagent can spend up to \$5, and up to 3 run at once. Costs are estimates.');
+      expect(subagentSpendNote(AppSettings(const {'subagentCostLimit': 0})), startsWith('No cost limit: a subagent keeps spending'));
+      expect(subagentSpendNote(null), contains('\$5'), reason: 'the default, before settings load');
     });
 
     test('the Usage row says when there is no daily limit', () {
       expect(budgetSubtitle(AppSettings(const {'dailyBudget': 0})), 'No daily limit: tap to set one');
       expect(budgetSubtitle(null), 'No daily limit: tap to set one');
-      expect(budgetSubtitle(AppSettings(const {'dailyBudget': 40})), '40 credits per day');
+      expect(budgetSubtitle(AppSettings(const {'dailyBudget': 40})), '\$40 per day');
     });
 
     test('in Indonesian', () {
       applyLook(const Look(language: 'id'));
       expect(budgetSubtitle(AppSettings(const {'dailyBudget': 0})), 'Tanpa batas harian: ketuk untuk mengatur');
-      expect(subagentSpendNote(AppSettings(const {'subagentCreditLimit': 50})), contains('maksimal 3 berjalan bersamaan'));
+      expect(subagentSpendNote(AppSettings(const {'subagentCostLimit': 5})), contains('maksimal 3 berjalan bersamaan'));
     });
 
     testWidgets('the subagent screen shows it', (tester) async {
       final host = FakeHost();
-      host.stored['subagentCreditLimit'] = 50;
+      host.stored['subagentCostLimit'] = 5;
       await pumpLook(tester, const Look(), SubagentSettingsScreen(agent: newAgent()), height: 1400);
       await frames(tester);
-      expect(find.textContaining('Each subagent can spend up to 50 credits'), findsOneWidget);
+      expect(find.textContaining('Each subagent can spend up to \$5'), findsOneWidget);
       expect(host, isNotNull);
     });
   });

@@ -757,7 +757,7 @@ class _LinkChip extends StatelessWidget {
 /// "1 server" / "3 servers" in the app's language (an English plural used to be built in place).
 /// The Usage & budget row's second line: the daily limit, or that there is none (spending is not capped by default).
 String budgetSubtitle(AppSettings? s) => (s?.dailyBudget ?? 0) > 0
-    ? tr('{n} per day').replaceAll('{n}', '${localNumber(formatCredits(s!.dailyBudget))} ${tr('credits')}')
+    ? tr('{n} per day').replaceAll('{n}', formatUsd(s!.dailyBudget))
     : tr('No daily limit: tap to set one');
 
 String serverCount(int n) => n == 1 ? tr('1 server') : tr('{n} servers').replaceAll('{n}', '$n');

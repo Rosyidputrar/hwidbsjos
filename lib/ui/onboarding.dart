@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
-import 'griphub_screen.dart';
+import 'settings_screen.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
 
-/// First-run welcome, rewritten for GripHub: what the router gives you,
-/// then straight to adding its API key.
+/// First-run welcome: what the agent is, then straight to connecting a
+/// provider — an account, an API key, or the user's own endpoint.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key, required this.agent});
   final AgentController agent;
@@ -21,19 +21,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final pages = PageController();
   int page = 0;
 
-  // Carousel kept, copy rewritten for GripHub: slide 1 is the brand,
-  // slide 2 the models + credits, slide 3 ends on the key action.
+  // Carousel: slide 1 is the brand, slide 2 the bring-your-own models,
+  // slide 3 ends on the connect action.
   static const _slides = [
-    (_Hero.logo, 'GripHub AI Agent', 'One GripHub key, every AI model.'),
+    (_Hero.logo, 'Rynex AI Agent', 'An AI coding agent on your phone.'),
     (
       _Hero.models,
-      '50+ models,\none key',
-      'Claude, GPT, Gemini, DeepSeek and more, paid with GripHub credits — 1 credit = Rp 300.'
+      'Every model,\nyour choice',
+      'Claude, GPT, Gemini, DeepSeek and more — bring your own account, API key or endpoint.'
     ),
     (
       _Hero.key,
-      'Add your key\nto start',
-      'Paste your GripHub Router API key. The model list loads itself — nothing else to configure.'
+      'Connect a provider\nto start',
+      'Sign in, paste an API key, or point Rynex at your own server. Nothing else to configure.'
     ),
   ];
 
@@ -44,14 +44,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ? pages.jumpToPage((pages.page ?? 0).round() + 1)
       : pages.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
 
-  /// Push the GripHub key screen; a saved key finishes onboarding straight
-  /// into Home (no connect card — the key is already there). Backing out
+  /// Push the providers screen; coming back with a provider connected
+  /// finishes onboarding straight into Home. Backing out without connecting
   /// leaves the user on this slide, with Skip still available.
   Future<void> _addKey() async {
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => GripHubScreen(agent: widget.agent)),
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SettingsScreen(agent: widget.agent)),
     );
-    if (saved == true && mounted) _start();
+    if (!mounted) return;
+    await widget.agent.refreshProviders();
+    if (mounted && widget.agent.providers.any((p) => p.configured)) _start();
   }
 
   @override
@@ -168,7 +170,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-              child: PrimaryButton(label: last ? tr('Add API key') : tr('Next'), onPressed: last ? _addKey : _next),
+              child: PrimaryButton(label: last ? tr('Connect a provider') : tr('Next'), onPressed: last ? _addKey : _next),
             ),
           ],
         ),

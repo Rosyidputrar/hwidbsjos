@@ -7,18 +7,12 @@ import 'errors.dart';
 import 'i18n.dart';
 import 'kit.dart';
 
-/// The limits offered, in GripHub credits a day.
-const dailyLimitChoices = <double>[10, 25, 50, 100];
+/// The limits offered, in USD a day.
+const dailyLimitChoices = <double>[1, 2.5, 5, 10];
 
-/// "Rp 7.500", with dot thousands.
-String rupiahOf(num credits) {
-  final s = (credits * kRupiahPerCredit).round().toString();
-  return 'Rp ${s.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}';
-}
-
-/// Spending has no limit until one is set, and nothing said so: a new key started with none. Offered once, right after
-/// a key is first saved (and only when no limit is set), with what each choice means in rupiah; "No limit" leaves it
-/// as it was. Returns the limit chosen, or null when none was set.
+/// Spending has no limit until one is set, and nothing said so: a new connection started with none. Offered once,
+/// right after a provider is first connected (and only when no limit is set); "No limit" leaves it as it was.
+/// Returns the limit chosen, or null when none was set.
 Future<double?> offerDailyLimit(BuildContext context, AgentController agent) async {
   try {
     final settings = await agent.integrations.refreshSettings();
@@ -41,14 +35,14 @@ Future<double?> offerDailyLimit(BuildContext context, AgentController agent) asy
               Text(tr('Set a daily limit?'), style: text.titleLarge),
               const SizedBox(height: 10),
               Text(
-                tr('The agent stops starting requests once a day\'s spend reaches it. 1 credit = Rp 300. You can change it later in Settings, under Usage & budget.'),
+                tr('The agent stops starting requests once a day\'s spend reaches it. You can change it later in Settings, under Usage & budget.'),
                 style: text.bodyMedium,
               ),
               const SizedBox(height: 16),
               for (final v in dailyLimitChoices) ...[
                 OutlinedButton(
                   onPressed: () => Navigator.of(sheet).pop(v),
-                  child: Text('${localNumber(formatCredits(v))} ${tr('credits')} · ${rupiahOf(v)} ${tr('a day')}'),
+                  child: Text('${formatUsd(v)} ${tr('a day')}'),
                 ),
                 const SizedBox(height: 8),
               ],

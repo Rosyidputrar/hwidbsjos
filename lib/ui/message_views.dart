@@ -424,9 +424,9 @@ class AssistantMessageView extends StatelessWidget {
   /// shows as a plain tool card with the report as its output.
   final Widget? Function(String toolCallId)? subagentCard;
 
-  /// What the subagent a `subagent` tool call started has cost: found, with its credits (null when unknown);
+  /// What the subagent a `subagent` tool call started has cost: found, with its cost in USD (null when unknown);
   /// null when the app knows no subagent for the call. Counted apart from the turn's own cost.
-  final ({double? credits})? Function(String toolCallId)? subagentCost;
+  final ({double? cost})? Function(String toolCallId)? subagentCost;
 
   /// The turn's copy-and-model footer, when this is the turn's last message
   /// and the turn is over (see [turnFooters]); null draws none.
@@ -475,7 +475,7 @@ class AssistantMessageView extends StatelessWidget {
           outcome: f.outcome,
           subagents: subagents.isEmpty
               ? null
-              : (count: subagents.length, credits: subagents.any((c) => c.credits == null) ? null : subagents.fold<double>(0, (a, c) => a + c.credits!)),
+              : (count: subagents.length, cost: subagents.any((c) => c.cost == null) ? null : subagents.fold<double>(0, (a, c) => a + c.cost!)),
         ),
       );
     }
@@ -608,9 +608,9 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
 }
 
 /// The subagents a turn started: how many, and what they cost together (null when any is unknown).
-typedef SubagentsCost = ({int count, double? credits});
+typedef SubagentsCost = ({int count, double? cost});
 
-String _creditsText(double c) => '~${localNumber(formatCredits(c))} ${tr('credits')}';
+String _costText(double c) => '~${formatUsd(c)}';
 
 class _MessageFooter extends StatelessWidget {
   const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took, this.outcome = TurnOutcome.done});
@@ -630,13 +630,13 @@ class _MessageFooter extends StatelessWidget {
     final p = context.palette;
     final style = TextStyle(fontSize: 11.5, color: p.faint);
     final c = cost;
-    // Tokens and credits are never cut off.
+    // Tokens and cost are never cut off.
     final usage = c == null
         ? null
         : [
             tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(c.tokens))),
-            if (c.credits case final credits?) _creditsText(credits),
-            if (subagents?.credits case final sub?) '(+${localNumber(formatCredits(sub))} ${tr('subagent')})',
+            if (c.cost case final cost?) _costText(cost),
+            if (subagents?.cost case final sub?) '(+${formatUsd(sub)} ${tr('subagent')})',
           ].join(' · ');
     // Side by side when they fit; on a narrow screen or with large text, the cost wraps under the model.
     final details = Wrap(
@@ -689,8 +689,9 @@ class _MessageFooter extends StatelessWidget {
   }
 }
 
-/// What one turn cost, line by line, as the subagent panel shows it: requests (and how many were raised to the
-/// model's minimum), tokens billed (cache included), the estimate, and the subagents it started, apart.
+/// What one turn cost, line by line, as the subagent panel shows it: requests,
+/// tokens billed (cache included), the cost at the model's own prices, and
+/// the subagents it started, apart.
 class TurnCostSheet extends StatelessWidget {
   const TurnCostSheet({super.key, required this.cost, this.model, this.subagents});
   final TurnCost cost;
@@ -720,7 +721,7 @@ class TurnCostSheet extends StatelessWidget {
         ],
       ),
     );
-    String money(double? v) => v == null ? '—' : '${_creditsText(v)} · Rp ${(v * kRupiahPerCredit).round()}';
+    String money(double? v) => v == null ? '—' : _costText(v);
     final sub = subagents;
     return SafeArea(
       child: SingleChildScrollView(
@@ -737,13 +738,7 @@ class TurnCostSheet extends StatelessWidget {
               child: Column(
                 children: [
                   if (model case final m?) row(LucideIcons.cpu, tr('Model'), m),
-                  row(
-                    LucideIcons.activity,
-                    tr('Requests'),
-                    c.floored > 0
-                        ? tr('{n} ({m} at the minimum)').replaceAll('{n}', '${c.requests}').replaceAll('{m}', '${c.floored}')
-                        : '${c.requests}',
-                  ),
+                  row(LucideIcons.activity, tr('Requests'), '${c.requests}'),
                   row(
                     LucideIcons.layers,
                     tr('Tokens billed'),
@@ -753,13 +748,13 @@ class TurnCostSheet extends StatelessWidget {
                               .replaceAll('{m}', '${(c.cached / c.tokens * 100).round()}')
                         : localNumber(formatTokens(c.tokens)),
                   ),
-                  row(LucideIcons.coins, tr('Cost'), money(c.credits), color: c.credits == null ? p.faint : null),
+                  row(LucideIcons.coins, tr('Cost'), money(c.cost), color: c.cost == null ? p.faint : null),
                   if (sub != null)
                     row(
                       LucideIcons.bot,
                       sub.count == 1 ? tr('Subagent') : tr('{n} subagents').replaceAll('{n}', '${sub.count}'),
-                      money(sub.credits),
-                      color: sub.credits == null ? p.faint : null,
+                      money(sub.cost),
+                      color: sub.cost == null ? p.faint : null,
                     ),
                 ],
               ),
@@ -767,9 +762,9 @@ class TurnCostSheet extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               tr(
-                c.credits == null
-                    ? 'No GripHub price is known for this model, so only its tokens are shown.'
-                    : 'Estimated per request at GripHub\'s live rate, including cache and each model\'s minimum; the exact charge is in Usage.',
+                c.cost == null
+                    ? 'No price is known for this model, so only its tokens are shown.'
+                    : 'Priced per request from the model\'s own rates, including cache; the totals are in Usage.',
               ),
               style: text.bodySmall?.copyWith(color: p.faint),
             ),
@@ -1427,7 +1422,7 @@ class CompactionView extends StatelessWidget {
         ? tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(e.tokensBefore!)))
         : '${localNumber(formatTokens(e.tokensBefore!))} → ${tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(e.tokensAfter!)))}';
     // The summary is a paid request too: what it cost goes with what it saved.
-    final detail = [?tokens, if (e.credits case final c?) _creditsText(c)].join(' · ');
+    final detail = [?tokens, if (e.cost case final c?) _costText(c)].join(' · ');
     final clock = LiveClock(
       label: e.running
           ? tr('Summarizing the context')

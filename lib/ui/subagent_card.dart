@@ -82,7 +82,7 @@ String subagentStopText(SubagentState s) => switch (s.stopCode) {
   SubagentStopCode.user => tr('Stopped by you.'),
   SubagentStopCode.force => tr('Force-stopped by you.'),
   SubagentStopCode.time => tr('The time limit was reached.'),
-  SubagentStopCode.credit => tr('The cost limit was reached.'),
+  SubagentStopCode.cost => tr('The cost limit was reached.'),
   SubagentStopCode.beforeStart => tr('Cancelled before it started.'),
   SubagentStopCode.limit => '${tr('Stopped by a limit')}: ${s.stopReason ?? ''}'.trim(),
   null => s.stopReason ?? tr('Stopped.'),
@@ -90,17 +90,17 @@ String subagentStopText(SubagentState s) => switch (s.stopCode) {
 
 String _toolCount(int n) => n == 1 ? tr('1 tool') : tr('{n} tools').replaceAll('{n}', '$n');
 
-String _creditsText(double c) => '~${localNumber(formatCredits(c))} ${tr('credits')}';
+String _costText(double c) => '~${formatUsd(c)}';
 
-/// "4 tools • 1m 15s • ~0.06 credits"; [full] adds tokens.
+/// "4 tools • 1m 15s • ~$0.06"; [full] adds tokens.
 String subagentMeta(SubagentState s, {bool full = false}) {
   final e = s.elapsed;
-  final c = s.credits;
+  final c = s.cost;
   return [
     _toolCount(s.tools.length),
     ?(e == null ? null : formatDurationShort(e)),
     if (full && s.totalTokens > 0) tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(s.totalTokens))),
-    ?(c == null ? null : _creditsText(c)),
+    ?(c == null ? null : _costText(c)),
   ].join(' • ');
 }
 
@@ -742,7 +742,7 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
         s.status == SubagentStatus.queued;
     final report = (s.report ?? '').trim();
     // The cost limit only works when the model's price is known.
-    final costUnknown = s.startedAt != null && s.credits == null && s.requests > 0;
+    final costUnknown = s.startedAt != null && s.cost == null && s.requests > 0;
 
     Widget section(String title, {Widget? trailing}) =>
         SectionLabel(title, trailing: trailing, padding: const EdgeInsets.fromLTRB(0, 20, 0, 8));
@@ -1337,8 +1337,7 @@ class CrossChatBanner extends StatelessWidget {
 }
 
 /// Model, thinking level and the running cost, line by line: requests,
-/// tokens (cache included, as GripHub bills them), how many requests were
-/// raised to the model's minimum, and the estimate in credits and rupiah.
+/// tokens (cache included), and the cost so far in USD.
 class SubagentCostPanel extends StatelessWidget {
   const SubagentCostPanel({super.key, required this.state});
   final SubagentState state;
@@ -1367,7 +1366,7 @@ class SubagentCostPanel extends StatelessWidget {
       ),
     );
     final cached = s.cacheReadTokens + s.cacheWriteTokens;
-    final c = s.credits;
+    final c = s.cost;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.md)),
@@ -1375,14 +1374,7 @@ class SubagentCostPanel extends StatelessWidget {
         children: [
           if (s.modelName ?? s.model case final name?) row(LucideIcons.cpu, tr('Model'), name),
           if (s.thinkingLevel case final level?) row(LucideIcons.brain, tr('Thinking'), thinkingLabel(level)),
-          if (s.rate case final r?) row(LucideIcons.tag, tr('Rate'), tr('{n} credits / 1M tokens').replaceAll('{n}', localNumber(formatCredits(r)))),
-          row(
-            LucideIcons.activity,
-            tr('Requests'),
-            s.flooredRequests > 0
-                ? tr('{n} ({m} at the minimum)').replaceAll('{n}', '${s.requests}').replaceAll('{m}', '${s.flooredRequests}')
-                : '${s.requests}',
-          ),
+          row(LucideIcons.activity, tr('Requests'), '${s.requests}'),
           row(
             LucideIcons.layers,
             tr('Tokens billed'),
@@ -1393,13 +1385,13 @@ class SubagentCostPanel extends StatelessWidget {
           row(
             LucideIcons.coins,
             tr(s.isActive ? 'Cost so far' : 'Cost'),
-            c == null ? '—' : '~${localNumber(formatCredits(c))} ${tr('credits')} · Rp ${(c * kRupiahPerCredit).round()}',
+            c == null ? '—' : '~${formatUsd(c)}',
             color: c == null ? p.faint : null,
           ),
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              tr('Estimated per request at GripHub\'s live rate, including cache and each model\'s minimum; the exact charge is in Usage.'),
+              tr('Priced per request from the model\'s own rates, including cache; the totals are in Usage.'),
               style: text.bodySmall?.copyWith(color: p.faint),
             ),
           ),

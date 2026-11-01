@@ -30,13 +30,13 @@ SubagentStatus _status(String? s, [SubagentStatus fallback = SubagentStatus.queu
 };
 
 /// Why a stopped subagent stopped (host `stopCode`).
-enum SubagentStopCode { user, force, time, credit, beforeStart, limit }
+enum SubagentStopCode { user, force, time, cost, beforeStart, limit }
 
 SubagentStopCode? _stopCode(String? s) => switch (s) {
   'user' => SubagentStopCode.user,
   'force' => SubagentStopCode.force,
   'time' => SubagentStopCode.time,
-  'credit' => SubagentStopCode.credit,
+  'cost' => SubagentStopCode.cost,
   'before_start' => SubagentStopCode.beforeStart,
   'limit' => SubagentStopCode.limit,
   _ => null,
@@ -165,21 +165,17 @@ class SubagentState {
   int cacheReadTokens = 0;
   int cacheWriteTokens = 0;
 
-  /// Estimated GripHub credits, summed per model request by the router's rule
-  /// (rate × all tokens incl. cache, or the model's floor when higher).
-  double? credits;
+  /// Spend in USD by pi's own per-request cost, summed as requests end;
+  /// null when a request's price is unknown.
+  double? cost;
 
-  /// Model requests so far, and how many were billed at the model's minimum.
+  /// Model requests so far.
   int requests = 0;
-  int flooredRequests = 0;
 
   /// The model doing the work, its name, and the thinking (reasoning) level.
   String? model;
   String? modelName;
   String? thinkingLevel;
-
-  /// The model's rate (credits per 1M tokens).
-  double? rate;
 
   /// All tokens billed: input, output and cache.
   int get totalTokens => inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
@@ -443,13 +439,11 @@ class SubagentState {
     cacheReadTokens = i('cacheReadTokens', cacheReadTokens);
     cacheWriteTokens = i('cacheWriteTokens', cacheWriteTokens);
     requests = i('requests', requests);
-    flooredRequests = i('flooredRequests', flooredRequests);
-    final c = (r['credits'] as num?)?.toDouble();
-    credits = replace ? c : (c ?? credits);
+    final c = (r['cost'] as num?)?.toDouble();
+    cost = replace ? c : (c ?? cost);
     model = r['model'] as String? ?? model;
     modelName = r['modelName'] as String? ?? modelName;
     thinkingLevel = r['thinkingLevel'] as String? ?? thinkingLevel;
-    rate = (r['rate'] as num?)?.toDouble() ?? rate;
   }
 }
 
