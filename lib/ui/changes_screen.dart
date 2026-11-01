@@ -4,18 +4,11 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import 'diff_view.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
+import 'i18n.dart';
 import 'theme.dart';
-
-String _ago(DateTime t) {
-  final d = DateTime.now().difference(t);
-  if (d.inSeconds < 60) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours < 24) return '${d.inHours}h ago';
-  if (d.inDays < 30) return '${d.inDays}d ago';
-  return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
-}
 
 /// What the agent changed since a checkpoint, with a one-tap undo. Checkpoints
 /// are shadow snapshots taken before the agent's first edit in each run, so
@@ -48,7 +41,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
 
   void _error(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 
   CheckpointInfo? get _current => _checkpoints?.where((c) => c.id == _selected).firstOrNull;
@@ -122,26 +115,27 @@ class _ChangesScreenState extends State<ChangesScreen> {
   Future<void> _undo() async {
     final cp = _current;
     if (cp == null) return;
-    final ok = await showDialog<bool>(
+    setState(() => _busy = true);
+    List<String> removes;
+    try {
+      removes = await _f.restorePlan(cp.id);
+    } catch (e) {
+      _error(e);
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    final keep = await showDialog<List<String>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Undo these changes?'),
-        content: Text(
-          'Files will be put back the way they were at "${cp.label}". '
-          'The current state is saved as a checkpoint first, so you can undo this again.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Undo changes')),
-        ],
-      ),
+      builder: (_) => UndoCheckpointDialog(label: cp.label, removes: removes),
     );
-    if (ok != true) return;
+    if (keep == null) return;
     setState(() => _busy = true);
     try {
-      await _f.restore(cp.id);
+      await _f.restore(cp.id, keep: keep);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Restored "${cp.label}"')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Restored')} "${cp.label}"')));
       setState(() => _selected = null);
       await _refresh();
     } catch (e) {
@@ -156,16 +150,16 @@ class _ChangesScreenState extends State<ChangesScreen> {
     final label = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Create checkpoint'),
+        title: Text(tr('Create checkpoint')),
         content: TextField(
           controller: ctrl,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Label, e.g. Before refactor'),
+          decoration: InputDecoration(hintText: tr('Label, e.g. Before refactor')),
           onSubmitted: (v) => Navigator.pop(context, v),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, ctrl.text), child: const Text('Create')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(context, ctrl.text), child: Text(tr('Create'))),
         ],
       ),
     );
@@ -175,7 +169,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
     try {
       await _f.createCheckpoint(l);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Checkpoint "$l" saved')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Checkpoint saved')}: "$l"')));
       setState(() => _selected = null);
       await _refresh();
     } catch (e) {
@@ -188,14 +182,14 @@ class _ChangesScreenState extends State<ChangesScreen> {
     final list = _checkpoints;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Changes'),
+        title: Text(tr('Changes')),
         actions: [
-          IconButton(tooltip: 'Create checkpoint', icon: const Icon(LucideIcons.bookmarkPlus), onPressed: _create),
-          IconButton(tooltip: 'Refresh', icon: const Icon(LucideIcons.refreshCw), onPressed: _refresh),
+          IconButton(tooltip: tr('Create checkpoint'), icon: const Icon(LucideIcons.bookmarkPlus), onPressed: _create),
+          IconButton(tooltip: tr('Refresh'), icon: const Icon(LucideIcons.refreshCw), onPressed: _refresh),
         ],
       ),
       body: list == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: BusySpinner.page())
           : RefreshIndicator(onRefresh: _refresh, child: list.isEmpty ? _empty(context) : _content(context, list)),
     );
   }
@@ -208,10 +202,16 @@ class _ChangesScreenState extends State<ChangesScreen> {
       children: [
         const Illustration('git', height: 160),
         const SizedBox(height: 20),
-        Text('No checkpoints yet', textAlign: TextAlign.center, style: text.titleMedium),
+        Text(tr('No checkpoints yet'), textAlign: TextAlign.center, style: text.titleMedium),
         const SizedBox(height: 6),
         Text(
-          'Checkpoints appear when the agent starts changing files',
+          tr('Checkpoints appear when the agent starts changing files'),
+          textAlign: TextAlign.center,
+          style: text.bodySmall,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          tr('Environment files (.env) are included, so undo restores them too.'),
           textAlign: TextAlign.center,
           style: text.bodySmall,
         ),
@@ -220,7 +220,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
           child: OutlinedButton.icon(
             onPressed: _create,
             icon: const Icon(LucideIcons.bookmarkPlus, size: 16),
-            label: const Text('Create checkpoint now'),
+            label: Text(tr('Create checkpoint now')),
           ),
         ),
       ],
@@ -238,7 +238,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
       children: [
-        const SectionLabel('Checkpoints', padding: EdgeInsets.fromLTRB(4, 8, 4, 10)),
+        SectionLabel(tr('Checkpoints'), padding: EdgeInsets.fromLTRB(4, 8, 4, 10)),
         SizedBox(
           height: 64,
           child: ListView.separated(
@@ -267,7 +267,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Changes since', style: text.bodySmall),
+                          Text(tr('Changes since'), style: text.bodySmall),
                           Text(cp.label, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleMedium),
                         ],
                       ),
@@ -279,7 +279,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
                   spacing: 6,
                   runSpacing: 6,
                   children: [
-                    Pill(_ago(cp.time), icon: LucideIcons.clock),
+                    Pill(formatAgo(cp.time), icon: LucideIcons.clock),
                     if (changes != null) ...[
                       Pill('${changes.files.length} ${changes.files.length == 1 ? 'file' : 'files'}'),
                       Pill('+$adds', color: p.success),
@@ -289,7 +289,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
                 ),
                 const SizedBox(height: 16),
                 PrimaryButton(
-                  label: 'Undo these changes',
+                  label: tr('Undo these changes'),
                   icon: LucideIcons.undo2,
                   busy: _busy,
                   onPressed: changes == null || changes.files.isEmpty ? null : _undo,
@@ -297,11 +297,11 @@ class _ChangesScreenState extends State<ChangesScreen> {
               ],
             ),
           ),
-        const SectionLabel('Files'),
+        SectionLabel(tr('Files')),
         if (_loadingChanges && changes == null)
           const Padding(
             padding: EdgeInsets.all(32),
-            child: Center(child: CircularProgressIndicator()),
+            child: Center(child: BusySpinner.page()),
           )
         else if (changes == null || changes.files.isEmpty)
           SurfaceCard(
@@ -309,7 +309,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
               children: [
                 Icon(LucideIcons.check, size: 18, color: p.success),
                 const SizedBox(width: 10),
-                Expanded(child: Text('Nothing changed since this checkpoint', style: text.bodyMedium)),
+                Expanded(child: Text(tr('Nothing changed since this checkpoint'), style: text.bodyMedium)),
               ],
             ),
           )
@@ -326,7 +326,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
     final name = slash >= 0 ? f.path.substring(slash + 1) : f.path;
     final dir = slash >= 0 ? f.path.substring(0, slash) : '';
     return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.lg)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -371,7 +371,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
               child: _loadingFile.contains(f.path)
                   ? const Padding(
                       padding: EdgeInsets.all(20),
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(child: BusySpinner.page()),
                     )
                   : f.binary
                   ? DiffView(patch: 'Binary files a/${f.path} and b/${f.path} differ', showHeaders: false)
@@ -393,16 +393,13 @@ class _CheckpointChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final fg = selected ? p.accent : p.text;
-    final sub = p.muted;
+    final fg = selected ? p.inverse : p.text;
+    final sub = selected ? p.inverse.withValues(alpha: 0.7) : p.muted;
     return Material(
-      color: selected ? p.accent.withValues(alpha: 0.12) : p.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.md),
-        side: BorderSide(color: selected ? p.accent.withValues(alpha: 0.4) : p.border),
-      ),
+      color: selected ? p.text : p.surface,
+      borderRadius: BorderRadius.circular(Radii.lg),
       child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.md),
+        borderRadius: BorderRadius.circular(Radii.lg),
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minWidth: 120, maxWidth: 220),
@@ -421,7 +418,7 @@ class _CheckpointChip extends StatelessWidget {
               Text(
                 [
                   if (latest) 'Latest',
-                  _ago(checkpoint.time),
+                  formatAgo(checkpoint.time),
                   '${checkpoint.files} ${checkpoint.files == 1 ? 'file' : 'files'}',
                 ].join(' · '),
                 maxLines: 1,
@@ -431,6 +428,122 @@ class _CheckpointChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Confirms an undo, listing the files it deletes (they did not exist at the
+/// checkpoint). Some may be the user's own, made after the agent's run: each
+/// can be kept. Pops the paths to keep, or null when cancelled.
+class UndoCheckpointDialog extends StatefulWidget {
+  const UndoCheckpointDialog({super.key, required this.label, required this.removes});
+  final String label;
+  final List<String> removes;
+
+  @override
+  State<UndoCheckpointDialog> createState() => _UndoCheckpointDialogState();
+}
+
+class _UndoCheckpointDialogState extends State<UndoCheckpointDialog> {
+  final _keep = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final removes = widget.removes;
+    final deleting = removes.length - _keep.length;
+    return AlertDialog(
+      title: Text(tr('Undo these changes?')),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              tr(
+                'Files will be put back the way they were at "{label}". '
+                'The current state is saved as a checkpoint first, so you can undo this again.',
+              ).replaceAll('{label}', widget.label),
+            ),
+            if (removes.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                tr('These files did not exist then and will be deleted. Tick any you made yourself to keep them.'),
+                style: text.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                // Material, not a decorated box: the tiles' ink must paint on it.
+                child: Material(
+                  color: p.surface,
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 240),
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      children: [
+                        for (final f in removes)
+                          CheckboxListTile(
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            value: _keep.contains(f),
+                            onChanged: (v) => setState(() => v == true ? _keep.add(f) : _keep.remove(f)),
+                            title: Text(
+                              f.split('/').last,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: mono,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: _keep.contains(f) ? p.text : p.danger,
+                                decoration: _keep.contains(f) ? null : TextDecoration.lineThrough,
+                                decorationColor: p.danger,
+                              ),
+                            ),
+                            // Name first (what the user recognises), its folder below.
+                            subtitle: f.contains('/')
+                                ? Text(
+                                    f.substring(0, f.lastIndexOf('/')),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontFamily: mono, fontSize: 11, color: p.muted),
+                                  )
+                                : null,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                deleting == 0
+                    ? tr('No files will be deleted.')
+                    : (deleting == 1
+                          ? tr('1 file will be deleted.')
+                          : tr('{n} files will be deleted.').replaceAll('{n}', '$deleting')),
+                style: text.bodySmall?.copyWith(color: deleting == 0 ? p.muted : p.danger),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+        FilledButton(
+          style: removes.isEmpty || deleting == 0
+              ? null
+              : dangerButtonStyle(context),
+          onPressed: () => Navigator.pop(context, _keep.toList()),
+          child: Text(tr('Undo changes')),
+        ),
+      ],
     );
   }
 }

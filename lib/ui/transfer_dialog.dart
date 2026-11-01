@@ -1,0 +1,145 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+import '../agent/agent_client.dart';
+import '../agent/agent_fs.dart';
+import 'i18n.dart';
+import 'errors.dart';
+import 'theme.dart';
+
+// Adapted from CoderRa's server mode (seseegy/coderra lib/ui/transfer_dialog.dart).
+
+/// What a running transfer reports to its dialog, and how it hears about "Cancel".
+class TransferHandle {
+  TransferHandle._(this.cancel);
+
+  final CancelToken cancel;
+  final _progress = ValueNotifier<({int done, int total})>((done: 0, total: 0));
+  final _label = ValueNotifier<String>('');
+
+  /// Pass to `upload` / `toPhoneFile`.
+  void onProgress(int done, int total) => _progress.value = (done: done, total: total);
+
+  /// What is being sent now, when several things are (`photo.pdf · 2 of 3`).
+  set label(String text) => _label.value = text;
+}
+
+String _size(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+/// Runs [task], a transfer between the phone and a server, with a dialog that shows how far it is and lets the user stop
+/// it. Returns the task's result, or null if it was stopped or failed (a failure is shown in a message). With [show]
+/// false (files on the phone itself, which copy at once) there is no dialog, but errors are still reported the same way.
+/// With [connection] (the server link) the dialog says when it is waiting for the link to come back, rather than
+/// looking stuck: the transfer carries on by itself once it does.
+Future<T?> runTransfer<T>(
+  BuildContext context, {
+  required String title,
+  required Future<T> Function(TransferHandle handle) task,
+  bool show = true,
+  ValueListenable<Connection>? connection,
+}) async {
+  final handle = TransferHandle._(CancelToken());
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  var dialogOpen = false;
+  if (show) {
+    dialogOpen = true;
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        useRootNavigator: true,
+        builder: (_) => _TransferDialog(title: title, handle: handle, connection: connection),
+      ).whenComplete(() => dialogOpen = false),
+    );
+  }
+  try {
+    return await task(handle);
+  } on Cancelled {
+    return null;
+  } on AgentError catch (e) {
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(switch (e.code) {
+            'offline' || 'connection_lost' || 'not_sent' => tr('The connection to the server was lost. Nothing was changed.'),
+            _ => e.message,
+          }),
+        ),
+      );
+    return null;
+  } catch (e) {
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    return null;
+  } finally {
+    if (dialogOpen && navigator.mounted) navigator.pop();
+  }
+}
+
+class _TransferDialog extends StatelessWidget {
+  const _TransferDialog({required this.title, required this.handle, this.connection});
+
+  final String title;
+  final TransferHandle handle;
+  final ValueListenable<Connection>? connection;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        title: Text(title),
+        content: ListenableBuilder(
+          listenable: Listenable.merge([handle._progress, handle._label, handle.cancel, ?connection]),
+          builder: (context, _) {
+            final v = handle._progress.value;
+            final known = v.total > 0;
+            // The modal barrier hides the chat's reconnect banner, so the dialog says it itself.
+            final waiting = connection != null && !connection!.value.connected && !handle.cancel.cancelled;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (handle._label.value.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(handle._label.value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                LinearProgressIndicator(
+                  value: known && !waiting ? v.done / v.total : null,
+                  minHeight: 4,
+                  borderRadius: BorderRadius.circular(2),
+                  color: waiting ? p.warning : null,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  handle.cancel.cancelled
+                      ? tr('Stopping…')
+                      : waiting
+                      ? tr('Waiting for the server connection… (continues on its own)')
+                      : known
+                      ? '${_size(v.done)} ${tr('of')} ${_size(v.total)} · ${v.done * 100 ~/ v.total}%'
+                      : tr('Starting…'),
+                  style: TextStyle(fontSize: 12.5, color: waiting ? p.warning : p.muted),
+                ),
+              ],
+            );
+          },
+        ),
+        actions: [
+          TextButton(onPressed: handle.cancel.cancelled ? null : handle.cancel.cancel, child: Text(tr('Cancel'))),
+        ],
+      ),
+    );
+  }
+}

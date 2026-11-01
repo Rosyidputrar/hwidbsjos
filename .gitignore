@@ -47,7 +47,7 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Rynex generated artifacts (rebuild with the steps in README.md)
+# GripHub generated artifacts (rebuild with the steps in README.md)
 /android/app/src/main/jniLibs/
 /android/app/src/main/assets/agent.zip
 /android/app/src/main/assets/agent.stamp
@@ -59,3 +59,14 @@ hs_err_pid*.log
 
 # Release outputs (APK/AAB and the Play Store bundle)
 /release/
+
+# Release signing (never commit the keystore or its passwords)
+android/key.properties
+*.keystore
+*.jks
+
+# Host test bundles (agent/test)
+/agent/build/
+
+# Written by a failing golden test
+test/golden/failures/

@@ -43,8 +43,13 @@ export class Mcp {
 	constructor(
 		private readonly file: string,
 		private readonly onChange: () => void,
+		/**
+		 * How local servers are started: the shell for a plain command, and the launcher for one that runs in the Linux
+		 * container. The defaults are the phone's; a server agent uses /bin/sh and its box (server_agent.md 4.8).
+		 */
+		private readonly shells: { shell: string; box: () => string } = { shell: "/system/bin/sh", box: () => "box" },
 	) {
-		this.servers = readSecureJson<McpServerConfig[]>(file, []);
+		this.servers = readSecureJson<McpServerConfig[]>(file, [], Array.isArray);
 	}
 
 	private save() {
@@ -72,7 +77,7 @@ export class Mcp {
 
 	private async connect(s: McpServerConfig) {
 		await this.disconnect(s.id);
-		const entry: Live = { client: new Client({ name: "rynex", version: "1.0.0" }), tools: [], status: "connecting" };
+		const entry: Live = { client: new Client({ name: "griphub", version: "1.0.0" }), tools: [], status: "connecting" };
 		this.live.set(s.id, entry);
 		this.onChange();
 		try {
@@ -81,9 +86,9 @@ export class Mcp {
 					? new StreamableHTTPClientTransport(new URL(s.url!), { requestInit: { headers: s.headers ?? {} } })
 					: new StdioClientTransport(
 							s.inContainer
-								? { command: "box", args: ["-c", s.command!], env: { ...(process.env as any), ...s.env }, stderr: "pipe" }
+								? { command: this.shells.box(), args: ["-c", s.command!], env: { ...(process.env as any), ...s.env }, stderr: "pipe" }
 								: {
-										command: "/system/bin/sh",
+										command: this.shells.shell,
 										args: ["-c", s.command!],
 										env: { ...(process.env as any), ...s.env },
 										stderr: "pipe",

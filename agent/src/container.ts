@@ -5,7 +5,7 @@
  * so `apt install nodejs python3` just works.
  */
 
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { createGunzip } from "node:zlib";
 import { Readable } from "node:stream";
@@ -47,7 +47,7 @@ export class Container {
 
 	constructor(filesDir: string) {
 		this.root = join(filesDir, "linux");
-		this.rootfs = process.env.RYNEX_ROOTFS ?? join(this.root, "rootfs");
+		this.rootfs = process.env.GRIPHUB_ROOTFS ?? join(this.root, "rootfs");
 		this.metaFile = join(this.root, "container.json");
 	}
 
@@ -88,19 +88,41 @@ export class Container {
 	async install(distro: Distro, log: Log, dns: DnsMode = "cloudflare") {
 		const image = IMAGES[distro];
 		if (!image) throw new Error(`Unknown distro: ${distro}`);
-		rmSync(this.rootfs, { recursive: true, force: true });
-		rmSync(this.metaFile, { force: true });
-		mkdirSync(this.rootfs, { recursive: true });
-
-		log(`Pulling ${image.repo.replace("library/", "")}:${image.tag} (${PLATFORM.label})…`);
-		const layers = await this.resolveLayers(image.repo, image.tag);
-		for (const [i, layer] of layers.entries()) {
-			log(`Layer ${i + 1}/${layers.length} · ${(layer.size / 1e6).toFixed(1)} MB`);
-			await this.extractLayer(image.repo, layer, log);
+		// Download and unpack beside the live rootfs, and swap only once the new
+		// one is complete. Wiping first (as before) meant a dropped connection or
+		// a full disk mid-download left the user with no container at all, and
+		// every package they had installed gone.
+		const staging = `${this.rootfs}.new`;
+		const previous = `${this.rootfs}.old`;
+		rmSync(staging, { recursive: true, force: true });
+		rmSync(previous, { recursive: true, force: true });
+		mkdirSync(staging, { recursive: true });
+		try {
+			log(`Pulling ${image.repo.replace("library/", "")}:${image.tag} (${PLATFORM.label})…`);
+			const layers = await this.resolveLayers(image.repo, image.tag);
+			for (const [i, layer] of layers.entries()) {
+				log(`Layer ${i + 1}/${layers.length} · ${(layer.size / 1e6).toFixed(1)} MB`);
+				await this.extractLayer(image.repo, layer, log, staging);
+			}
+			log("Configuring…");
+			this.configure(distro, staging);
+		} catch (e) {
+			rmSync(staging, { recursive: true, force: true });
+			if (existsSync(join(this.rootfs, "etc"))) log("Install failed; your current container is unchanged.");
+			throw e;
 		}
 
-		log("Configuring…");
-		this.configure(distro);
+		// Swap: the old tree moves aside, the new one into place, then the old one goes.
+		const hadOld = existsSync(this.rootfs);
+		if (hadOld) renameSync(this.rootfs, previous);
+		try {
+			renameSync(staging, this.rootfs);
+		} catch (e) {
+			if (hadOld) renameSync(previous, this.rootfs);
+			rmSync(staging, { recursive: true, force: true });
+			throw e;
+		}
+		rmSync(previous, { recursive: true, force: true });
 		this.setNameservers(dns);
 		writeFileSync(
 			this.metaFile,
@@ -114,6 +136,8 @@ export class Container {
 	}
 
 	remove() {
+		rmSync(`${this.rootfs}.new`, { recursive: true, force: true });
+		rmSync(`${this.rootfs}.old`, { recursive: true, force: true });
 		rmSync(this.rootfs, { recursive: true, force: true });
 		rmSync(this.metaFile, { force: true });
 	}
@@ -127,14 +151,42 @@ export class Container {
 		if (!this.token) {
 			const res = await fetch(
 				`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`,
+				{ signal: AbortSignal.timeout(30_000) },
 			);
 			this.token = ((await res.json()) as any).token;
 		}
-		const res = await fetch(`https://registry-1.docker.io/v2/${repo}/${path}`, {
-			headers: { Authorization: `Bearer ${this.token}`, ...(accept ? { Accept: accept } : {}) },
-		});
-		if (!res.ok) throw new Error(`Registry ${path}: ${res.status} ${res.statusText}`);
-		return res;
+		// 30 seconds without progress, not 30 seconds in total: a whole layer
+		// (tens of MB) used to have to arrive within the same 30 seconds, which
+		// a slow phone connection can't do. Every chunk of the body restarts it.
+		const ctrl = new AbortController();
+		const stall = setTimeout(() => ctrl.abort(new Error(`Registry ${path}: no data for 30 seconds`)), 30_000);
+		let res: Response;
+		try {
+			res = await fetch(`https://registry-1.docker.io/v2/${repo}/${path}`, {
+				signal: ctrl.signal,
+				headers: { Authorization: `Bearer ${this.token}`, ...(accept ? { Accept: accept } : {}) },
+			});
+		} catch (e) {
+			clearTimeout(stall);
+			throw e;
+		}
+		if (!res.ok || !res.body) {
+			clearTimeout(stall);
+			if (!res.ok) throw new Error(`Registry ${path}: ${res.status} ${res.statusText}`);
+			return res;
+		}
+		const body = res.body.pipeThrough(
+			new TransformStream<Uint8Array, Uint8Array>({
+				transform(chunk, out) {
+					stall.refresh();
+					out.enqueue(chunk);
+				},
+				flush() {
+					clearTimeout(stall);
+				},
+			}),
+		);
+		return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 	}
 
 	private async resolveLayers(repo: string, tag: string) {
@@ -163,7 +215,7 @@ export class Container {
 		return (manifest.layers as any[]).map((l) => ({ digest: l.digest as string, size: l.size as number }));
 	}
 
-	private async extractLayer(repo: string, layer: { digest: string; size: number }, log: Log) {
+	private async extractLayer(repo: string, layer: { digest: string; size: number }, log: Log, dest: string) {
 		const res = await this.registry(repo, `blobs/${layer.digest}`);
 		let received = 0;
 		let lastPct = -1;
@@ -175,11 +227,11 @@ export class Container {
 				log(`Downloading: ${pct}%`);
 			}
 		});
-		await untar(counted.pipe(createGunzip()), this.rootfs);
+		await untar(counted.pipe(createGunzip()), dest);
 	}
 
-	private configure(distro: Distro) {
-		const etc = join(this.rootfs, "etc");
+	private configure(distro: Distro, root: string) {
+		const etc = join(root, "etc");
 		mkdirSync(etc, { recursive: true });
 		// Replace (not follow) whatever the image ships: often a symlink to /run.
 		for (const [name, body] of [
@@ -189,14 +241,14 @@ export class Container {
 			rmSync(join(etc, name), { force: true });
 			writeFileSync(join(etc, name), body);
 		}
-		const tmp = join(this.rootfs, "tmp");
+		const tmp = join(root, "tmp");
 		mkdirSync(tmp, { recursive: true });
 		chmodSync(tmp, 0o1777);
 		if (distro === "debian") {
 			// apt drops privileges to _apt for downloads; under proot that user can't write.
 			mkdirSync(join(etc, "apt/apt.conf.d"), { recursive: true });
 			writeFileSync(
-				join(etc, "apt/apt.conf.d/99rynex"),
+				join(etc, "apt/apt.conf.d/99griphub"),
 				'APT::Sandbox::User "root";\nAcquire::Retries "3";\nAPT::Install-Recommends "false";\n',
 			);
 		}

@@ -5,12 +5,21 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Renders HTML in a WebView. With [live], it re-renders as the source grows,
 /// so a page the agent is still writing builds up in front of the user.
 class HtmlPreviewScreen extends StatefulWidget {
-  const HtmlPreviewScreen({super.key, required this.title, required this.source, this.baseDir, this.live, this.url});
+  const HtmlPreviewScreen({
+    super.key,
+    required this.title,
+    required this.source,
+    this.baseDir,
+    this.baseUrl,
+    this.live,
+    this.url,
+  });
 
   /// A running server to show instead of HTML source (dev servers on localhost).
   final String? url;
@@ -28,6 +37,9 @@ class HtmlPreviewScreen extends StatefulWidget {
 
   /// Directory relative links (css, js, images) resolve against.
   final String? baseDir;
+
+  /// Or a web address they resolve against: the page as a server agent serves it (server_agent.md, phase 6).
+  final String? baseUrl;
   final Listenable? live;
 
   static Future<void> open(
@@ -35,11 +47,12 @@ class HtmlPreviewScreen extends StatefulWidget {
     required String title,
     required String Function() source,
     String? baseDir,
+    String? baseUrl,
     Listenable? live,
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => HtmlPreviewScreen(title: title, source: source, baseDir: baseDir, live: live),
+        builder: (_) => HtmlPreviewScreen(title: title, source: source, baseDir: baseDir, baseUrl: baseUrl, live: live),
       ),
     );
   }
@@ -82,9 +95,13 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
     super.dispose();
   }
 
+  /// While the agent writes, the page reloads at most this often: every reload parses and paints the whole
+  /// document again, which on a phone competes with the chat for the CPU.
+  static const liveInterval = Duration(milliseconds: 1500);
+
   void _onSourceChanged() {
     if (debounce?.isActive ?? false) return;
-    debounce = Timer(const Duration(milliseconds: 400), _reload);
+    debounce = Timer(liveInterval, _reload);
   }
 
   void _reload({bool force = false}) {
@@ -96,7 +113,7 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
     final html = widget.source();
     if (!force && html == loaded) return;
     loaded = html;
-    final base = widget.baseDir == null ? null : Uri.directory(widget.baseDir!).toString();
+    final base = widget.baseUrl ?? (widget.baseDir == null ? null : Uri.directory(widget.baseDir!).toString());
     controller.loadHtmlString(html, baseUrl: base);
   }
 
@@ -114,7 +131,7 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(99),
+                  borderRadius: BorderRadius.circular(Radii.pill),
                   border: Border.all(color: p.success.withValues(alpha: 0.5)),
                 ),
                 child: Row(
@@ -126,7 +143,7 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
                       decoration: BoxDecoration(color: p.success, shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 5),
-                    Text('Live', style: TextStyle(fontSize: 11, color: p.success)),
+                    Text(tr('Live'), style: TextStyle(fontSize: 11, color: p.success)),
                   ],
                 ),
               ),
@@ -135,7 +152,7 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Reload',
+            tooltip: tr('Reload'),
             icon: const Icon(LucideIcons.refreshCw, size: 20),
             onPressed: () => _reload(force: true),
           ),

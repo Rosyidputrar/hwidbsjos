@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
+
+import 'sent_attachments.dart';
 
 class ModelInfo {
   ModelInfo(this.json);
@@ -9,8 +12,39 @@ class ModelInfo {
   String get name => json['name'] as String? ?? id;
   bool get reasoning => json['reasoning'] == true;
   int? get contextWindow => json['contextWindow'] as int?;
+  int? get maxTokens => (json['maxTokens'] as num?)?.toInt();
   bool get acceptsImages => (json['input'] as List?)?.contains('image') ?? false;
   String get key => '$provider/$id';
+
+  /// GripHub pricing, when the host knows it (router.ts): credits per 1M
+  /// tokens, the per-request minimum, a running promo, and availability.
+  ModelPricing? get pricing => json['pricing'] is Map ? ModelPricing((json['pricing'] as Map).cast<String, dynamic>()) : null;
+}
+
+class ModelPricing {
+  ModelPricing(this.json);
+  final Map<String, dynamic> json;
+  double? get credits => (json['credits'] as num?)?.toDouble();
+  double? get list => (json['list'] as num?)?.toDouble();
+  double? get floor => (json['floor'] as num?)?.toDouble();
+  String? get promo => json['promo'] as String?;
+  DateTime? get promoEndsAt => DateTime.tryParse(json['promoEndsAt'] as String? ?? '');
+  bool get available => json['available'] != false;
+
+  /// A promo that has not ended yet.
+  bool get onPromo => list != null && (promoEndsAt == null || promoEndsAt!.isAfter(DateTime.now()));
+}
+
+/// Favorite models in the order they were starred, not catalog order. Keys
+/// missing from the catalog are skipped here but stay in storage, so they
+/// reappear if the model returns. Repeated keys show the model once.
+List<ModelInfo> favoriteModelsInOrder(List<ModelInfo> models, List<String> favoriteKeys) {
+  final byKey = {for (final m in models) m.key: m};
+  final seen = <String>{};
+  return [
+    for (final key in favoriteKeys)
+      if (byKey[key] != null && seen.add(key)) byKey[key]!,
+  ];
 }
 
 class ProviderInfo {
@@ -21,38 +55,65 @@ class ProviderInfo {
   String get name => json['name'] as String? ?? id;
   bool get configured => json['configured'] == true;
   bool get oauth => json['oauth'] == true;
-  bool get custom => json['custom'] == true;
   List<String> get methods => (json['methods'] as List? ?? const []).cast<String>();
   int get modelCount => json['models'] as int? ?? 0;
+
+  /// Added by the user with a base URL and API key (see agent/src/providers.ts).
+  bool get custom => json['custom'] == true;
 }
 
-/// An endpoint the user defined themselves (models.json): any server speaking
-/// an API pi supports, such as an OpenAI-compatible one on the local network.
-class CustomProviderInfo {
-  CustomProviderInfo(this.json);
+/// A user-added endpoint as stored by the host; the API key itself never comes back.
+class CustomProvider {
+  CustomProvider(this.json);
   final Map<String, dynamic> json;
 
   String get id => json['id'] as String;
   String get name => json['name'] as String? ?? id;
-  String get baseUrl => json['baseUrl'] as String? ?? '';
   String get api => json['api'] as String? ?? 'openai-completions';
+  String get baseUrl => json['baseUrl'] as String? ?? '';
   bool get hasKey => json['hasKey'] == true;
-  bool get images => json['images'] == true;
-  List<String> get modelIds => ((json['models'] as List?) ?? const [])
-      .map((m) => (m as Map)['id'] as String? ?? '')
-      .where((s) => s.isNotEmpty)
-      .toList();
-
-  String get summary => hasKey ? 'API key · $baseUrl' : 'No key needed · $baseUrl';
+  List<CustomModel> get models =>
+      (json['models'] as List? ?? const []).map((e) => CustomModel((e as Map).cast<String, dynamic>())).toList();
 }
 
-/// The API shapes pi implements; the app offers exactly these.
-class CustomApiInfo {
-  CustomApiInfo(this.json);
+class CustomModel {
+  CustomModel(this.json);
   final Map<String, dynamic> json;
 
   String get id => json['id'] as String;
-  String get label => json['label'] as String? ?? id;
+  String? get name => json['name'] as String?;
+  int? get contextWindow => (json['contextWindow'] as num?)?.toInt();
+  int? get maxTokens => (json['maxTokens'] as num?)?.toInt();
+  bool get reasoning => json['reasoning'] == true;
+
+  /// False for models that always think: they get effort levels but no "off".
+  bool get canDisableThinking => json['canDisableThinking'] != false;
+  bool get vision => (json['input'] as List?)?.contains('image') ?? false;
+
+  /// False when the endpoint says effort levels make no difference.
+  bool get effort => json['effort'] != false;
+
+  /// A copy with reasoning or vision switched by hand, for endpoints that don't say.
+  CustomModel copyWith({bool? reasoning, bool? vision}) => CustomModel({
+    ...json,
+    'reasoning': ?reasoning,
+    if (reasoning == false) 'canDisableThinking': null,
+    if (vision != null) 'input': vision ? ['text', 'image'] : ['text'],
+  });
+}
+
+class ProjectDeleteCheck {
+  ProjectDeleteCheck(this.json);
+  final Map<String, dynamic> json;
+
+  int get chats => json['chats'] as int? ?? 0;
+  bool get isGit => json['git'] == true;
+  int get changes => json['changes'] as int? ?? 0;
+  int get unpushed => json['unpushed'] as int? ?? 0;
+  List<String> get blockers => (json['blockers'] as List? ?? const []).cast<String>();
+
+  /// Work that exists only on this phone and is lost with the folder.
+  bool get losesWork => changes > 0 || unpushed > 0;
 }
 
 class SessionSummary {
@@ -81,9 +142,14 @@ class SessionSummary {
 sealed class ChatEntry {}
 
 class UserEntry extends ChatEntry {
-  UserEntry(this.text, {this.images = 0});
+  UserEntry(this.text, {this.images = 0, this.attachments = const []});
   final String text;
   final int images;
+
+  /// Files/pictures sent with this message, from the sent-attachments
+  /// store. Empty for messages sent before attachment display existed:
+  /// those still show their text unchanged.
+  final List<SentAttachment> attachments;
 }
 
 enum BlockKind { text, thinking, toolCall }
@@ -98,11 +164,25 @@ class Block {
 
   String get text => buffer.toString();
 
+  /// Reads the streamed argument JSON incrementally: each call only scans what
+  /// arrived since the last one, so a long file being written costs the same
+  /// per frame at its end as at its start.
+  PartialJsonReader? _reader;
+
   /// Arguments so far: final ones once known, else string fields read from
   /// the streamed JSON (for tool calls the buffer holds raw argument JSON).
-  Map<String, dynamic>? get liveArgs => args ?? (buffer.isEmpty ? null : partialJsonStrings(text));
+  Map<String, dynamic>? get liveArgs {
+    if (args != null) return args;
+    if (buffer.isEmpty) return null;
+    var reader = _reader;
+    // The buffer only grows while streaming; if it was replaced, read it again from the start.
+    if (reader == null || buffer.length < reader.length) reader = _reader = PartialJsonReader();
+    if (buffer.length != reader.length) reader.update(text);
+    return reader.values;
+  }
 
   set text(String value) {
+    _reader = null;
     buffer
       ..clear()
       ..write(value);
@@ -115,6 +195,13 @@ class AssistantEntry extends ChatEntry {
   String? error;
   bool aborted = false;
   String? model;
+
+  /// This model request's usage, once the message is final (null while streaming, or for a message without it).
+  RequestUsage? usage;
+
+  /// How long the whole turn took, on a turn's last reply once it is over (from the host: live at the turn's end, and
+  /// kept with the chat).
+  int? turnMs;
 
   List<Block> get orderedBlocks {
     final keys = blocks.keys.toList()..sort();
@@ -143,6 +230,8 @@ class AssistantEntry extends ChatEntry {
     }
     streaming = false;
     model = message['model'] as String?;
+    usage = RequestUsage.fromMessage(message);
+    turnMs = (message['griphubTurnMs'] as num?)?.toInt() ?? turnMs;
     final stop = message['stopReason'];
     aborted = stop == 'aborted';
     if (stop == 'error') error = readableError(message['errorMessage'] as String? ?? 'The model returned an error.');
@@ -170,6 +259,50 @@ class NoticeEntry extends ChatEntry {
   final bool error;
 }
 
+/// The chat's older turns being summarized to keep its context in bounds (pi's compaction): running, done or failed.
+class CompactionEntry extends ChatEntry {
+  CompactionEntry({this.startedAt, this.limit, this.running = true, this.tokensBefore, this.tokensAfter});
+
+  /// When the summary began, by this phone's clock; null for one read back from the chat's history.
+  final DateTime? startedAt;
+
+  /// The context limit that set it off (Settings > Usage), when the host started it for that.
+  final int? limit;
+  bool running;
+  int? tokensBefore;
+  int? tokensAfter;
+
+  /// What the summary cost: it is a model request too. Null when unknown (the host's estimate has no price for the
+  /// model, or the chat is from before the host said).
+  double? credits;
+
+  /// How long it took, once it ended.
+  Duration? took;
+
+  /// Why it failed, if it did.
+  String? error;
+
+  /// The user stopped it.
+  bool aborted = false;
+}
+
+/// A background job's result coming back to its chat: a notice, not a bubble (the user did not send it), and the start
+/// of the turn in which the agent carries on with it.
+class JobEntry extends ChatEntry {
+  JobEntry(this.job);
+
+  /// The job as it was when it ended (agent/src/jobs.ts `jobWire`).
+  final Map<String, dynamic> job;
+
+  String get id => job['id'] as String? ?? '';
+  String get label => job['label'] as String? ?? job['command'] as String? ?? '';
+  String get status => job['status'] as String? ?? 'done';
+  int? get exitCode => (job['exitCode'] as num?)?.toInt();
+  Duration get took => Duration(milliseconds: (job['elapsedMs'] as num?)?.toInt() ?? 0);
+  String get tail => job['tail'] as String? ?? '';
+  String get command => job['command'] as String? ?? '';
+}
+
 enum ToolStatus { running, done, failed }
 
 class ToolRun {
@@ -177,6 +310,32 @@ class ToolRun {
   final String id;
   ToolStatus status = ToolStatus.running;
   String output = '';
+
+  /// Pictures in the result (a `read` of an image): shown as thumbnails on the tool's card.
+  List<ToolImage> images = const [];
+}
+
+/// A picture a tool returned, decoded once.
+typedef ToolImage = ({Uint8List bytes, String mimeType});
+
+/// Pictures a card shows at most; a result with more says how many there were.
+const maxToolImages = 4;
+
+/// The pictures in a tool result's [content] (`{type: image, data: <base64>, mimeType}` blocks). Blocks that do not
+/// decode are skipped.
+List<ToolImage> contentImageData(dynamic content) {
+  if (content is! List) return const [];
+  final out = <ToolImage>[];
+  for (final c in content.whereType<Map>()) {
+    if (c['type'] != 'image' || c['data'] is! String) continue;
+    try {
+      out.add((bytes: base64Decode(c['data'] as String), mimeType: c['mimeType'] as String? ?? 'image/png'));
+    } on FormatException {
+      continue;
+    }
+    if (out.length == maxToolImages) break;
+  }
+  return out;
 }
 
 String contentText(dynamic content) {
@@ -203,12 +362,13 @@ String toolSummary(String? name, Map<String, dynamic>? args) {
 
   final value = switch (name) {
     'bash' => pick(['command'])?.replaceAllMapped(
-      RegExp(r'''(?:/data/(?:data|user/\d+)/com\.rynex\.agent|/storage/emulated/\d+|/sdcard)(?:/[^\s'"/;|&>]+)+'''),
+      RegExp(r'''(?:/data/(?:data|user/\d+)/id\.griphub\.agent|/storage/emulated/\d+|/sdcard)(?:/[^\s'"/;|&>]+)+'''),
       (m) => _shortPath(m[0]) ?? m[0]!,
     ),
     'read' || 'write' || 'edit' || 'ls' => _shortPath(pick(['path', 'file_path'])),
     'grep' => pick(['pattern']),
     'find' => pick(['pattern', 'path']),
+    'background_job' => pick(['label', 'command']),
     _ => null,
   };
   return (value ?? jsonEncode(args)).split('\n').first;
@@ -232,56 +392,252 @@ String? _shortPath(String? path) {
 /// Reads top-level-looking `"key": "string"` pairs from possibly truncated
 /// JSON. The last value may be cut off; it is returned as far as it goes.
 /// Repeated keys keep the latest value (e.g. the edit being written now).
-Map<String, dynamic> partialJsonStrings(String raw) {
-  final out = <String, dynamic>{};
-  final key = RegExp(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*:\s*"');
-  var pos = 0;
-  while (true) {
-    final m = key.firstMatch(raw.substring(pos));
-    if (m == null) break;
-    var i = pos + m.end;
-    final value = StringBuffer();
-    while (i < raw.length) {
-      final c = raw[i];
-      if (c == '"') break;
-      if (c != r'\') {
-        value.write(c);
-        i++;
-        continue;
+Map<String, dynamic> partialJsonStrings(String raw) => (PartialJsonReader()..update(raw)).values;
+
+/// [partialJsonStrings] for text that keeps growing: [update] with the whole
+/// text so far, and only the part after the previous call is scanned. A value
+/// still being written is kept in a buffer, so an unfinished escape at the end
+/// (`\`, `\u00`) waits for the rest instead of being re-read from the start.
+class PartialJsonReader {
+  static final _key = RegExp(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*:\s*"');
+
+  /// The values read so far; the one being written holds what has arrived.
+  final values = <String, dynamic>{};
+
+  /// How much of the text has been read.
+  int get length => _length;
+  int _length = 0;
+
+  /// Where scanning resumes: the start of the next key, or the next character of [_key]'s value.
+  int _pos = 0;
+  String? _open;
+  final _value = StringBuffer();
+
+  void update(String raw) {
+    _length = raw.length;
+    while (_pos < raw.length) {
+      if (_open == null) {
+        final m = _key.firstMatch(raw.substring(_pos));
+        // The next key isn't complete yet: try again from here next time.
+        if (m == null) return;
+        _open = m.group(1);
+        _value.clear();
+        values[_open!] = '';
+        _pos += m.end;
       }
-      if (i + 1 >= raw.length) {
-        i = raw.length;
-        break;
-      }
-      final e = raw[i + 1];
-      switch (e) {
-        case 'n':
-          value.write('\n');
-        case 't':
-          value.write('\t');
-        case 'r':
-          value.write('\r');
-        case 'b':
-          value.write('\b');
-        case 'f':
-          value.write('\f');
-        case 'u':
-          if (i + 6 > raw.length) {
-            i = raw.length;
-            continue;
+      var i = _pos;
+      var closed = false;
+      while (i < raw.length) {
+        final c = raw[i];
+        if (c == '"') {
+          closed = true;
+          break;
+        }
+        if (c != r'\') {
+          // Copy the run of plain characters in one go.
+          var j = i + 1;
+          while (j < raw.length && raw[j] != '"' && raw[j] != r'\') {
+            j++;
           }
+          _value.write(raw.substring(i, j));
+          i = j;
+          continue;
+        }
+        // An escape cut off at the end: wait for the rest.
+        if (i + 1 >= raw.length) break;
+        final e = raw[i + 1];
+        if (e == 'u') {
+          if (i + 6 > raw.length) break;
           final code = int.tryParse(raw.substring(i + 2, i + 6), radix: 16);
-          if (code != null) value.writeCharCode(code);
+          if (code != null) _value.writeCharCode(code);
           i += 6;
           continue;
-        default:
-          value.write(e);
+        }
+        _value.write(switch (e) {
+          'n' => '\n',
+          't' => '\t',
+          'r' => '\r',
+          'b' => '\b',
+          'f' => '\f',
+          _ => e,
+        });
+        i += 2;
       }
-      i += 2;
+      _pos = i;
+      values[_open!] = _value.toString();
+      if (!closed) return;
+      _open = null;
+      _pos = i + 1;
     }
-    out[m.group(1)!] = value.toString();
-    pos = i < raw.length ? i + 1 : raw.length;
-    if (pos >= raw.length) break;
   }
+}
+
+/// One model request: its tokens as pi reports them, and the host's GripHub estimate for it
+/// (agent/src/pricing.ts messageCost; [credits] null when the price is unknown or it went to another provider).
+class RequestUsage {
+  const RequestUsage({
+    this.input = 0,
+    this.output = 0,
+    this.cacheRead = 0,
+    this.cacheWrite = 0,
+    this.credits,
+    this.floored = false,
+  });
+
+  final int input;
+  final int output;
+  final int cacheRead;
+  final int cacheWrite;
+  final double? credits;
+
+  /// Billed at the model's per-request minimum.
+  final bool floored;
+
+  static RequestUsage? fromMessage(Map<String, dynamic> message) {
+    final u = message['usage'];
+    if (u is! Map) return null;
+    int n(Object? v) => (v as num?)?.toInt() ?? 0;
+    final cost = message['griphubCost'];
+    return RequestUsage(
+      input: n(u['input']),
+      output: n(u['output']),
+      cacheRead: n(u['cacheRead']),
+      cacheWrite: n(u['cacheWrite']),
+      credits: cost is Map ? (cost['credits'] as num?)?.toDouble() : null,
+      floored: cost is Map && cost['floored'] == true,
+    );
+  }
+}
+
+/// What a whole turn cost: every model request from the user's message to the final answer, summed.
+/// Subagents the turn started are counted apart (their cards carry their own cost).
+class TurnCost {
+  TurnCost(Iterable<RequestUsage> requests, {this.subagentCalls = const []}) {
+    var unknown = false;
+    var credits = 0.0;
+    for (final r in requests) {
+      this.requests++;
+      if (r.floored) floored++;
+      input += r.input;
+      output += r.output;
+      cacheRead += r.cacheRead;
+      cacheWrite += r.cacheWrite;
+      if (r.credits == null) {
+        unknown = true;
+      } else {
+        credits += r.credits!;
+      }
+    }
+    // One request of unknown price makes the total unknown: never a made-up number.
+    this.credits = unknown || this.requests == 0 ? null : credits;
+  }
+
+  int requests = 0;
+  int floored = 0;
+  int input = 0;
+  int output = 0;
+  int cacheRead = 0;
+  int cacheWrite = 0;
+  late final double? credits;
+
+  /// Tool call ids of the subagents this turn started.
+  final List<String> subagentCalls;
+
+  int get tokens => input + output + cacheRead + cacheWrite;
+  int get cached => cacheRead + cacheWrite;
+}
+
+/// How a turn ended: its clock in the footer says so, not just how long it ran.
+enum TurnOutcome { done, stopped, failed }
+
+/// What the copy-and-model footer under an assistant reply shows, with how long the turn took when known.
+typedef TurnFooter = ({String text, String? model, TurnCost? cost, Duration? took, TurnOutcome outcome});
+
+/// Footers for a transcript, keyed by entry index. One turn (from a user
+/// message to the next) is several assistant messages — text, tools, more
+/// text — and the footer belongs only under the last one, once the turn is
+/// over: it copies the turn's final answer and names the model that gave it.
+/// It used to appear under every step that had text, mid-run.
+///
+/// [busy] is whether the agent is still working on the last turn; that turn
+/// gets no footer until it ends.
+Map<int, TurnFooter> turnFooters(List<ChatEntry> entries, {required bool busy}) {
+  final out = <int, TurnFooter>{};
+  var start = 0;
+  void close(int end, {required bool last}) {
+    if (last && busy) return;
+    // The last assistant message of the turn, and the last one with text.
+    int? tail;
+    AssistantEntry? answer;
+    for (var i = end - 1; i >= start; i--) {
+      final e = entries[i];
+      if (e is! AssistantEntry) continue;
+      tail ??= i;
+      if (e.streaming) return;
+      if (answer == null && _replyText(e).isNotEmpty) answer = e;
+      if (answer != null) break;
+    }
+    if (tail == null || answer == null) return;
+    final lastEntry = entries[tail] as AssistantEntry;
+    final turn = entries.sublist(start, end).whereType<AssistantEntry>();
+    final requests = [for (final e in turn) ?e.usage];
+    out[tail] = (
+      text: _replyText(answer),
+      model: lastEntry.model ?? answer.model,
+      took: lastEntry.turnMs == null ? null : Duration(milliseconds: lastEntry.turnMs!),
+      // A turn that was stopped or died on an error must not get the green "Done": say what happened instead.
+      outcome: lastEntry.aborted
+          ? TurnOutcome.stopped
+          : lastEntry.error != null
+          ? TurnOutcome.failed
+          : TurnOutcome.done,
+      cost: requests.isEmpty
+          ? null
+          : TurnCost(
+              requests,
+              subagentCalls: [
+                for (final e in turn)
+                  for (final b in e.orderedBlocks)
+                    if (b.kind == BlockKind.toolCall && b.toolName == 'subagent' && b.toolCallId != null) b.toolCallId!,
+              ],
+            ),
+    );
+  }
+
+  for (var i = 0; i < entries.length; i++) {
+    // A background job's result starts a turn too: the agent goes on with it without a message from the user.
+    if (entries[i] is UserEntry || entries[i] is JobEntry) {
+      close(i, last: false);
+      start = i + 1;
+    }
+  }
+  close(entries.length, last: true);
   return out;
+}
+
+/// Tokens the running turn has used so far: its finished model requests since the last user message (or job result).
+int turnTokensSoFar(List<ChatEntry> entries) {
+  var tokens = 0;
+  for (final e in entries.reversed) {
+    if (e is UserEntry || e is JobEntry) break;
+    final u = e is AssistantEntry ? e.usage : null;
+    if (u != null) tokens += u.input + u.output + u.cacheRead + u.cacheWrite;
+  }
+  return tokens;
+}
+
+String _replyText(AssistantEntry e) => [
+  for (final b in e.orderedBlocks)
+    if (b.kind == BlockKind.text && b.text.trim().isNotEmpty) b.text.trim(),
+].join('\n\n');
+
+/// A follow-up sent while the agent works, waiting for the turn's boundary.
+class QueuedPrompt {
+  QueuedPrompt(Map<String, dynamic> j)
+    : id = j['id'] as String? ?? '',
+      text = j['text'] as String? ?? '',
+      images = (j['images'] as num?)?.toInt() ?? 0;
+  final String id;
+  final String text;
+  final int images;
 }

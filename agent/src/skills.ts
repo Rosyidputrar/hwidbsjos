@@ -1,11 +1,12 @@
 /**
  * Agent Skills (SKILL.md, https://agentskills.io) for pi: list, install from
- * skills.md, GitHub or a URL, remove, and seed the ones Rynex ships with.
+ * skills.md, GitHub or a URL, remove, and seed the ones GripHub AI Agent ships with.
  * Skills live in <agentDir>/skills/<name>/, where pi discovers them.
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { atomicWrite } from "./state.js";
 
 export interface SkillInfo {
 	name: string;
@@ -21,7 +22,7 @@ interface Origin {
 	builtin?: boolean;
 }
 
-const ORIGIN_FILE = ".rynex.json";
+const ORIGIN_FILE = ".griphub.json";
 
 /** Curated collections searched first and shown when the query is empty. */
 const COLLECTIONS = [
@@ -78,7 +79,7 @@ export class Skills {
 		private readonly githubToken: () => string | undefined,
 	) {
 		this.dir = join(agentDir, "skills");
-		this.seededFile = join(agentDir, "rynex", "seeded-skills.json");
+		this.seededFile = join(agentDir, "griphub", "seeded-skills.json");
 		mkdirSync(this.dir, { recursive: true });
 	}
 
@@ -95,11 +96,11 @@ export class Skills {
 			if (seeded.includes(name) && !ours) continue;
 			rmSync(dest, { recursive: true, force: true });
 			cpSync(src, dest, { recursive: true });
-			writeOrigin(dest, { source: "Rynex", installedAt: Date.now(), builtin: true });
+			writeOrigin(dest, { source: "GripHub", installedAt: Date.now(), builtin: true });
 			if (!seeded.includes(name)) seeded.push(name);
 		}
 		mkdirSync(dirname(this.seededFile), { recursive: true });
-		writeFileSync(this.seededFile, JSON.stringify(seeded));
+		atomicWrite(this.seededFile, JSON.stringify(seeded));
 	}
 
 	list(): SkillInfo[] {
@@ -153,7 +154,10 @@ export class Skills {
 
 	private async installUrl(url: string, log: (line: string) => void, source = url) {
 		log(`Fetching ${url}`);
-		const res = await fetch(url, { headers: { Accept: "text/markdown, text/plain, */*" } });
+		const res = await fetch(url, {
+			signal: AbortSignal.timeout(30_000),
+			headers: { Accept: "text/markdown, text/plain, */*" },
+		});
 		if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
 		const body = await res.text();
 		const fm = frontmatter(body);
@@ -188,7 +192,7 @@ export class Skills {
 			try {
 				await this.install(spec, log);
 				done.push(spec);
-				writeFileSync(file, JSON.stringify(done));
+				atomicWrite(file, JSON.stringify(done));
 			} catch (e) {
 				log(`Skipped ${spec}: ${(e as Error).message}`);
 			}
@@ -229,7 +233,7 @@ export class Skills {
 			}
 		}
 		mkdirSync(dirname(this.catalogFile()), { recursive: true });
-		writeFileSync(this.catalogFile(), JSON.stringify({ at: Date.now(), entries }));
+		atomicWrite(this.catalogFile(), JSON.stringify({ at: Date.now(), entries }));
 		return entries;
 	}
 

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Rynex Linux container launcher, shipped as libbox.so and linked as `box`.
+# GripHub AI Agent Linux container launcher, shipped as libbox.so and linked as `box`.
 #
 #   box                 interactive shell in the container
 #   box -c 'apt ...'    run a command (this is how pi calls its shell)
@@ -9,14 +9,14 @@
 # the same path inside, so files and git credentials are shared both ways.
 # Paths come from the environment AgentRuntime sets up.
 
-R="$RYNEX_ROOTFS"
+R="$GRIPHUB_ROOTFS"
 if [ -z "$R" ] || { [ ! -e "$R/bin/sh" ] && [ ! -L "$R/bin/sh" ]; }; then
-  echo "box: the Linux container is not installed. Install it in Rynex under Settings > Linux container." >&2
+  echo "box: the Linux container is not installed. Install it in GripHub AI Agent under Settings > Linux container." >&2
   exit 127
 fi
 
-H="${RYNEX_HOME:-$HOME}"
-export PROOT_LOADER="$RYNEX_PROOT_LOADER"
+H="${GRIPHUB_HOME:-$HOME}"
+export PROOT_LOADER="$GRIPHUB_PROOT_LOADER"
 export PROOT_TMP_DIR="${TMPDIR:-$H}"
 cwd="$PWD"
 case "$cwd" in "$H"*|/storage/*|/sdcard/*) ;; *) cwd="$H" ;; esac
@@ -36,13 +36,13 @@ SH=/bin/sh
 export HOME="$H" USER=root LOGNAME=root SHELL="$SH" TMPDIR=/tmp LANG=C.UTF-8
 export TERM="${TERM:-xterm-256color}" DEBIAN_FRONTEND=noninteractive
 # The phone's trusted CAs (incl. user-installed ones), mounted below.
-CA=/etc/ssl/rynex-ca.pem
+CA=/etc/ssl/griphub-ca.pem
 export SSL_CERT_FILE="$CA" NODE_EXTRA_CA_CERTS="$CA" GIT_SSL_CAINFO="$CA" CURL_CA_BUNDLE="$CA" REQUESTS_CA_BUNDLE="$CA"
 
 [ "$#" -eq 0 ] && set -- -l
 set -- /usr/bin/env -u LD_LIBRARY_PATH "$SH" "$@"
 
-exec "$RYNEX_PROOT" --kill-on-exit --link2symlink -0 -r "$R" \
+exec "$GRIPHUB_PROOT" --kill-on-exit --link2symlink -0 -r "$R" \
   -b /dev -b /proc -b /sys -b "$R/tmp:/dev/shm" \
-  -b "$H" -b "$RYNEX_FILES/cacerts.pem:$CA" $SHARED \
+  -b "$H" -b "$GRIPHUB_FILES/cacerts.pem:$CA" $SHARED \
   -w "$cwd" "$@"

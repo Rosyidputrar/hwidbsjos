@@ -6,7 +6,7 @@
  */
 
 const EMPTY = new Set(["none", "null", "undefined", "nil", "nan", ""]);
-const LENIENT = Symbol.for("rynex.lenient");
+const LENIENT = Symbol.for("griphub.lenient");
 
 export function cleanArguments(args: unknown, schema: any): unknown {
 	if (!args || typeof args !== "object" || Array.isArray(args) || !schema?.properties) return args;

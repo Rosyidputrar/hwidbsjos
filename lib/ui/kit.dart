@@ -1,15 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
+import 'energy.dart';
+import 'i18n.dart';
+import 'errors.dart';
 import 'theme.dart';
 
-/// Shared building blocks for the Rynex look: neutral surfaces with
-/// hairline borders, one accent colour, and the spacing and radius tokens
-/// from theme.dart.
+/// Shared building blocks for the GripHub AI Agent look.
 
-/// The app mark: the Android-headed π symbol, with no tile behind it.
+/// The app mark: the GripHub Router logo, with no tile behind it.
 class LogoMark extends StatelessWidget {
   const LogoMark({super.key, this.size = 40, this.glow = true});
   final double size;
@@ -22,54 +25,47 @@ class LogoMark extends StatelessWidget {
   );
 }
 
-/// Primary call to action: solid accent, full width.
+/// Primary call to action: solid, high-contrast, full width.
 class PrimaryButton extends StatelessWidget {
-  const PrimaryButton({
-    super.key,
-    required this.label,
-    required this.onPressed,
-    this.icon,
-    this.busy = false,
-    this.compact = false,
-  });
+  const PrimaryButton({super.key, required this.label, required this.onPressed, this.icon, this.busy = false});
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
   final bool busy;
-  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final enabled = onPressed != null && !busy;
     return AnimatedOpacity(
-      duration: const Duration(milliseconds: 150),
+      duration: Motion.of(context, const Duration(milliseconds: 150)),
       opacity: enabled ? 1 : 0.45,
       child: Material(
-        color: p.accent,
-        borderRadius: BorderRadius.circular(Radii.md),
+        color: p.text,
+        borderRadius: BorderRadius.circular(Radii.lg),
         child: InkWell(
-          borderRadius: BorderRadius.circular(Radii.md),
+          borderRadius: BorderRadius.circular(Radii.lg),
           onTap: enabled ? onPressed : null,
-          child: SizedBox(
-            height: compact ? 44 : 52,
+          // 54 dp tall, and taller when a long label with large text needs a second line (it ran off the side).
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 54),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (busy)
-                    SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.onAccent))
+                    BusySpinner(color: p.inverse)
                   else if (icon != null)
-                    Icon(icon, size: 18, color: p.onAccent),
-                  if (busy || icon != null) const SizedBox(width: Space.sm),
+                    Icon(icon, size: 18, color: p.inverse),
+                  if (busy || icon != null) const SizedBox(width: 8),
                   Flexible(
                     child: Text(
                       label,
-                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: p.onAccent, fontWeight: FontWeight.w600, fontSize: compact ? 14 : 15),
+                      style: TextStyle(color: p.inverse, fontWeight: FontWeight.w600, fontSize: 15),
                     ),
                   ),
                 ],
@@ -82,41 +78,192 @@ class PrimaryButton extends StatelessWidget {
   }
 }
 
-/// A bordered card on the surface colour; tappable when [onTap] is set.
+/// A soft grey surface; tappable when [onTap] is set.
 class SurfaceCard extends StatelessWidget {
   const SurfaceCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(Space.lg),
+    this.padding = const EdgeInsets.all(18),
     this.onTap,
-    this.onLongPress,
     this.highlight = false,
-    this.color,
-    this.radius = Radii.lg,
   });
   final Widget child;
   final EdgeInsets padding;
   final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
   final bool highlight;
-  final Color? color;
-  final double radius;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Material(
-      color: color ?? p.surface,
+      color: p.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(radius),
-        side: BorderSide(color: highlight ? p.accent : p.border, width: highlight ? 1.5 : 1),
+        borderRadius: BorderRadius.circular(Radii.xl),
+        side: highlight ? BorderSide(color: p.text, width: 1.5) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
-        child: Padding(padding: padding, child: child),
+        child: Padding(
+          padding: padding,
+          child: OnSurface(child: child),
+        ),
       ),
+    );
+  }
+}
+
+/// Text fields are filled with the surface colour, so inside a surface card
+/// they vanish into it. Under this widget they are filled with the page colour
+/// instead and read as inset wells.
+class OnSurface extends StatelessWidget {
+  const OnSurface({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(inputDecorationTheme: theme.inputDecorationTheme.copyWith(fillColor: context.palette.bg)),
+      child: child,
+    );
+  }
+}
+
+/// The app's one segmented control: the options sit in a soft track and the
+/// chosen one in a solid pill. Every segment keeps its rounded shape (a
+/// SegmentedButton squares off the inner corners of the middle ones).
+class PillSegments<T> extends StatelessWidget {
+  const PillSegments({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.icons = const {},
+    this.expand = true,
+  });
+  final T value;
+  final Map<T, String> options;
+  final Map<T, IconData> icons;
+  final ValueChanged<T> onChanged;
+
+  /// Full width with equal segments; false hugs the labels (a "7 / 30 days" switch).
+  final bool expand;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final style = Theme.of(context).textTheme.labelMedium;
+    final selected = options.containsKey(value) ? value : options.keys.first;
+
+    // [touch]: in a row, the track's 4 dp above and below belong to each segment's touch box (48 dp, for a 40 dp pill).
+    Widget segment(T key, String label, {bool touch = false}) {
+      final on = key == selected;
+      final fg = on ? p.inverse : p.muted;
+      final icon = icons[key];
+      void pick() {
+        HapticFeedback.selectionClick();
+        onChanged(key);
+      }
+
+      final pill = AnimatedContainer(
+        duration: Motion.of(context, const Duration(milliseconds: 180)),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: on ? p.text : Colors.transparent,
+          borderRadius: BorderRadius.circular(Radii.pill),
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: on ? null : pick,
+            child: ConstrainedBox(
+              // A one-character label ("2") would make a 36 dp segment.
+              constraints: const BoxConstraints(minHeight: 40, minWidth: 48),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (icon != null) ...[Icon(icon, size: 16, color: fg), const SizedBox(width: 6)],
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: style?.copyWith(color: fg),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    return Semantics(
+        button: true,
+        selected: on,
+        inMutuallyExclusiveGroup: true,
+        child: touch
+            ? GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                excludeFromSemantics: true,
+                onTap: on ? null : pick,
+                child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: pill),
+              )
+            : pill,
+      );
+    }
+
+    // Natural width of one segment: label, icon and padding, at the user's text size.
+    final scaler = MediaQuery.textScalerOf(context);
+    double natural(T key, String label) {
+      final painter = TextPainter(
+        text: TextSpan(text: label, style: style),
+        textScaler: scaler,
+        maxLines: 1,
+        textDirection: Directionality.of(context),
+      )..layout();
+      final w = painter.width + 28 + (icons[key] != null ? 22 : 0);
+      painter.dispose();
+      return w < 48 ? 48 : w;
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final widths = [for (final e in options.entries) natural(e.key, e.value)];
+        final needed =
+            8 + (expand ? widths.fold<double>(0, (m, w) => w > m ? w : m) * widths.length : widths.fold<double>(0, (a, w) => a + w));
+        // Labels that don't fit side by side (a narrow phone, large text, a long
+        // translation) stack instead of clipping or overflowing.
+        if (constraints.hasBoundedWidth && needed > constraints.maxWidth) {
+          return Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.lg)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [for (final e in options.entries) segment(e.key, e.value)],
+            ),
+          );
+        }
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
+          child: Row(
+            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              for (final e in options.entries)
+                if (expand)
+                  Expanded(child: segment(e.key, e.value, touch: true))
+                else
+                  segment(e.key, e.value, touch: true),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -139,38 +286,19 @@ class IconTile extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: solid ? c : c.withValues(alpha: 0.12),
+        color: solid ? c : c.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(size * 0.3),
+        border: solid ? null : Border.all(color: c.withValues(alpha: 0.22)),
       ),
       alignment: Alignment.center,
-      child: Icon(icon, size: size * 0.5, color: solid ? Colors.white : c),
-    );
-  }
-}
-
-/// A neutral tile for list rows: the icon carries the colour, the tile does not.
-class GlyphTile extends StatelessWidget {
-  const GlyphTile({super.key, required this.icon, this.color, this.size = 34});
-  final IconData icon;
-  final Color? color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.sm)),
-      alignment: Alignment.center,
-      child: Icon(icon, size: size * 0.5, color: color ?? p.text),
+      child: Icon(icon, size: size * 0.5, color: solid ? onFill(c) : c),
     );
   }
 }
 
 /// Small uppercase label above a group.
 class SectionLabel extends StatelessWidget {
-  const SectionLabel(this.label, {super.key, this.trailing, this.padding = const EdgeInsets.fromLTRB(4, 24, 4, 8)});
+  const SectionLabel(this.label, {super.key, this.trailing, this.padding = const EdgeInsets.fromLTRB(4, 24, 4, 10)});
   final String label;
   final Widget? trailing;
   final EdgeInsets padding;
@@ -181,70 +309,31 @@ class SectionLabel extends StatelessWidget {
     child: Row(
       children: [
         Expanded(child: Text(label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall)),
-        ?trailing,
+        if (trailing != null) SectionAction(child: trailing!),
       ],
     ),
   );
 }
 
-/// A section title with an optional text action on the right ("See all").
-class SectionHeader extends StatelessWidget {
-  const SectionHeader(this.title, {super.key, this.action, this.onAction, this.padding});
-  final String title;
-  final String? action;
-  final VoidCallback? onAction;
-  final EdgeInsets? padding;
+/// A text button next to a section label ("Stage all", "Add server"): small and in the accent,
+/// like the "See all" link, so it reads as an action on the section instead of a second heading.
+class SectionAction extends StatelessWidget {
+  const SectionAction({super.key, required this.child});
+  final Widget child;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: padding ?? const EdgeInsets.fromLTRB(2, Space.xxl, 0, Space.sm),
-    child: Row(
-      children: [
-        Expanded(child: Text(title, style: Theme.of(context).textTheme.titleMedium)),
-        if (action != null)
-          TextButton(
-            onPressed: onAction,
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: Space.sm),
-              textStyle: const TextStyle(fontFamily: 'Geist', fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-            child: Text(action!),
-          ),
-      ],
-    ),
-  );
-}
-
-/// The large title at the top of a tab, with an optional caption and actions.
-class PageHeader extends StatelessWidget {
-  const PageHeader(this.title, {super.key, this.subtitle, this.actions = const []});
-  final String title;
-  final String? subtitle;
-  final List<Widget> actions;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.only(top: Space.sm, bottom: Space.lg),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: text.displaySmall),
-                if (subtitle != null) ...[const SizedBox(height: Space.xs), Text(subtitle!, style: text.bodySmall)],
-              ],
-            ),
-          ),
-          for (var i = 0; i < actions.length; i++) ...[if (i > 0) const SizedBox(width: Space.sm), actions[i]],
-        ],
+  Widget build(BuildContext context) => TextButtonTheme(
+    data: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: context.palette.accentText,
+        textStyle: Theme.of(context).textTheme.labelMedium,
+        // Small to look at, 48 dp to touch.
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        iconSize: 16,
       ),
-    );
-  }
+    ),
+    child: child,
+  );
 }
 
 /// Inset grouped rows, separated by hairlines.
@@ -256,18 +345,13 @@ class SettingsGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      decoration: BoxDecoration(
-        color: p.surface,
-        borderRadius: BorderRadius.circular(Radii.lg),
-        border: Border.all(color: p.border),
-      ),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.xl)),
       clipBehavior: Clip.antiAlias,
-      child: Material(
-        type: MaterialType.transparency,
+      child: OnSurface(
         child: Column(
           children: [
             for (var i = 0; i < children.length; i++) ...[
-              if (i > 0) Divider(height: 1, indent: 62, endIndent: 0, color: p.border),
+              if (i > 0) Divider(height: 1, indent: 66, endIndent: 16, color: p.border),
               children[i],
             ],
           ],
@@ -287,36 +371,43 @@ class SettingsRow extends StatelessWidget {
     this.subtitle,
     this.trailing,
     this.onTap,
-    this.onLongPress,
     this.destructive = false,
   });
   final String title;
   final IconData? icon;
   final Widget? leading;
-
-  /// Tints the icon glyph; the tile behind it stays neutral.
   final Color? color;
   final String? subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
   final bool destructive;
+
+  /// The row's switch, with nothing else to tap beside it (a menu would be lost in one merged node).
+  bool get _onlySwitch {
+    final t = trailing;
+    if (t is LabeledSwitch) return true;
+    if (t is Row) {
+      return t.children.any((c) => c is LabeledSwitch) && t.children.every((c) => c is LabeledSwitch || c is BusySpinner || c is SizedBox);
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final row = _build(context);
+    return _onlySwitch ? TitledSwitchRow(child: row) : row;
+  }
+
+  Widget _build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return InkWell(
       onTap: onTap,
-      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
         child: Row(
           children: [
-            leading ??
-                (icon != null
-                    ? GlyphTile(icon: icon!, color: destructive ? p.danger : color)
-                    : const SizedBox.shrink()),
+            leading ?? (icon != null ? IconTile(icon: icon!, color: color, size: 36) : const SizedBox.shrink()),
             if (leading != null || icon != null) const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -330,9 +421,14 @@ class SettingsRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (trailing != null)
-              trailing!
-            else if (onTap != null)
+            if (trailing != null) ...[
+              trailing!,
+              // A status pill doesn't say the row opens something; keep the chevron beside it.
+              if (onTap != null && trailing is Pill) ...[
+                const SizedBox(width: 6),
+                Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+              ],
+            ] else if (onTap != null)
               Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
           ],
         ),
@@ -353,402 +449,36 @@ class Pill extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final c = color ?? p.muted;
+    // The pill's own colour as its text, made dark enough to read on its tint over a card (danger and warning were 4:1).
+    final ink = readableOn(c, Color.alphaBlend(c.withValues(alpha: 0.12), p.surface));
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: c.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(Radii.pill)),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(Radii.pill),
+        border: Border.all(color: c.withValues(alpha: 0.25)),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (dot) ...[
-            StatusDot(color: c, size: 6),
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+            ),
             const SizedBox(width: 6),
           ] else if (icon != null) ...[
-            Icon(icon, size: 12, color: c),
+            Icon(icon, size: 12, color: ink),
             const SizedBox(width: 5),
           ],
-          Text(
-            label,
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A small dot; with [pulse] it breathes, for "working" states.
-class StatusDot extends StatefulWidget {
-  const StatusDot({super.key, required this.color, this.size = 8, this.pulse = false});
-  final Color color;
-  final double size;
-  final bool pulse;
-
-  @override
-  State<StatusDot> createState() => _StatusDotState();
-}
-
-class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMixin {
-  late final controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.pulse) controller.repeat(reverse: true);
-  }
-
-  @override
-  void didUpdateWidget(StatusDot old) {
-    super.didUpdateWidget(old);
-    if (widget.pulse && !controller.isAnimating) controller.repeat(reverse: true);
-    if (!widget.pulse && controller.isAnimating) controller.stop();
-  }
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final dot = Container(
-      width: widget.size,
-      height: widget.size,
-      decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
-    );
-    if (!widget.pulse) return dot;
-    return FadeTransition(opacity: Tween(begin: 0.35, end: 1.0).animate(controller), child: dot);
-  }
-}
-
-/// A square icon button with a hairline border; [filled] makes it the accent.
-class AppIconButton extends StatelessWidget {
-  const AppIconButton({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.onLongPress,
-    this.size = 40,
-    this.filled = false,
-    this.badge = 0,
-    this.color,
-  });
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
-  final double size;
-  final bool filled;
-  final int badge;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final enabled = onTap != null;
-    final button = Semantics(
-      button: true,
-      enabled: enabled,
-      label: label,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: filled ? (enabled ? p.accent : p.raised) : p.surface,
-          borderRadius: BorderRadius.circular(size * 0.32),
-          border: filled ? null : Border.all(color: p.border),
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(size * 0.32),
-            onTap: enabled
-                ? () {
-                    HapticFeedback.selectionClick();
-                    onTap!();
-                  }
-                : null,
-            onLongPress: onLongPress,
-            child: Icon(
-              icon,
-              size: size * 0.45,
-              color: filled ? (enabled ? p.onAccent : p.faint) : (color ?? (enabled ? p.text : p.faint)),
-            ),
-          ),
-        ),
-      ),
-    );
-    return Badge(isLabelVisible: badge > 0, label: Text('$badge'), child: button);
-  }
-}
-
-/// A rounded chip: filters, toggles and compact pickers.
-class AppChip extends StatelessWidget {
-  const AppChip({
-    super.key,
-    required this.label,
-    required this.onTap,
-    this.selected = false,
-    this.icon,
-    this.leading,
-    this.trailingIcon,
-    this.color,
-    this.maxWidth,
-  });
-  final String label;
-  final VoidCallback? onTap;
-  final bool selected;
-  final IconData? icon;
-  final Widget? leading;
-  final IconData? trailingIcon;
-
-  /// Overrides the accent for a selected chip (warnings, for example).
-  final Color? color;
-  final double? maxWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final c = color ?? p.accent;
-    final fg = selected ? c : p.text;
-    Widget label0 = Text(
-      label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg),
-    );
-    if (maxWidth != null) {
-      label0 = ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxWidth!),
-        child: label0,
-      );
-    }
-    return Material(
-      color: selected ? c.withValues(alpha: 0.13) : p.surface,
-      shape: StadiumBorder(side: BorderSide(color: selected ? c.withValues(alpha: 0.4) : p.border)),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Container(
-          height: 34,
-          padding: EdgeInsets.fromLTRB(leading != null ? 6 : 12, 0, 12, 0),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (leading != null) ...[leading!, const SizedBox(width: 6)],
-              if (icon != null) ...[Icon(icon, size: 15, color: selected ? c : p.muted), const SizedBox(width: 6)],
-              Flexible(child: label0),
-              if (trailingIcon != null) ...[const SizedBox(width: 4), Icon(trailingIcon, size: 13, color: p.faint)],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A full-width segmented control with an optional caption above it.
-class Segmented<T> extends StatelessWidget {
-  const Segmented({super.key, required this.value, required this.options, required this.onChanged, this.label});
-  final T value;
-  final Map<T, String> options;
-  final ValueChanged<T> onChanged;
-  final String? label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (label != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 0, Space.sm),
-            child: Text(label!, style: Theme.of(context).textTheme.labelMedium),
-          ),
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<T>(
-            showSelectedIcon: false,
-            segments: [
-              for (final e in options.entries)
-                ButtonSegment(
-                  value: e.key,
-                  label: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            selected: {options.containsKey(value) ? value : options.keys.first},
-            onSelectionChanged: (s) => onChanged(s.first),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// A tinted strip for state the user should notice: approvals, plan mode,
-/// running servers, warnings.
-class InlineBanner extends StatelessWidget {
-  const InlineBanner({
-    super.key,
-    required this.tone,
-    required this.child,
-    this.icon,
-    this.trailing,
-    this.onTap,
-    this.padding = const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.sm, Space.sm),
-  });
-  final Color tone;
-  final IconData? icon;
-  final Widget child;
-  final Widget? trailing;
-  final VoidCallback? onTap;
-  final EdgeInsets padding;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: tone.withValues(alpha: 0.08),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.md),
-        side: BorderSide(color: tone.withValues(alpha: 0.28)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: padding,
-          child: Row(
-            children: [
-              if (icon != null) ...[Icon(icon, size: 18, color: tone), const SizedBox(width: Space.md)],
-              Expanded(child: child),
-              ?trailing,
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A square tile with an icon over a label, for grids of destinations.
-class ActionTile extends StatelessWidget {
-  const ActionTile({super.key, required this.icon, required this.label, required this.onTap, this.color});
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final enabled = onTap != null;
-    return Opacity(
-      opacity: enabled ? 1 : 0.45,
-      child: SurfaceCard(
-        radius: Radii.md,
-        padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: Space.md),
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconTile(icon: icon, color: color ?? p.accent, size: 38),
-            const SizedBox(height: Space.sm),
-            Text(
+          // Wraps rather than overflows where the pill is given less than its label (a long status, large text).
+          Flexible(
+            child: Text(
               label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.text),
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: ink),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Opens a bottom sheet of actions and returns the picked value.
-Future<T?> showActionSheet<T>(
-  BuildContext context, {
-  String? title,
-  required List<({IconData icon, String title, String? subtitle, T value, bool destructive, bool enabled})> actions,
-}) => showModalBottomSheet<T>(
-  context: context,
-  builder: (sheet) => SafeArea(
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (title != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 0, 4, Space.md),
-              child: Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(sheet).textTheme.titleMedium,
-              ),
-            ),
-          SettingsGroup(
-            children: [
-              for (final a in actions)
-                Opacity(
-                  opacity: a.enabled ? 1 : 0.45,
-                  child: SettingsRow(
-                    icon: a.icon,
-                    title: a.title,
-                    subtitle: a.subtitle,
-                    destructive: a.destructive,
-                    trailing: const SizedBox.shrink(),
-                    onTap: a.enabled ? () => Navigator.pop(sheet, a.value) : null,
-                  ),
-                ),
-            ],
           ),
-        ],
-      ),
-    ),
-  ),
-);
-
-/// Centered picture, title and message for empty lists.
-class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.icon, required this.title, this.message, this.action});
-  final IconData icon;
-  final String title;
-  final String? message;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final text = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: Space.xl),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: p.surface,
-              borderRadius: BorderRadius.circular(Radii.lg),
-              border: Border.all(color: p.border),
-            ),
-            child: Icon(icon, size: 26, color: p.muted),
-          ),
-          const SizedBox(height: Space.lg),
-          Text(title, style: text.titleMedium, textAlign: TextAlign.center),
-          if (message != null) ...[
-            const SizedBox(height: Space.xs),
-            Text(message!, style: text.bodySmall, textAlign: TextAlign.center),
-          ],
-          if (action != null) ...[const SizedBox(height: Space.lg), action!],
         ],
       ),
     );
@@ -794,8 +524,6 @@ Brand providerBrand(BuildContext context, String id) {
   }
   if (key.contains('bedrock') || key.contains('amazon')) return Brand(LucideIcons.cloud, const Color(0xFFFF9900));
   if (key.contains('llama.cpp') || key.contains('local')) return Brand(LucideIcons.cpu, p.muted);
-  // Endpoints the user defined themselves: an unknown host, not a known vendor.
-  if (key.startsWith('custom-')) return Brand(LucideIcons.server, p.muted);
   return Brand(LucideIcons.bot, p.muted);
 }
 
@@ -821,5 +549,266 @@ IconData toolIcon(String? name) => switch (name) {
   'find' || 'ls' => LucideIcons.folderSearch,
   'web_search' => LucideIcons.search,
   'web_fetch' => LucideIcons.globe,
+  'web_screenshot' => LucideIcons.camera,
+  'todo_write' => LucideIcons.listTodo,
+  'background_job' => LucideIcons.hourglass,
   _ => LucideIcons.wrench,
 };
+
+/// A token count for people: 872k, 1M, 1.5M, or the number itself when small.
+String formatTokens(int n) {
+  if (n >= 1000000) {
+    final m = n / 1000000;
+    final s = m >= 10 ? m.round().toString() : m.toStringAsFixed(1);
+    return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}M';
+  }
+  if (n >= 1000) return '${(n / 1000).round()}k';
+  return '$n';
+}
+
+// ---------------------------------------------------------------------------
+// Work in progress
+
+/// A spinner for a button or a row that is waiting on the host, or ([BusySpinner.page]) for a screen or panel with
+/// nothing to show yet. [color] on a filled button, or where the colour means something; otherwise the theme's comets.
+class BusySpinner extends StatelessWidget {
+  const BusySpinner({super.key, this.size = 16, this.color, this.semanticsLabel});
+
+  /// The big one, alone in the middle of a screen or panel.
+  const BusySpinner.page({super.key}) : size = 44, color = null, semanticsLabel = null;
+
+  final double size;
+  final Color? color;
+
+  /// See [EnergySpinner.semanticsLabel]: empty where the control around it already says it is busy.
+  final String? semanticsLabel;
+
+  @override
+  Widget build(BuildContext context) => EnergySpinner(size: size, color: color, semanticsLabel: semanticsLabel);
+}
+
+/// A 2 px bar that runs while [busy]. It always takes its height, so the content under it never jumps when it shows.
+class BusyBar extends StatelessWidget {
+  const BusyBar({super.key, required this.busy});
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return SizedBox(
+      height: 2,
+      child: busy
+          ? LinearProgressIndicator(minHeight: 2, color: p.muted, backgroundColor: p.border)
+          : const SizedBox.shrink(),
+    );
+  }
+}
+
+/// Gives a small control the 48 dp a finger needs without making it look bigger: the control keeps its size, centred,
+/// and a tap on the margin around it counts as a tap on it. Wrap it in the control's [Semantics], so a screen reader's
+/// box is the 48 dp too.
+class TapTarget extends StatelessWidget {
+  const TapTarget({super.key, required this.child, this.onTap, this.onLongPress, this.size = 48});
+  final Widget child;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    excludeFromSemantics: true,
+    onTap: onTap,
+    onLongPress: onLongPress,
+    child: ConstrainedBox(
+      constraints: BoxConstraints(minWidth: size, minHeight: size),
+      child: Center(widthFactor: 1, heightFactor: 1, child: child),
+    ),
+  );
+}
+
+/// A [Switch] that says what it switches. Beside a row's title a bare one is its own stop for a screen reader and
+/// reads "switch, on" with nothing else.
+class LabeledSwitch extends StatelessWidget {
+  const LabeledSwitch({super.key, required this.label, required this.value, required this.onChanged});
+  final String label;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    // Beside a title that already says what it switches (TitledSwitchRow) it adds nothing: the row is read once, as
+    // "<title>, switch, on", instead of the title and then the same words again for the switch.
+    if (context.dependOnInheritedWidgetOfExactType<_SwitchTitled>() != null) return Switch(value: value, onChanged: onChanged);
+    return Semantics(label: label, child: Switch(value: value, onChanged: onChanged));
+  }
+}
+
+/// A row whose visible title says what its [LabeledSwitch] switches: one thing to a screen reader (the title, the
+/// switch's state and its tap), not the title and then the switch's label repeating it.
+class TitledSwitchRow extends StatelessWidget {
+  const TitledSwitchRow({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => MergeSemantics(child: _SwitchTitled(child: child));
+}
+
+class _SwitchTitled extends InheritedWidget {
+  const _SwitchTitled({required super.child});
+
+  @override
+  bool updateShouldNotify(_SwitchTitled oldWidget) => false;
+}
+
+/// Something that failed to load, in the user's words ([friendlyError]), with a way to try again: an error alone in
+/// the middle of a screen leaves nothing to do but find the refresh icon.
+class ErrorNotice extends StatelessWidget {
+  const ErrorNotice({super.key, required this.error, this.onRetry, this.center = false});
+  final Object? error;
+  final VoidCallback? onRetry;
+
+  /// Centred, alone on a screen or panel; otherwise aligned to the start, in a card or a list.
+  final bool center;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: p.danger);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: center ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      children: [
+        Text(friendlyError(error), style: style, textAlign: center ? TextAlign.center : TextAlign.start),
+        if (onRetry != null) ...[
+          const SizedBox(height: 4),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(LucideIcons.rotateCcw, size: 16),
+            label: Text(tr('Try again')),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// One action at a time per key: a second tap while the first is still waiting on the host does nothing, instead of
+/// running it twice (two sheets, the same message sent twice, two screens pushed). [busy] says what is running, for the
+/// spinner, and the state rebuilds when it starts and ends.
+mixin BusyActions<T extends StatefulWidget> on State<T> {
+  final Set<Object> _running = {};
+
+  /// Whether the action [key] is running, or any action when [key] is null.
+  bool busy([Object? key]) => key == null ? _running.isNotEmpty : _running.contains(key);
+
+  /// Runs [action] under [key] unless it is already running (then returns null at once). Errors are rethrown.
+  Future<R?> runBusy<R>(Object key, Future<R> Function() action) async {
+    if (_running.contains(key)) return null;
+    setState(() => _running.add(key));
+    try {
+      return await action();
+    } finally {
+      if (mounted) {
+        setState(() => _running.remove(key));
+      } else {
+        _running.remove(key);
+      }
+    }
+  }
+}
+
+/// Runs [task] behind a small dialog that says what it waits for and cannot be dismissed, for work that has no button
+/// of its own to show a spinner on. A failure turns the spinner into a cross for a moment, then says why in a snackbar
+/// (the result is null then). With [confirm] success shows a check the same way: for work whose result nothing else on
+/// screen shows; where the next screen opening says it worked, the dialog just goes.
+Future<T?> runWithProgress<T>(
+  BuildContext context,
+  String label,
+  Future<T> Function() task, {
+  bool confirm = false,
+}) async {
+  final nav = Navigator.of(context);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final hold = Motion.of(context, EnergySpinner.outcomeDuration);
+  final outcome = ValueNotifier<EnergyOutcome?>(null);
+  // This dialog and no other is taken down when the work ends, whatever opened on top of it meanwhile.
+  final route = DialogRoute<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: Row(
+          children: [
+            ValueListenableBuilder(
+              valueListenable: outcome,
+              // The label next to it says the same.
+              builder: (_, o, _) => EnergySpinner(size: 36, outcome: o, semanticsLabel: ''),
+            ),
+            const SizedBox(width: 14),
+            // "Restoring…" next to a check would still read as running.
+            Expanded(
+              child: ValueListenableBuilder(
+                valueListenable: outcome,
+                builder: (_, o, _) => Text(switch (o) {
+                  EnergyOutcome.success => tr('Done'),
+                  EnergyOutcome.failure => tr('Failed'),
+                  null => label,
+                }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  // Only while the dialog is the one on screen: under something else nobody would see it.
+  Future<void> show(EnergyOutcome o) async {
+    if (!route.isCurrent) return;
+    outcome.value = o;
+    if (hold > Duration.zero) await Future<void>.delayed(hold);
+  }
+
+  unawaited(nav.push(route));
+  try {
+    final result = await task();
+    if (confirm) await show(EnergyOutcome.success);
+    return result;
+  } catch (e) {
+    await show(EnergyOutcome.failure);
+    messenger?.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    return null;
+  } finally {
+    if (route.isActive) nav.removeRoute(route);
+  }
+}
+
+/// A bottom sheet that is never cut off: as tall as its content, up to the whole screen, and it scrolls past that. A plain
+/// sheet stops at 9/16 of the screen's height, which in landscape left a menu's last rows (Delete) out of reach.
+Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilder builder}) => showModalBottomSheet<T>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  builder: (context) => SingleChildScrollView(child: builder(context)),
+);
+
+/// A filled button that deletes or stops something: the danger colour, with text that reads on it in either theme.
+ButtonStyle dangerButtonStyle(BuildContext context) =>
+    FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: context.palette.onDanger);
+
+/// Keeps content to a readable width on a tablet, a foldable or a phone on its side (lists and the chat used the whole
+/// width: an 880 dp line of text, 430 dp project tiles). Below [max] it changes nothing.
+class ContentWidth extends StatelessWidget {
+  const ContentWidth({super.key, required this.child, this.max = 720});
+  final Widget child;
+  final double max;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) => box.maxWidth.isFinite && box.maxWidth > max
+        ? Padding(padding: EdgeInsets.symmetric(horizontal: (box.maxWidth - max) / 2), child: child)
+        : child,
+  );
+}

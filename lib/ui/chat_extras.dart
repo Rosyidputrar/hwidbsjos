@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,20 +8,26 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
 import '../agent/features.dart';
+import '../agent/sent_attachments.dart';
+import '../agent/updater.dart' show formatBytes;
 import 'i18n.dart';
 import 'changes_screen.dart';
-import 'deploy_sheet.dart';
+import 'code_view.dart';
 import 'editor_screen.dart';
+import 'chat_export.dart';
+import 'diff_view.dart';
+import 'errors.dart';
 import 'files_screen.dart';
-import 'folder_picker.dart';
 import 'git_screen.dart';
 import 'kit.dart';
-import 'preview_screen.dart';
+import 'preview_open.dart';
+import 'review_screen.dart';
 import 'search_screen.dart';
 import 'tasks_screen.dart';
-import 'terminal_screen.dart';
 import 'theme.dart';
 import 'usage_screen.dart';
 
@@ -45,63 +52,188 @@ class Attachment {
   String get ext => name.contains('.') ? name.split('.').last.toLowerCase() : '';
   String? get imageMime => mime?.startsWith('image/') == true ? mime : _imageTypes[ext];
   bool get isImage => imageMime != null;
+
+  /// Long text pasted into the composer, kept as a file (see [LongPasteFormatter]).
+  bool get isPasted => name == pastedName;
 }
+
+/// Pasting more than this many characters, or at least this many lines, attaches the text as a file instead.
+const longPasteChars = 1000;
+const longPasteLines = 10;
+
+/// Whether [text] is long enough to become an attachment when pasted: more
+/// than [longPasteChars] characters, or [longPasteLines] lines or more (a
+/// trailing line break does not count as a line).
+bool isLongPaste(String text) =>
+    text.length > longPasteChars || '\n'.allMatches(text.trimRight()).length + 1 >= longPasteLines;
+
+/// Turns a long paste into an attachment: the field is left as it was and [onLongPaste] gets the text.
+///
+/// A paste is told apart from typing by size: one edit that inserts more than [longPasteChars] characters or
+/// at least [longPasteLines] lines. Keyboards insert a word or a suggestion at a time, and text the app sets itself
+/// (voice input, shared text, a restored draft) never goes through input formatters.
+class LongPasteFormatter extends TextInputFormatter {
+  LongPasteFormatter(this.onLongPaste);
+  final void Function(String text) onLongPaste;
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final before = oldValue.text;
+    final after = newValue.text;
+    // What this edit inserted: newValue minus the prefix and suffix it shares with oldValue.
+    var start = 0;
+    final shortest = before.length < after.length ? before.length : after.length;
+    while (start < shortest && before.codeUnitAt(start) == after.codeUnitAt(start)) {
+      start++;
+    }
+    var end = 0;
+    while (end < shortest - start &&
+        before.codeUnitAt(before.length - 1 - end) == after.codeUnitAt(after.length - 1 - end)) {
+      end++;
+    }
+    final inserted = after.substring(start, after.length - end);
+    if (!isLongPaste(inserted)) return newValue;
+    // After this edit is applied; the callback updates widgets.
+    scheduleMicrotask(() => onLongPaste(inserted));
+    return oldValue;
+  }
+}
+
+/// Writes pasted text to a file and returns it as an attachment. Synchronous: it is a paste (kilobytes),
+/// and the chip should be there the moment the field stays empty.
+Attachment pastedAttachment(String text) {
+  final dir = Directory('${Directory.systemTemp.path}/griphub-paste/${DateTime.now().microsecondsSinceEpoch}')
+    ..createSync(recursive: true);
+  final file = File('${dir.path}/$pastedName')..writeAsStringSync(text);
+  return Attachment(file.path, pastedName, mime: 'text/plain');
+}
+
+/// What a pasted picture is called; the type decides the extension.
+const pastedImageStem = 'pasted-image';
+
+/// Writes a picture pasted from the keyboard (its bytes and type) to a file and returns it as an attachment, like
+/// [pastedAttachment] does for long text.
+Attachment pastedImageAttachment(Uint8List bytes, String mime) {
+  final ext = switch (mime) {
+    'image/jpeg' => 'jpg',
+    'image/webp' => 'webp',
+    'image/gif' => 'gif',
+    _ => 'png',
+  };
+  final dir = Directory('${Directory.systemTemp.path}/griphub-paste/${DateTime.now().microsecondsSinceEpoch}')
+    ..createSync(recursive: true);
+  final file = File('${dir.path}/$pastedImageStem.$ext')..writeAsBytesSync(bytes);
+  return Attachment(file.path, '$pastedImageStem.$ext', mime: mime);
+}
+
+/// The picture types a keyboard may paste into the composer.
+const pasteImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 /// Pictures go to the model as images; other files are copied into the
 /// project's `.attachments/` folder and referenced by path in the message.
-Future<({String text, List<Map<String, String>> images})> preparePrompt(
+/// Every attachment is ALSO copied there (with a unique name, so two
+/// same-named attachments never overwrite each other) and returned in
+/// [files], so the sent message can show it later. Unreadable files are
+/// skipped rather than failing the send.
+///
+/// The attachments live on the phone ([Attachment.path]); the project folder is on the agent's machine ([fs]), so on
+/// a server they are uploaded ([onProgress], [cancel], and [onFile] naming the file being sent). A failed upload or a
+/// cancel throws: nothing is sent then.
+Future<({String text, List<Map<String, String>> images, List<SentAttachment> files})> preparePrompt(
   String text,
   List<Attachment> attachments,
   String cwd,
-) async {
+  AgentFs fs, {
+  Progress? onProgress,
+  CancelToken? cancel,
+  void Function(String label)? onFile,
+}) async {
   final images = <Map<String, String>>[];
   final paths = <String>[];
-  for (final a in attachments) {
+  final files = <SentAttachment>[];
+  final dir = '$cwd/.attachments';
+  final stamp = DateTime.now().microsecondsSinceEpoch;
+  final present = [
+    for (final a in attachments)
+      if (File(a.path).existsSync()) a,
+  ];
+  if (present.isNotEmpty) await fs.mkdir(dir);
+  for (var i = 0; i < attachments.length; i++) {
+    final a = attachments[i];
     final file = File(a.path);
     if (!file.existsSync()) continue;
-    if (a.isImage && file.lengthSync() < 8 * 1024 * 1024) {
+    final target = '$dir/${stamp}_${i}_${a.name}';
+    cancel?.check();
+    onFile?.call(present.length > 1 ? '${a.name} · ${present.indexOf(a) + 1} ${tr('of')} ${present.length}' : a.name);
+    try {
+      await fs.upload(a.path, target, onProgress: onProgress, cancel: cancel);
+    } on FileSystemException {
+      continue; // unreadable on the phone
+    }
+    final length = _fileSize(file);
+    files.add((path: target, name: a.name, mime: a.imageMime ?? a.mime, size: length));
+    if (a.isImage && length >= 0 && length < 8 * 1024 * 1024) {
       images.add({'type': 'image', 'data': base64Encode(await file.readAsBytes()), 'mimeType': a.imageMime!});
     } else {
-      final dir = Directory('$cwd/.attachments')..createSync(recursive: true);
-      final target = '${dir.path}/${a.name}';
-      await file.copy(target);
       paths.add(target);
     }
   }
   final note = paths.isEmpty ? '' : '\n\nAttached files:\n${paths.map((p) => '- $p').join('\n')}';
-  return (text: '$text$note'.trim(), images: images);
+  return (text: '$text$note'.trim(), images: images, files: files);
 }
 
-Future<List<Attachment>> pickAttachments(BuildContext context) async {
-  final choice = await showActionSheet<String>(
-    context,
-    title: tr('Attach'),
-    actions: [
-      (
-        icon: LucideIcons.images,
-        title: tr('Photos'),
-        subtitle: tr('Screenshots, sketches, error photos'),
-        value: 'gallery',
-        destructive: false,
-        enabled: true,
+int _fileSize(File file) {
+  try {
+    return file.lengthSync();
+  } catch (_) {
+    return -1;
+  }
+}
+
+/// Asks where to attach from. With [client], a picture on the clipboard is offered too ("Paste image").
+Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client}) async {
+  final clipboardImage = await client?.clipboardHasImage() ?? false;
+  if (!context.mounted) return const [];
+  final choice = await showAppSheet<String>(
+    context: context,
+    builder: (context) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: SettingsGroup(
+          children: [
+            SettingsRow(
+              icon: LucideIcons.images,
+              color: context.palette.accentAlt,
+              title: tr('Photos'),
+              subtitle: tr('Screenshots, sketches, error photos'),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            SettingsRow(
+              icon: LucideIcons.camera,
+              color: const Color(0xFF30A46C),
+              title: tr('Camera'),
+              subtitle: tr('Take a picture now'),
+              onTap: () => Navigator.pop(context, 'camera'),
+            ),
+            SettingsRow(
+              icon: LucideIcons.paperclip,
+              color: const Color(0xFFF76B15),
+              title: tr('Files'),
+              subtitle: tr('PDFs, code, data, anything'),
+              onTap: () => Navigator.pop(context, 'files'),
+            ),
+            if (clipboardImage)
+              SettingsRow(
+                icon: LucideIcons.clipboardPaste,
+                color: const Color(0xFF8E4EC6),
+                title: tr('Paste image'),
+                subtitle: tr('The picture you copied'),
+                onTap: () => Navigator.pop(context, 'clipboard'),
+              ),
+          ],
+        ),
       ),
-      (
-        icon: LucideIcons.camera,
-        title: tr('Camera'),
-        subtitle: tr('Take a picture now'),
-        value: 'camera',
-        destructive: false,
-        enabled: true,
-      ),
-      (
-        icon: LucideIcons.paperclip,
-        title: tr('Files'),
-        subtitle: tr('PDFs, code, data, anything'),
-        value: 'files',
-        destructive: false,
-        enabled: true,
-      ),
-    ],
+    ),
   );
   final picker = ImagePicker();
   switch (choice) {
@@ -111,6 +243,9 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
     case 'camera':
       final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 2048);
       return x == null ? [] : [Attachment(x.path, x.name, mime: x.mimeType)];
+    case 'clipboard':
+      final image = await client?.clipboardImage();
+      return image == null ? const [] : [Attachment(image['path']!, image['name']!, mime: image['mime'])];
     case 'files':
       final files = await FilePicker.pickFiles();
       return [
@@ -123,9 +258,12 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
 
 /// Thumbnails / chips of what will be sent with the next message.
 class AttachmentStrip extends StatelessWidget {
-  const AttachmentStrip({super.key, required this.items, required this.onRemove});
+  const AttachmentStrip({super.key, required this.items, required this.onRemove, this.onOpen});
   final List<Attachment> items;
   final void Function(Attachment) onRemove;
+
+  /// Tapping an attachment (a long paste opens its preview).
+  final void Function(Attachment)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -143,8 +281,10 @@ class AttachmentStrip extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(Radii.sm),
-                child: a.isImage
+                borderRadius: BorderRadius.circular(Radii.md),
+                child: a.isPasted
+                    ? GestureDetector(onTap: onOpen == null ? null : () => onOpen!(a), child: _PastedChip(attachment: a))
+                    : a.isImage
                     ? Image.file(File(a.path), width: 56, height: 56, fit: BoxFit.cover)
                     : Container(
                         width: 120,
@@ -189,48 +329,329 @@ class AttachmentStrip extends StatelessWidget {
   }
 }
 
+/// A long paste waiting to be sent: a TXT badge with its size, and "Pasted content".
+class _PastedChip extends StatelessWidget {
+  const _PastedChip({required this.attachment});
+  final Attachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    var size = -1;
+    try {
+      size = File(attachment.path).lengthSync();
+    } catch (_) {}
+    return Container(
+      // Wide enough for "Konten yang ditempel" on one line.
+      width: 156,
+      height: 56,
+      padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+      decoration: BoxDecoration(
+        color: p.raised,
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(Radii.sm),
+                  border: Border.all(color: p.border),
+                ),
+                child: Text(
+                  'TXT',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.muted, letterSpacing: 0.4),
+                ),
+              ),
+              if (size >= 0) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    formatBytes(size),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: p.faint),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          Text(
+            tr('Pasted content'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: p.text),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A long paste's preview, from its chip in the composer. Pops true for "Paste as text".
+Future<bool?> showPastedSheet(BuildContext context, String text) => showModalBottomSheet<bool>(
+  context: context,
+  isScrollControlled: true,
+  builder: (context) {
+    final p = context.palette;
+    final lines = '\n'.allMatches(text).length + 1;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(tr('Pasted content'), style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(
+              '${lines == 1 ? tr('1 line') : tr('{n} lines').replaceAll('{n}', localNumber('$lines'))} · '
+              '${formatBytes(utf8.encode(text).length)}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+            ),
+            const SizedBox(height: 12),
+            CodeBox(
+              // A preview: the start is enough to recognise it, and long text stays cheap to draw.
+              text: text.length > 6000 ? '${text.substring(0, 6000)}\n…' : text,
+              copyText: text,
+              label: pastedName,
+              language: 'text',
+              maxHeight: MediaQuery.sizeOf(context).height * 0.4,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              tr('Sent with your message as a file the agent reads, so a long log or document does not fill the chat.'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(context, true),
+              icon: const Icon(LucideIcons.textCursorInput, size: 16),
+              label: Text(tr('Paste as text')),
+            ),
+          ],
+        ),
+      ),
+    );
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Approvals
 
 /// Asks once before turning every approval off, since pi can then delete files or push without asking.
+/// The agent is mid-turn and the user picked another chat: stop it and
+/// switch, or stay. Switching without stopping would drop the reply.
+Future<bool> confirmStopToSwitch(BuildContext context) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(tr('Stop the agent and switch?')),
+      content: Text(
+        tr('The agent is still working in this chat. Switching stops it; what it has done so far stays in the chat.'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+        FilledButton(
+          style: dangerButtonStyle(context),
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(tr('Stop and switch')),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}
+
+/// The app-wide messenger, for what is said outside any one screen (a chat switch that could not go ahead).
+final rootMessenger = GlobalKey<ScaffoldMessengerState>();
+
+/// Covers every screen while Stop and switch waits for the agent to stop, so the wait is visible and nothing else can
+/// be tapped meanwhile; and says it when the agent did not stop in time (the switch then does not happen).
+class StopToSwitchOverlay extends StatefulWidget {
+  const StopToSwitchOverlay({super.key, required this.agent, required this.child});
+  final AgentController agent;
+  final Widget child;
+
+  @override
+  State<StopToSwitchOverlay> createState() => _StopToSwitchOverlayState();
+}
+
+class _StopToSwitchOverlayState extends State<StopToSwitchOverlay> {
+  late final StreamSubscription<String> _problems;
+
+  @override
+  void initState() {
+    super.initState();
+    _problems = widget.agent.switchProblems.stream.listen((m) {
+      rootMessenger.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(tr(m))));
+    });
+  }
+
+  @override
+  void dispose() {
+    _problems.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return ListenableBuilder(
+      listenable: widget.agent,
+      builder: (context, child) => Stack(
+        children: [
+          child!,
+          if (widget.agent.stoppingToSwitch)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.35),
+                child: Center(
+                  child: Material(
+                    color: p.surface,
+                    borderRadius: BorderRadius.circular(Radii.lg),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const BusySpinner(size: 18),
+                          const SizedBox(width: 12),
+                          Text(tr('Stopping the agent…'), style: Theme.of(context).textTheme.bodyMedium),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      child: widget.child,
+    );
+  }
+}
+
 Future<bool> confirmBypass(BuildContext context) async =>
     await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Bypass all permissions?')),
-        content: Text(tr('pi will run every command, edit any file and use every tool without asking.')),
+        content: Text(
+          tr(
+            'The agent will run every command, edit any file and use every tool without asking. This stays on for all chats until you turn it off in Settings > Approvals.',
+          ),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Bypass'))),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: dangerButtonStyle(context),
+            child: Text(tr('Bypass')),
+          ),
         ],
       ),
     ) ??
     false;
 
-class ApprovalCards extends StatelessWidget {
-  const ApprovalCards({super.key, required this.features});
+/// The first approval in the queue. After an answer, the answered card stays
+/// on screen (disabled) for a moment before the next one slides in: without
+/// this, the second half of a double-tap lands on the NEXT card's Allow
+/// button and approves an action the user never saw.
+class ApprovalCards extends StatefulWidget {
+  const ApprovalCards({super.key, required this.features, this.agent});
   final Features features;
+
+  /// The chat's agent: "Bypass all permissions" on a card goes through it, so the chat shows at once that it is on.
+  final AgentController? agent;
+
+  @override
+  State<ApprovalCards> createState() => _ApprovalCardsState();
+}
+
+class _ApprovalCardsState extends State<ApprovalCards> {
+  Approval? _justAnswered;
+  Timer? _timer;
+
+  /// The card last announced with a buzz, so each approval buzzes once.
+  String? _buzzed;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onAnswered(Approval a) {
+    _timer?.cancel();
+    setState(() => _justAnswered = a);
+    _timer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _justAnswered = null);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.features,
+      builder: (context, _) {
+        final approvals = widget.features.approvals;
+        final a = _justAnswered ?? (approvals.isEmpty ? null : approvals.first);
+        if (a != null && _justAnswered == null && a.id != _buzzed) {
+          _buzzed = a.id;
+          // The agent stopped to ask: worth a nudge, even if the user is looking elsewhere.
+          WidgetsBinding.instance.addPostFrameCallback((_) => HapticFeedback.mediumImpact());
+        }
+        // Rises from the composer and folds back into it; the next card in the queue cross-fades
+        // in once the answered one has had its moment on screen (see _onAnswered).
+        return AnimatedSwitcher(
+          duration: Motion.of(context, Motion.normal),
+          switchInCurve: Motion.curve,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) => SizeTransition(
+            sizeFactor: animation,
+            alignment: Alignment.bottomCenter,
+            child: FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween(begin: const Offset(0, 0.12), end: Offset.zero).animate(animation),
+                // A card on its way out takes no taps, so only the card fading in can be answered.
+                child: AnimatedBuilder(
+                  animation: animation,
+                  child: child,
+                  builder: (context, child) => IgnorePointer(
+                    ignoring: animation.status == AnimationStatus.reverse,
+                    child: child,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          child: a == null ? const SizedBox(key: ValueKey('none'), width: double.infinity) : _card(context, a, approvals),
+        );
+      },
+    );
+  }
+
+  Widget _card(BuildContext context, Approval a, List<Approval> approvals) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    return ListenableBuilder(
-      listenable: features,
-      builder: (context, _) {
-        if (features.approvals.isEmpty) return const SizedBox.shrink();
-        final a = features.approvals.first;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
+    return Padding(
+          key: ValueKey(a.id),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(Radii.lg),
-              border: Border.all(color: p.warning.withValues(alpha: 0.55), width: 1.2),
-              boxShadow: [
-                BoxShadow(color: p.warning.withValues(alpha: 0.12), blurRadius: 20, offset: const Offset(0, 6)),
-              ],
+              borderRadius: BorderRadius.circular(Radii.xl),
+              border: Border.all(color: p.warning.withValues(alpha: 0.6), width: 1.2),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -244,66 +665,55 @@ class ApprovalCards extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('${tr('Allow')} ${a.toolName}?', style: text.titleSmall),
-                          Text(a.reason, style: text.bodySmall),
+                          Text(tr(a.reason), style: text.bodySmall),
                         ],
                       ),
                     ),
-                    if (features.approvals.length > 1) Pill('+${features.approvals.length - 1}', color: p.muted),
+                    if (approvals.length > 1) Pill('+${approvals.length - 1}', color: p.muted),
                   ],
                 ),
                 const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  constraints: const BoxConstraints(maxHeight: 110),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: p.raised,
-                    borderRadius: BorderRadius.circular(Radii.sm),
-                    border: Border.all(color: p.border),
-                  ),
-                  child: SingleChildScrollView(
-                    child: Text(
-                      a.summary,
-                      style: TextStyle(fontFamily: mono, fontSize: 12, color: p.text, height: 1.45),
+                // An edit or a write shows what it changes, so it is allowed knowing that; anything else, what it runs.
+                if (a.patch != null)
+                  ApprovalPatch(patch: a.patch!)
+                else
+                  Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(maxHeight: 110),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.md)),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        a.summary,
+                        style: TextStyle(fontFamily: mono, fontSize: 12, color: p.text, height: 1.45),
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => features.answer(a, allow: false),
-                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
-                        child: Text(tr('Deny')),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => features.answer(a, allow: true, always: true),
-                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
-                        child: Text(tr('Always')),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => features.answer(a, allow: true),
-                        style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
-                        child: Text(tr('Allow')),
-                      ),
-                    ),
-                  ],
+                _ApprovalActions(
+                  key: ValueKey(a.id),
+                  features: widget.features,
+                  approval: a,
+                  onAnswered: () => _onAnswered(a),
                 ),
                 TextButton.icon(
                   onPressed: () async {
                     if (!await confirmBypass(context)) return;
-                    await features.client.call('settings_set', {
-                      'settings': {'approvalMode': 'auto'},
-                    });
-                    for (final pending in [...features.approvals]) {
-                      await features.answer(pending, allow: true);
+                    try {
+                      final agent = widget.agent;
+                      if (agent != null) {
+                        await agent.setApprovalMode('auto');
+                      } else {
+                        await widget.features.client.call('settings_set', {
+                          'settings': {'approvalMode': 'auto'},
+                        });
+                      }
+                      for (final pending in [...widget.features.approvals]) {
+                        await widget.features.answer(pending, allow: true);
+                      }
+                    } catch (e) {
+                      // Offline, or the host did not take it: the cards that were not answered are still here.
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
                     }
                   },
                   style: TextButton.styleFrom(foregroundColor: p.muted),
@@ -314,7 +724,158 @@ class ApprovalCards extends StatelessWidget {
             ),
           ),
         );
+  }
+}
+
+/// Deny / Always / Allow for one approval card. The buttons disable on the
+/// first tap, and the parent keeps the answered card on screen briefly, so
+/// a double-tap cannot approve the next card in the queue unseen.
+class _ApprovalActions extends StatefulWidget {
+  const _ApprovalActions({super.key, required this.features, required this.approval, this.onAnswered});
+  final Features features;
+  final Approval approval;
+
+  /// Called synchronously on the first tap, before the answer round-trip.
+  final void Function()? onAnswered;
+
+  @override
+  State<_ApprovalActions> createState() => _ApprovalActionsState();
+}
+
+class _ApprovalActionsState extends State<_ApprovalActions> {
+  bool _responded = false;
+
+  Future<void> _answer({required bool allow, bool always = false}) async {
+    if (_responded) return;
+    setState(() => _responded = true);
+    widget.onAnswered?.call();
+    try {
+      await widget.features.answer(widget.approval, allow: allow, always: always);
+    } catch (e) {
+      // The answer did not get to the host, which is still waiting for it: the card is back, and can be answered again.
+      if (!mounted) return;
+      setState(() => _responded = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A server agent keeps waiting while the link is down; an answer tapped now could only get lost.
+    return ValueListenableBuilder<Connection>(
+      valueListenable: widget.features.client.connection,
+      builder: (context, link, _) => _buttons(context, offline: !link.connected),
+    );
+  }
+
+  Widget _buttons(BuildContext context, {required bool offline}) {
+    final p = context.palette;
+    final blocked = _responded || offline;
+    final deny = OutlinedButton(
+      onPressed: blocked ? null : () => _answer(allow: false),
+      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
+      child: Text(tr('Deny')),
+    );
+    final always = OutlinedButton(
+      onPressed: blocked ? null : () => _answer(allow: true, always: true),
+      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+      child: Text(tr('Always')),
+    );
+    final allow = FilledButton(
+      onPressed: blocked ? null : () => _answer(allow: true),
+      style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
+      child: Text(tr('Allow')),
+    );
+    final buttons = LayoutBuilder(
+      builder: (context, constraints) {
+        // Equal thirds must fit the widest label; on a narrow phone with large text "Izinkan" broke into "Izin/kan".
+        final style = Theme.of(context).textTheme.labelLarge;
+        final scaler = MediaQuery.textScalerOf(context);
+        var widest = 0.0;
+        for (final l in [tr('Deny'), tr('Always'), tr('Allow')]) {
+          final tp = TextPainter(
+            text: TextSpan(text: l, style: style),
+            textScaler: scaler,
+            maxLines: 1,
+            textDirection: Directionality.of(context),
+          )..layout();
+          if (tp.width > widest) widest = tp.width;
+          tp.dispose();
+        }
+        if ((widest + 48) * 3 + 16 > constraints.maxWidth) {
+          // Stacked: the likely answer on top, the destructive one last.
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [allow, const SizedBox(height: 8), always, const SizedBox(height: 8), deny],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: deny),
+            const SizedBox(width: 8),
+            Expanded(child: always),
+            const SizedBox(width: 8),
+            Expanded(child: allow),
+          ],
+        );
       },
+    );
+    if (!offline) return buttons;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        buttons,
+        const SizedBox(height: 8),
+        Text(
+          tr('Not connected. The agent is still waiting for your answer: reconnect to answer.'),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bypass
+
+/// While approvals are bypassed (for every chat, until turned off) the chat says so: the agent acts without asking, and
+/// nothing else on the screen would remind anyone. One tap puts the question back.
+class BypassBar extends StatelessWidget {
+  const BypassBar({super.key, required this.agent});
+  final AgentController agent;
+
+  Future<void> _turnOff(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await agent.setApprovalMode('ask_risky');
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (agent.approvalMode != 'auto') return const SizedBox.shrink();
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+        decoration: BoxDecoration(color: p.danger.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.lg)),
+        child: Row(
+          children: [
+            Icon(LucideIcons.shieldOff, size: 16, color: p.danger),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                tr('Permissions bypassed: the agent acts without asking, in every chat.'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.text),
+              ),
+            ),
+            TextButton(onPressed: () => _turnOff(context), child: Text(tr('Turn off'))),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -332,26 +893,23 @@ class PlanBar extends StatelessWidget {
     final p = context.palette;
     if (!agent.planMode || agent.busy || agent.entries.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
-      child: InlineBanner(
-        tone: p.accent,
-        icon: LucideIcons.listChecks,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.lg)),
+        child: Row(
           children: [
+            Icon(LucideIcons.listChecks, size: 18, color: p.accent),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(tr('Plan mode'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+            ),
             TextButton(onPressed: () => agent.setPlanMode(false), child: Text(tr('Exit'))),
             FilledButton(
               onPressed: agent.approvePlan,
               style: FilledButton.styleFrom(minimumSize: const Size(0, 38)),
               child: Text(tr('Approve & run')),
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(tr('Plan mode'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-            Text(tr('Review the plan, then run it'), style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),
@@ -363,6 +921,51 @@ class PlanBar extends StatelessWidget {
 // Dev servers
 
 /// A server the agent started: preview it, or share a public link.
+/// After the agent's turn, when the project has uncommitted changes: how many files, and the way to review and commit
+/// them. Closed, it stays away until the next turn.
+class ReviewBanner extends StatelessWidget {
+  const ReviewBanner({super.key, required this.files, required this.onReview, required this.onClose});
+  final int files;
+  final VoidCallback onReview;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Material(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(Radii.lg),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 2, 2),
+          child: Row(
+            children: [
+              Icon(LucideIcons.gitCommitHorizontal, size: 18, color: p.success),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  files == 1 ? tr('1 file changed') : tr('{n} files changed').replaceAll('{n}', '$files'),
+                  style: text.labelLarge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton(onPressed: onReview, child: Text(tr('Review & commit'))),
+              IconButton(
+                tooltip: tr('Close'),
+                icon: Icon(LucideIcons.x, size: 18, color: p.muted),
+                onPressed: onClose,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class DevServerBanner extends StatefulWidget {
   const DevServerBanner({super.key, required this.agent});
   final AgentController agent;
@@ -374,6 +977,18 @@ class DevServerBanner extends StatefulWidget {
 class _DevServerBannerState extends State<DevServerBanner> {
   final opening = <int>{};
 
+  /// Ports whose preview is being opened (on a server the port is forwarded to this phone first, which takes a moment).
+  final previewing = <int>{};
+
+  Future<void> _preview(int port, String url) async {
+    setState(() => previewing.add(port));
+    try {
+      await openDevServer(context, widget.agent, port, url);
+    } finally {
+      if (mounted) setState(() => previewing.remove(port));
+    }
+  }
+
   Future<void> _share(int port) async {
     final f = widget.agent.features;
     setState(() => opening.add(port));
@@ -383,13 +998,13 @@ class _DevServerBannerState extends State<DevServerBanner> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Public link copied: $url'),
+            content: Text('${tr('Public link copied')}: $url'),
             action: SnackBarAction(label: tr('Open'), onPressed: () => widget.agent.client.openUrl(url)),
           ),
         );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => opening.remove(port));
     }
@@ -407,34 +1022,40 @@ class _DevServerBannerState extends State<DevServerBanner> {
           children: [
             for (final e in f.devServers.entries)
               Padding(
-                padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                 child: Container(
-                  padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
+                  padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
                   decoration: BoxDecoration(
-                    color: p.success.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(Radii.md),
-                    border: Border.all(color: p.success.withValues(alpha: 0.28)),
+                    color: p.success.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(Radii.lg),
                   ),
                   child: Row(
                     children: [
-                      StatusDot(color: p.success, pulse: true),
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(color: p.success, shape: BoxShape.circle),
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          f.tunnels[e.key] ?? 'localhost:${e.key}',
+                          // On a server, "localhost" would read as this phone.
+                          f.tunnels[e.key] ?? (widget.agent.client.isRemote ? 'server:${e.key}' : 'localhost:${e.key}'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.text),
                         ),
                       ),
-                      TextButton(
-                        onPressed: () => HtmlPreviewScreen.openUrl(context, title: 'localhost:${e.key}', url: e.value),
-                        child: Text(tr('Preview')),
-                      ),
+                      previewing.contains(e.key)
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              child: BusySpinner(),
+                            )
+                          : TextButton(onPressed: () => _preview(e.key, e.value), child: Text(tr('Preview'))),
                       opening.contains(e.key)
                           ? const Padding(
                               padding: EdgeInsets.all(12),
-                              child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                              child: BusySpinner(),
                             )
                           : IconButton(
                               tooltip: tr('Share a public link'),
@@ -476,42 +1097,123 @@ class SlashMenu extends StatelessWidget {
     final q = query.toLowerCase();
     final matches = commands.where((c) => c.name.toLowerCase().contains(q)).take(8).toList();
     if (matches.isEmpty) return const SizedBox.shrink();
+    // The fill is a Material's, not the box's: rows paint their touch ripple on the nearest Material, and a coloured
+    // box between them hid it.
     return Container(
-      margin: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       constraints: const BoxConstraints(maxHeight: 260),
-      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: p.surface,
         borderRadius: BorderRadius.circular(Radii.lg),
-        border: Border.all(color: p.border),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
       ),
-      child: ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        children: [
-          for (final c in matches)
-            ListTile(
-              dense: true,
-              leading: Icon(c.isSkill ? LucideIcons.puzzle : LucideIcons.slash, size: 18, color: p.accent),
-              title: Text(
-                '/${c.name}${c.hint != null ? '  ${c.hint}' : ''}',
-                style: TextStyle(fontFamily: mono, fontSize: 13, color: p.text),
+      child: Material(
+        color: p.bg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.lg),
+          side: BorderSide(color: p.border),
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          children: [
+            for (final c in matches)
+              ListTile(
+                dense: true,
+                leading: Icon(c.isSkill ? LucideIcons.puzzle : LucideIcons.slash, size: 18, color: p.accent),
+                title: Text(
+                  '/${c.name}${c.hint != null ? '  ${c.hint}' : ''}',
+                  style: TextStyle(fontFamily: mono, fontSize: 13, color: p.text),
+                ),
+                subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis),
+                onTap: () => onPick(c),
               ),
-              subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis),
-              onTap: () => onPick(c),
-            ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Where an @ mention is being typed in [text]: the @ and what follows it up to the cursor, with no space in between,
+/// and the @ at the start or after a space (not an email address). Null when the cursor isn't in one.
+({int start, String query})? mentionAt(String text, int cursor) {
+  if (cursor < 0 || cursor > text.length) return null;
+  for (var i = cursor - 1; i >= 0; i--) {
+    final c = text[i];
+    if (c == '@') {
+      if (i > 0 && !RegExp(r'\s').hasMatch(text[i - 1])) return null;
+      return (start: i, query: text.substring(i + 1, cursor));
+    }
+    if (RegExp(r'\s').hasMatch(c)) return null;
+  }
+  return null;
+}
+
+/// [text] with the mention at [start] (up to [cursor]) replaced by `@path `, and where the cursor goes after it.
+({String text, int cursor}) insertMention(String text, int start, int cursor, String path) {
+  final mention = '@$path ';
+  // A space typed already after the cursor isn't doubled.
+  final rest = text.substring(cursor);
+  final out = text.substring(0, start) + (rest.startsWith(' ') ? mention.trimRight() : mention) + rest;
+  return (text: out, cursor: start + mention.length);
+}
+
+/// The composer's @ list: project files matching what follows the @, picked to put their path in the message.
+class MentionMenu extends StatelessWidget {
+  const MentionMenu({super.key, required this.files, required this.onPick});
+  final List<String> files;
+  final void Function(String path) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    if (files.isEmpty) return const SizedBox.shrink();
+    // The fill is a Material's, not the box's: rows paint their touch ripple on the nearest Material, and a coloured
+    // box between them hid it.
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      constraints: const BoxConstraints(maxHeight: 260),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(Radii.lg),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
+      ),
+      child: Material(
+        color: p.bg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.lg),
+          side: BorderSide(color: p.border),
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          children: [
+            for (final f in files.take(8))
+              ListTile(
+                dense: true,
+                leading: Icon(LucideIcons.fileCode, size: 18, color: p.accent),
+                title: Text(
+                  f.substring(f.lastIndexOf('/') + 1),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontFamily: mono, fontSize: 13, color: p.text, fontWeight: FontWeight.w600),
+                ),
+                subtitle: f.contains('/')
+                    ? Text(f.substring(0, f.lastIndexOf('/')), maxLines: 1, overflow: TextOverflow.ellipsis)
+                    : null,
+                onTap: () => onPick(f),
+              ),
+          ],
+        ),
       ),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Workspace sheet
+// Project tools menu
 
-/// Everything that acts on the chat's folder: files, git, terminal, deploy,
-/// history, memory, tasks and usage, as one grid.
 Future<void> showProjectTools(
   BuildContext context,
   AgentController agent, {
@@ -519,100 +1221,148 @@ Future<void> showProjectTools(
 }) async {
   void push(Widget w) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
   final memory = '${agent.cwd}/AGENTS.md';
-  final workspace = agent.info['workspace'] as String? ?? '';
-  final folder = sessionFolder(agent.cwd, workspace);
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (sheet) {
-      final p = sheet.palette;
-      final text = Theme.of(sheet).textTheme;
       void go(Widget w) {
         Navigator.pop(sheet);
         push(w);
       }
 
-      final tiles = <(IconData, String, Color, VoidCallback?)>[
-        (LucideIcons.folderOpen, tr('Files'), const Color(0xFFF97316), () => go(FilesScreen(agent: agent))),
-        (
-          LucideIcons.gitBranch,
-          tr('Git'),
-          const Color(0xFFEF4444),
-          () => go(GitScreen(agent: agent, onWork: onPrompt)),
-        ),
-        (LucideIcons.squareTerminal, tr('Terminal'), const Color(0xFF64748B), () => go(TerminalScreen(agent: agent))),
-        (
-          LucideIcons.rocket,
-          tr('Deploy'),
-          const Color(0xFFEC4899),
-          agent.busy
-              ? null
-              : () {
-                  Navigator.pop(sheet);
-                  showDeploySheet(context, agent);
-                },
-        ),
-        (LucideIcons.search, tr('Search'), const Color(0xFF3B82F6), () => go(SearchScreen(agent: agent))),
-        (LucideIcons.history, tr('Changes'), const Color(0xFF8B5CF6), () => go(ChangesScreen(agent: agent))),
-        (
-          LucideIcons.brain,
-          tr('Memory'),
-          const Color(0xFFD946EF),
-          () {
-            final f = File(memory);
-            if (!f.existsSync()) {
-              f.writeAsStringSync('# Project notes for pi\n\n- Stack:\n- How to run:\n- Conventions:\n');
-            }
-            go(EditorScreen(agent: agent, path: memory));
-          },
-        ),
-        (LucideIcons.listTodo, tr('Tasks'), const Color(0xFF14B8A6), () => go(TasksScreen(agent: agent))),
-        (LucideIcons.chartColumn, tr('Usage'), const Color(0xFFEAB308), () => go(UsageScreen(agent: agent))),
-      ];
-
       return SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(Space.page, 0, Space.page, Space.lg),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  IconTile(icon: folder != null ? LucideIcons.folderGit2 : LucideIcons.messageSquare, size: 40),
-                  const SizedBox(width: Space.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(folder ?? tr('Workspace'), style: text.titleMedium),
-                        Text(
-                          agent.cwd,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.faint),
-                        ),
-                      ],
+              Text(tr('Project'), style: Theme.of(sheet).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              // The chat itself, once there is something in it to share.
+              if (agent.entries.isNotEmpty) ...[
+                SettingsGroup(
+                  children: [
+                    SettingsRow(
+                      icon: LucideIcons.share2,
+                      color: context.palette.accent,
+                      title: tr('Share this chat'),
+                      subtitle: tr('As text or a Markdown file'),
+                      onTap: () async {
+                        Navigator.pop(sheet);
+                        await showChatExport(context, agent);
+                      },
                     ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+              SettingsGroup(
+                children: [
+                  SettingsRow(
+                    icon: LucideIcons.folderOpen,
+                    color: const Color(0xFFF76B15),
+                    title: tr('Files'),
+                    subtitle: tr('Browse and edit the project'),
+                    onTap: () => go(FilesScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.search,
+                    color: context.palette.accentAlt,
+                    title: tr('Search'),
+                    subtitle: tr('Find text across every file'),
+                    onTap: () => go(SearchScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.history,
+                    color: const Color(0xFF7C5CFC),
+                    title: tr('Changes & undo'),
+                    subtitle: tr('What the agent changed, and roll it back'),
+                    onTap: () => go(ChangesScreen(agent: agent)),
+                  ),
+                  // The agent's changes in one place: read every diff, then commit them with a message it writes.
+                  SettingsRow(
+                    icon: LucideIcons.gitCommitHorizontal,
+                    color: const Color(0xFF18794E),
+                    title: tr('Review & commit'),
+                    subtitle: tr('Every changed file with its diff, and a commit message the agent writes'),
+                    onTap: () => go(ReviewScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.gitBranch,
+                    color: const Color(0xFF111113),
+                    title: tr('Git'),
+                    subtitle: tr('Commit, push, branches, issues and PRs'),
+                    onTap: () => go(GitScreen(agent: agent, onWork: onPrompt)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.brain,
+                    color: const Color(0xFFEC4899),
+                    title: tr('Project memory'),
+                    subtitle: tr('AGENTS.md: rules the agent follows in this folder'),
+                    onTap: () async {
+                      try {
+                        if (!await agent.fs.exists(memory)) {
+                          await agent.fs.writeString(
+                            memory,
+                            '# Project notes for the agent\n\n- Stack:\n- How to run:\n- Conventions:\n',
+                          );
+                        }
+                      } catch (e) {
+                        if (sheet.mounted) {
+                          ScaffoldMessenger.of(sheet)
+                              .showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: ${friendlyError(e)}')));
+                        }
+                        return;
+                      }
+                      if (sheet.mounted) go(EditorScreen(agent: agent, path: memory));
+                    },
                   ),
                 ],
               ),
-              const SizedBox(height: Space.lg),
-              GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: Space.sm,
-                crossAxisSpacing: Space.sm,
-                childAspectRatio: 1.15,
+              const SizedBox(height: 12),
+              ListenableBuilder(
+                listenable: agent.integrations,
+                builder: (context, _) {
+                  final it = agent.integrations;
+                  final on = it.settings?.projectSearch[agent.cwd] ?? true;
+                  Future<void> set(bool v) async {
+                    final map = {...(it.settings?.projectSearch ?? {}), agent.cwd: v};
+                    await it.updateSettings({'projectSearch': map});
+                  }
+
+                  return SettingsGroup(
+                    children: [
+                      SettingsRow(
+                        icon: LucideIcons.globe,
+                        color: const Color(0xFF0EA5E9),
+                        title: tr('Web search'),
+                        subtitle: tr('Allow the agent to search the web in this project'),
+                        onTap: () => set(!on),
+                        trailing: LabeledSwitch(label: tr('Web search'), value: on, onChanged: set),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              SettingsGroup(
                 children: [
-                  for (final (icon, label, color, onTap) in tiles)
-                    ActionTile(icon: icon, label: label, color: color, onTap: onTap),
+                  SettingsRow(
+                    icon: LucideIcons.listTodo,
+                    color: const Color(0xFF14B8A6),
+                    title: tr('Background tasks'),
+                    subtitle: tr('Queue, parallel agents and schedules'),
+                    onTap: () => go(TasksScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.chartColumn,
+                    color: const Color(0xFFF59E0B),
+                    title: tr('Usage'),
+                    subtitle: tr('Tokens and cost'),
+                    onTap: () => go(UsageScreen(agent: agent)),
+                  ),
                 ],
               ),
-              if (agent.busy) ...[
-                const SizedBox(height: Space.sm),
-                Text(tr('Deploy is available once pi finishes.'), style: text.bodySmall, textAlign: TextAlign.center),
-              ],
             ],
           ),
         ),

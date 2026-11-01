@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'kit.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Splits a unified diff (possibly covering several files) into one patch per file.
@@ -138,7 +139,7 @@ _ParsedFile _parse(String path, String patch) {
 
 /// Renders a unified diff with per-file headers, line numbers and tinted
 /// added/removed lines; long lines scroll sideways rather than wrap.
-class DiffView extends StatelessWidget {
+class DiffView extends StatefulWidget {
   const DiffView({super.key, required this.patch, this.maxHeight, this.showHeaders = true});
   final String patch;
   final double? maxHeight;
@@ -149,40 +150,69 @@ class DiffView extends StatelessWidget {
   static const _maxLines = 4000;
 
   @override
+  State<DiffView> createState() => _DiffViewState();
+}
+
+class _DiffViewState extends State<DiffView> {
+  /// Parsed once per patch, not on every build: large diffs used to be
+  /// re-parsed on each frame.
+  late List<_ParsedFile> _files = _parseAll(widget.patch);
+
+  static List<_ParsedFile> _parseAll(String patch) =>
+      [for (final f in splitPatch(patch)) _parse(f.path, f.patch)];
+
+  @override
+  void didUpdateWidget(DiffView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.patch != widget.patch) _files = _parseAll(widget.patch);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    if (patch.trim().isEmpty) {
+    if (widget.patch.trim().isEmpty) {
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
-        decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.lg)),
         alignment: Alignment.center,
-        child: Text('No changes', style: Theme.of(context).textTheme.bodySmall),
+        child: Text(tr('No changes'), style: Theme.of(context).textTheme.bodySmall),
       );
     }
-    final files = [for (final f in splitPatch(patch)) _parse(f.path, f.patch)];
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (var i = 0; i < files.length; i++) ...[
+        for (var i = 0; i < _files.length; i++) ...[
           if (i > 0) const SizedBox(height: 12),
-          _FileDiff(file: files[i], showHeader: showHeaders, maxLines: _maxLines),
+          _FileDiff(
+            file: _files[i],
+            showHeader: widget.showHeaders,
+            maxLines: DiffView._maxLines,
+            viewport: widget.maxHeight ?? MediaQuery.sizeOf(context).height * 0.7,
+          ),
         ],
       ],
     );
-    if (maxHeight == null) return body;
+    if (widget.maxHeight == null) return body;
     return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight!),
+      constraints: BoxConstraints(maxHeight: widget.maxHeight!),
       child: SingleChildScrollView(child: body),
     );
   }
 }
 
 class _FileDiff extends StatelessWidget {
-  const _FileDiff({required this.file, required this.showHeader, required this.maxLines});
+  const _FileDiff({required this.file, required this.showHeader, required this.maxLines, required this.viewport});
   final _ParsedFile file;
   final bool showHeader;
   final int maxLines;
+
+  /// The height a long diff scrolls within (it builds only the rows on screen there).
+  final double viewport;
+
+  /// Diffs longer than this are built lazily, a screenful at a time: all 4000 rows at once (inside an IntrinsicWidth,
+  /// which lays them all out twice) stalled the first frame of a large review (UI-12). Shorter ones are drawn as before.
+  static const lazyFrom = 300;
 
   @override
   Widget build(BuildContext context) {
@@ -202,7 +232,7 @@ class _FileDiff extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: p.raised,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(Radii.lg),
         border: Border.all(color: p.border),
       ),
       clipBehavior: Clip.antiAlias,
@@ -220,7 +250,7 @@ class _FileDiff extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      file.path.isEmpty ? '(unknown file)' : file.path,
+                      file.path.isEmpty ? tr('(unknown file)') : file.path,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.text, fontWeight: FontWeight.w600),
@@ -237,9 +267,11 @@ class _FileDiff extends StatelessWidget {
               child: Text(file.note!, style: text.bodySmall),
             ),
           if (file.binary)
-            message('Binary file changed')
+            message(tr('Binary file changed'))
           else if (lines.isEmpty)
-            message(file.note ?? 'No content changes')
+            message(file.note ?? tr('No content changes'))
+          else if (lines.length > lazyFrom)
+            _lazyRows(context, lines, gutter)
           else
             LayoutBuilder(
               builder: (context, box) => SingleChildScrollView(
@@ -258,13 +290,53 @@ class _FileDiff extends StatelessWidget {
                 ),
               ),
             ),
-          if (file.lines.length > maxLines) message('${file.lines.length - maxLines} more lines not shown'),
+          if (file.lines.length > maxLines) message(tr('{n} more lines not shown').replaceAll('{n}', '${file.lines.length - maxLines}')),
         ],
       ),
     );
   }
 
-  Widget _row(BuildContext context, _Line l, double gutter) {
+  /// A long diff: its rows in a list that builds what is on screen. The width is worked out once from the longest line
+  /// (the font is monospaced) instead of by laying every row out.
+  Widget _lazyRows(BuildContext context, List<_Line> lines, double gutter) {
+    final p = context.palette;
+    final base = TextStyle(fontFamily: mono, fontSize: 12, height: 1.5, color: p.text);
+    final probe = TextPainter(
+      text: TextSpan(text: '0000000000', style: base),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final charWidth = probe.width / 10;
+    final rowHeight = probe.height + 1;
+    probe.dispose();
+    var longest = 0;
+    for (final l in lines) {
+      final n = l.text.length + 3 * '\t'.allMatches(l.text).length;
+      if (n > longest) longest = n;
+    }
+    final contentWidth = gutter * 2 + 20 + longest * charWidth + 14 + 24;
+    final height = (lines.length * rowHeight + 12).clamp(0.0, viewport);
+    return LayoutBuilder(
+      builder: (context, box) => SizedBox(
+        height: height,
+        child: Scrollbar(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: contentWidth > box.maxWidth ? contentWidth : box.maxWidth,
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                itemCount: lines.length,
+                itemBuilder: (context, i) => _row(context, lines[i], gutter, clip: true),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, _Line l, double gutter, {bool clip = false}) {
     final p = context.palette;
     final base = TextStyle(fontFamily: mono, fontSize: 12, height: 1.5, color: p.text);
     final num = base.copyWith(color: p.faint, fontSize: 11);
@@ -306,10 +378,19 @@ class _FileDiff extends StatelessWidget {
               style: base.copyWith(color: signColor),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 14),
-            child: Text(l.text.replaceAll('\t', '    '), softWrap: false, style: base),
-          ),
+          if (clip)
+            // A line wider than worked out (wide characters) is cut off rather than overflowing the row.
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: Text(l.text.replaceAll('\t', '    '), softWrap: false, overflow: TextOverflow.clip, style: base),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: Text(l.text.replaceAll('\t', '    '), softWrap: false, style: base),
+            ),
         ],
       ),
     );
@@ -333,6 +414,47 @@ class DiffStat extends StatelessWidget {
         Pill('+$additions', color: p.success),
         const SizedBox(width: 4),
         Pill('-$deletions', color: p.danger),
+      ],
+    );
+  }
+}
+
+/// What an edit or a write would change, on its approval card: the diff, scrolling inside the card, and a page with
+/// all of it when it is longer than the card shows.
+class ApprovalPatch extends StatelessWidget {
+  const ApprovalPatch({super.key, required this.patch, this.maxHeight = 260});
+  final String patch;
+  final double maxHeight;
+
+  /// About how many diff lines fit in [maxHeight]; past that the whole change gets its own page.
+  bool get _long => '\n'.allMatches(patch).length > maxHeight / 20;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DiffView(patch: patch, maxHeight: maxHeight),
+        if (_long)
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => Scaffold(
+                    appBar: AppBar(title: Text(tr('The whole change'))),
+                    body: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
+                      child: DiffView(patch: patch),
+                    ),
+                  ),
+                ),
+              ),
+              icon: const Icon(LucideIcons.maximize2, size: 16),
+              label: Text(tr('See the whole change')),
+            ),
+          ),
       ],
     );
   }

@@ -3,10 +3,12 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:highlight/highlight.dart' show highlight, Node;
 
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Token colors for highlight.js class names, tuned to sit on [Palette.surface].
-Map<String, Color> _syntax(Brightness b) => b == Brightness.dark
+/// The syntax colours for a theme (tested for contrast in test/contrast_test.dart).
+Map<String, Color> syntaxColors(Brightness b) => b == Brightness.dark
     ? const {
         'keyword': Color(0xFFFF7B72),
         'built_in': Color(0xFFFFA657),
@@ -44,9 +46,10 @@ Map<String, Color> _syntax(Brightness b) => b == Brightness.dark
         'number': Color(0xFF0550AE),
         'string': Color(0xFF0A3069),
         'regexp': Color(0xFF0A3069),
-        'comment': Color(0xFF6E7781),
-        'doctag': Color(0xFF6E7781),
-        'meta': Color(0xFF6E7781),
+        // 4.5:1 on a card (0xFF6E7781 was 4.2).
+        'comment': Color(0xFF59636E),
+        'doctag': Color(0xFF59636E),
+        'meta': Color(0xFF59636E),
         'title': Color(0xFF8250DF),
         'function': Color(0xFF8250DF),
         'class': Color(0xFF953800),
@@ -92,7 +95,7 @@ List<TextSpan> highlightSpans(String code, String? language, Brightness brightne
   try {
     final nodes = highlight.parse(code, language: _aliases[lang] ?? lang).nodes;
     if (nodes == null) return [TextSpan(text: code)];
-    final colors = _syntax(brightness);
+    final colors = syntaxColors(brightness);
     return _spans(nodes, colors, null);
   } catch (_) {
     return [TextSpan(text: code)];
@@ -114,6 +117,35 @@ List<TextSpan> _spans(List<Node> nodes, Map<String, Color> colors, Color? inheri
   return out;
 }
 
+/// A highlighted text, kept so a rebuild with the same text reuses the very same span: no new highlight pass,
+/// and Flutter sees an identical span, so the text isn't laid out again. The chat rebuilds every frame while
+/// the agent works, and every code panel on screen used to be re-highlighted each time.
+class _Highlighted {
+  _Highlighted(this.text, this.language, this.brightness, this.style, this.span);
+  final String text;
+  final String? language;
+  final Brightness brightness;
+  final TextStyle style;
+  final TextSpan span;
+}
+
+final _highlighted = <_Highlighted>[];
+
+TextSpan _highlight(String text, String? language, Brightness brightness, TextStyle style) {
+  for (var i = 0; i < _highlighted.length; i++) {
+    final h = _highlighted[i];
+    if (h.language == language && h.brightness == brightness && h.style == style && h.text == text) {
+      // Most recently used last.
+      if (i != _highlighted.length - 1) _highlighted.add(_highlighted.removeAt(i));
+      return h.span;
+    }
+  }
+  final span = TextSpan(style: style, children: highlightSpans(text, language, brightness));
+  _highlighted.add(_Highlighted(text, language, brightness, style, span));
+  if (_highlighted.length > 32) _highlighted.removeAt(0);
+  return span;
+}
+
 /// Bordered code panel: language label, copy button, line numbers, highlighting.
 class CodeBox extends StatelessWidget {
   const CodeBox({
@@ -125,6 +157,8 @@ class CodeBox extends StatelessWidget {
     this.lineNumbers = true,
     this.followTail = false,
     this.onPreview,
+    this.firstLine = 1,
+    this.copyText,
   });
   final String text;
   final String? label;
@@ -136,18 +170,24 @@ class CodeBox extends StatelessWidget {
   final bool followTail;
   final VoidCallback? onPreview;
 
+  /// The line number of [text]'s first line, when it is the end of something longer.
+  final int firstLine;
+
+  /// What Copy copies, when [text] is only part of it; [text] otherwise.
+  final String? copyText;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final brightness = Theme.of(context).brightness;
     final style = TextStyle(fontFamily: mono, fontSize: 12.5, height: 1.6, color: p.text);
     final lines = '\n'.allMatches(text).length + 1;
-    final showNumbers = lineNumbers && lines > 1;
+    final showNumbers = lineNumbers && (lines > 1 || firstLine > 1);
 
     Widget code = SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: EdgeInsets.fromLTRB(showNumbers ? 12 : 14, 12, 14, 14),
-      child: SelectableText.rich(TextSpan(style: style, children: highlightSpans(text, language ?? label, brightness))),
+      child: SelectableText.rich(_highlight(text, language ?? label, brightness, style)),
     );
     Widget body = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,7 +199,7 @@ class CodeBox extends StatelessWidget {
               border: Border(right: BorderSide(color: p.border)),
             ),
             child: Text(
-              List.generate(lines, (i) => '${i + 1}').join('\n'),
+              List.generate(lines, (i) => '${firstLine + i}').join('\n'),
               textAlign: TextAlign.right,
               style: style.copyWith(color: p.faint),
             ),
@@ -177,7 +217,7 @@ class CodeBox extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: p.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.border),
       ),
       child: Column(
@@ -200,8 +240,8 @@ class CodeBox extends StatelessWidget {
                     style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.muted),
                   ),
                 ),
-                if (onPreview != null) _HeaderAction(icon: LucideIcons.play, label: 'Preview', onTap: onPreview!),
-                CopyButton(text: text),
+                if (onPreview != null) _HeaderAction(icon: LucideIcons.play, label: tr('Preview'), onTap: onPreview!),
+                CopyButton(text: copyText ?? text),
                 const SizedBox(width: 4),
               ],
             ),
@@ -239,26 +279,42 @@ class _CopyButtonState extends State<CopyButton> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final color = copied ? p.success : p.muted;
-    return InkWell(
+    final said = tr(copied ? 'Copied' : 'Copy');
+    // Said to a screen reader ("Copy", then "Copied" as it happens) and, when it is only an icon, in a tooltip; an icon
+    // alone gets a 48 dp touch box (it was 30 x 26 under every reply).
+    final button = InkWell(
       onTap: _copy,
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 150),
-              child: Icon(copied ? LucideIcons.check : LucideIcons.copy, key: ValueKey(copied), size: 14, color: color),
-            ),
-            if (widget.showLabel) ...[
-              const SizedBox(width: 5),
-              Text(copied ? 'Copied' : 'Copy', style: TextStyle(fontSize: 11.5, color: color)),
+      borderRadius: BorderRadius.circular(Radii.sm),
+      child: ConstrainedBox(
+        constraints: widget.showLabel ? const BoxConstraints() : const BoxConstraints(minWidth: 48, minHeight: 48),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedSwitcher(
+                duration: Motion.of(context, const Duration(milliseconds: 150)),
+                child: Icon(copied ? LucideIcons.check : LucideIcons.copy, key: ValueKey(copied), size: 14, color: color),
+              ),
+              if (widget.showLabel) ...[
+                const SizedBox(width: 5),
+                Text(said, style: TextStyle(fontSize: 11.5, color: color)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
+    final labelled = Semantics(
+      button: true,
+      label: said,
+      liveRegion: copied,
+      onTap: _copy,
+      excludeSemantics: true,
+      child: button,
+    );
+    return widget.showLabel ? labelled : Tooltip(message: said, child: labelled);
   }
 }
 
@@ -273,7 +329,7 @@ class _HeaderAction extends StatelessWidget {
     final p = context.palette;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(Radii.sm),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(

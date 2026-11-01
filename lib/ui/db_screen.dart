@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import 'kit.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// A small SQLite browser: tables with row counts, a data grid, and a SQL
@@ -126,7 +127,7 @@ class _DbScreenState extends State<DbScreen> {
           ),
           actions: [
             IconButton(
-              tooltip: 'Reload',
+              tooltip: tr('Reload'),
               icon: const Icon(LucideIcons.rotateCcw, size: 20),
               onPressed: () {
                 _loadTables();
@@ -182,7 +183,7 @@ class _DbScreenState extends State<DbScreen> {
     if (list == null) return const _Spinner();
     if (list.isEmpty) {
       return Center(
-        child: Text('No tables in this database', style: text.bodyMedium?.copyWith(color: p.muted)),
+        child: Text(tr('No tables in this database'), style: text.bodyMedium?.copyWith(color: p.muted)),
       );
     }
     return ListView(
@@ -196,7 +197,7 @@ class _DbScreenState extends State<DbScreen> {
                 color: t.type == 'view' ? p.accentAlt : p.accent,
                 title: t.name,
                 subtitle: t.type,
-                trailing: t.rows == null ? null : Pill('${t.rows} rows'),
+                trailing: t.rows == null ? null : Pill(tr('{n} rows').replaceAll('{n}', '${t.rows}')),
                 onTap: () => _openTable(t.name),
               ),
           ],
@@ -218,7 +219,7 @@ class _DbScreenState extends State<DbScreen> {
             maxLines: 8,
             keyboardType: TextInputType.multiline,
             style: const TextStyle(fontFamily: mono, fontSize: 13),
-            decoration: const InputDecoration(hintText: 'SELECT * FROM ...'),
+            decoration: InputDecoration(hintText: tr('SELECT * FROM ...')),
           ),
         ),
         Padding(
@@ -255,7 +256,7 @@ class _DbScreenState extends State<DbScreen> {
               const SizedBox(width: 8),
               SizedBox(
                 width: 110,
-                child: PrimaryButton(label: 'Run', icon: LucideIcons.play, busy: sqlBusy, onPressed: _runSql),
+                child: PrimaryButton(label: tr('Run'), icon: LucideIcons.play, busy: sqlBusy, onPressed: _runSql),
               ),
             ],
           ),
@@ -269,13 +270,17 @@ class _DbScreenState extends State<DbScreen> {
               : r == null
               ? Center(
                   child: Text(
-                    'Run a query to see results',
+                    tr('Run a query to see results'),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.muted),
                   ),
                 )
               : r.columns.isEmpty
               ? Center(
-                  child: Pill('${r.changes ?? 0} rows changed', color: p.success, icon: LucideIcons.check),
+                  child: Pill(
+                    tr('{n} rows changed').replaceAll('{n}', '${r.changes ?? 0}'),
+                    color: p.success,
+                    icon: LucideIcons.check,
+                  ),
                 )
               : _Grid(result: r),
         ),
@@ -299,7 +304,7 @@ class _TableBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 2, 16, 2),
       child: Row(
         children: [
-          IconButton(icon: const Icon(LucideIcons.chevronLeft, size: 20), onPressed: onBack),
+          IconButton(tooltip: tr('Back'), icon: const Icon(LucideIcons.chevronLeft, size: 20), onPressed: onBack),
           Icon(LucideIcons.table, size: 16, color: p.accent),
           const SizedBox(width: 8),
           Expanded(
@@ -309,7 +314,7 @@ class _TableBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text('first 200 rows', style: TextStyle(fontSize: 12, color: p.muted)),
+          Text(tr('first 200 rows'), style: TextStyle(fontSize: 12, color: p.muted)),
         ],
       ),
     );
@@ -366,7 +371,7 @@ class _Grid extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Text('${rows.length} rows · ${cols.length} columns', style: TextStyle(fontSize: 12, color: p.muted)),
+          child: Text('${rows.length} ${tr('rows')} · ${cols.length} ${tr('columns')}', style: TextStyle(fontSize: 12, color: p.muted)),
         ),
         Expanded(
           child: SingleChildScrollView(
@@ -456,9 +461,9 @@ class _Grid extends StatelessWidget {
               Clipboard.setData(ClipboardData(text: value));
               Navigator.of(context).pop();
             },
-            child: const Text('Copy'),
+            child: Text(tr('Copy')),
           ),
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(tr('Close'))),
         ],
       ),
     );
@@ -479,7 +484,7 @@ class _ErrorBox extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: p.danger.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(Radii.md),
             border: Border.all(color: p.danger.withValues(alpha: 0.3)),
           ),
           child: Row(
@@ -506,5 +511,5 @@ class _Spinner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)));
+      const Center(child: BusySpinner(size: 18));
 }

@@ -14,7 +14,7 @@ val keyProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.rynex.agent"
+    namespace = "com.airynex.agent"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -31,7 +31,7 @@ android {
                 abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
             }
         }
-        applicationId = "com.rynex.agent"
+        applicationId = "com.airynex.agent"
         minSdk = 26
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION

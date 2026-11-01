@@ -4,7 +4,12 @@
  * its own pi session, so the result can be opened later as a normal chat.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { atomicWrite, isObject, keepBackup, loadStore, readJsonFile } from "./state.js";
+
+/** Nobody watches a background run, so one that never settles is stopped after this long. */
+export const RUN_TIME_LIMIT_MS = 60 * 60_000;
+/** Finished runs kept in the list; queued and running ones are always kept. */
+const KEEP_FINISHED = 100;
 
 export interface RunSession {
 	sessionFile?: string;
@@ -27,6 +32,8 @@ export interface Run {
 	finishedAt?: number;
 	sessionFile?: string;
 	summary?: string;
+	/** The schedule that queued this run, so a slow run is not queued again on top of itself. */
+	scheduleId?: string;
 }
 
 export interface Schedule {
@@ -53,27 +60,40 @@ export class Runner {
 	private store: Store = { runs: [], schedules: [], concurrency: 1 };
 	private active = new Map<string, RunSession>();
 	private timer?: NodeJS.Timeout;
+	private firstTick?: NodeJS.Timeout;
+	/** Issue approvals waiting for an answer, so polls never stack duplicate cards. */
+	private pendingIssueApprovals = new Set<string>();
 
 	constructor(
 		private readonly file: string,
 		private readonly makeSession: (cwd: string) => Promise<RunSession>,
 		private readonly notify: (record: object) => void,
 		private readonly github: (path: string) => Promise<any>,
+		/**
+		 * Asks the user before an issue-triggered run starts. Issue text is
+		 * untrusted input from GitHub; without this callback the run never
+		 * starts (fail closed).
+		 */
+		private readonly requestApproval?: (summary: string, reason: string) => Promise<boolean>,
 	) {
-		if (existsSync(file)) {
-			try {
-				this.store = { runs: [], schedules: [], concurrency: 1, ...JSON.parse(readFileSync(file, "utf8")) };
-			} catch {}
-		}
+		// A file that cannot be read is set aside and reported, not taken for "no runs and no schedules" and written over.
+		const saved = loadStore<Record<string, unknown> | null>(file, readJsonFile, null, (v) => isObject(v) && (v.runs === undefined || Array.isArray(v.runs)) && (v.schedules === undefined || Array.isArray(v.schedules)));
+		if (saved) this.store = { runs: [], schedules: [], concurrency: 1, ...saved } as typeof this.store;
 		// Runs interrupted by an app restart cannot resume.
 		for (const r of this.store.runs) if (r.status === "running") r.status = "error";
+		// Neither keeps a process alive by itself: the host has its connections for that, and a test that forgets dispose() ends.
 		this.timer = setInterval(() => void this.tick(), 60_000);
-		setTimeout(() => void this.tick(), 5_000);
+		this.timer.unref();
+		this.firstTick = setTimeout(() => void this.tick(), 5_000);
+		this.firstTick.unref();
 	}
 
 	private save() {
-		this.store.runs = this.store.runs.slice(0, 100);
-		writeFileSync(this.file, JSON.stringify(this.store, null, 1));
+		// Cutting the list at a fixed length used to drop the oldest runs even while they were still queued.
+		let finished = 0;
+		this.store.runs = this.store.runs.filter((r) => r.status === "queued" || r.status === "running" || ++finished <= KEEP_FINISHED);
+		keepBackup(this.file, readJsonFile, isObject);
+		atomicWrite(this.file, JSON.stringify(this.store, null, 1));
 	}
 
 	summary() {
@@ -102,7 +122,7 @@ export class Runner {
 		this.pump();
 	}
 
-	enqueue(prompt: string, cwd: string, title?: string, source: Run["source"] = "queue") {
+	enqueue(prompt: string, cwd: string, title?: string, source: Run["source"] = "queue", scheduleId?: string) {
 		const run: Run = {
 			id: `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
 			title: title || prompt.split("\n")[0].slice(0, 80),
@@ -111,6 +131,7 @@ export class Runner {
 			status: "queued",
 			source,
 			createdAt: Date.now(),
+			scheduleId,
 		};
 		this.store.runs.unshift(run);
 		this.changed();
@@ -131,8 +152,35 @@ export class Runner {
 		this.changed();
 	}
 
+	/**
+	 * Removes one finished run from the list (its chat stays, like "Clear finished"). Returns it and its
+	 * place so the app can offer Undo; queued and running runs are refused, they must be cancelled first.
+	 */
+	delete(id: string): { run: Run; index: number } | null {
+		const index = this.store.runs.findIndex((r) => r.id === id);
+		if (index < 0) return null;
+		const run = this.store.runs[index];
+		if (run.status === "queued" || run.status === "running") throw new Error("Cancel the run before removing it");
+		this.store.runs.splice(index, 1);
+		this.changed();
+		return { run, index };
+	}
+
+	/** Puts back a run [delete] removed (Undo), at its old place. A finished run only; never twice. */
+	restore(run: Run, index: number) {
+		if (!run?.id || this.store.runs.some((r) => r.id === run.id)) return;
+		if (run.status === "queued" || run.status === "running") return;
+		this.store.runs.splice(Math.min(Math.max(Math.trunc(index) || 0, 0), this.store.runs.length), 0, run);
+		this.changed();
+	}
+
 	private pump() {
-		while (this.active.size < this.store.concurrency) {
+		// Count by status, not by the active map: start() is async and only
+		// registers in `active` after makeSession resolves, so counting the
+		// map let this synchronous loop drain the whole queue at once and
+		// the concurrency limit never applied. start() flips the status
+		// synchronously, so this count is exact.
+		while (this.store.runs.filter((r) => r.status === "running").length < this.store.concurrency) {
 			const next = [...this.store.runs].reverse().find((r) => r.status === "queued");
 			if (!next) return;
 			void this.start(next);
@@ -144,13 +192,20 @@ export class Runner {
 		run.startedAt = Date.now();
 		this.changed();
 		let session: RunSession | undefined;
+		let timer: NodeJS.Timeout | undefined;
+		let timedOut = false;
 		try {
 			session = await this.makeSession(run.cwd);
 			this.active.set(run.id, session);
 			run.sessionFile = session.sessionFile;
 			this.changed();
+			const started = session;
+			timer = setTimeout(() => {
+				timedOut = true;
+				void started.abort();
+			}, RUN_TIME_LIMIT_MS);
 			await session.prompt(run.prompt);
-			const err = session.errorText();
+			const err = timedOut ? `Stopped after ${RUN_TIME_LIMIT_MS / 60_000} minutes without finishing.` : session.errorText();
 			if ((run.status as string) === "cancelled") return;
 			run.status = err ? "error" : "done";
 			run.summary = (err ?? session.lastText() ?? "").slice(0, 600);
@@ -160,6 +215,7 @@ export class Runner {
 				run.summary = String((e as Error).message ?? e).slice(0, 600);
 			}
 		} finally {
+			clearTimeout(timer);
 			run.finishedAt = Date.now();
 			this.active.delete(run.id);
 			session?.dispose();
@@ -175,6 +231,10 @@ export class Runner {
 	saveSchedule(s: Partial<Schedule>) {
 		if (!s.name?.trim() || !s.prompt?.trim()) throw new Error("A schedule needs a name and a prompt");
 		if (!s.trigger && !s.everyMinutes && !s.dailyAt) throw new Error("Choose how often it runs");
+		const i = s.id ? this.store.schedules.findIndex((x) => x.id === s.id) : -1;
+		// lastRun is server-managed (the edit form never sends it): an edit
+		// used to overwrite it with undefined, which re-armed every-minute
+		// and daily schedules to fire immediately after any edit.
 		const entry: Schedule = {
 			id: s.id ?? `s${Date.now().toString(36)}`,
 			name: s.name.trim(),
@@ -184,9 +244,8 @@ export class Runner {
 			everyMinutes: s.everyMinutes ? Math.max(15, Math.round(s.everyMinutes)) : undefined,
 			dailyAt: s.dailyAt || undefined,
 			trigger: s.trigger,
-			lastRun: s.lastRun,
+			lastRun: s.lastRun ?? (i >= 0 ? this.store.schedules[i].lastRun : undefined),
 		};
-		const i = this.store.schedules.findIndex((x) => x.id === entry.id);
 		if (i >= 0) this.store.schedules[i] = { ...this.store.schedules[i], ...entry };
 		else this.store.schedules.push(entry);
 		this.changed();
@@ -202,7 +261,7 @@ export class Runner {
 		const s = this.store.schedules.find((x) => x.id === id);
 		if (!s) throw new Error("Unknown schedule");
 		s.lastRun = Date.now();
-		return this.enqueue(s.prompt, s.cwd, s.name, "schedule");
+		return this.enqueue(s.prompt, s.cwd, s.name, "schedule", s.id);
 	}
 
 	private due(s: Schedule, now: Date) {
@@ -228,8 +287,10 @@ export class Runner {
 				continue;
 			}
 			if (this.due(s, now)) {
+				// Still queued or running from last time: wait for it instead of stacking another (lastRun is left as is, so it runs once that one ends).
+				if (this.store.runs.some((r) => r.scheduleId === s.id && (r.status === "queued" || r.status === "running"))) continue;
 				s.lastRun = now.getTime();
-				this.enqueue(s.prompt, s.cwd, s.name, "schedule");
+				this.enqueue(s.prompt, s.cwd, s.name, "schedule", s.id);
 			}
 		}
 		this.save();
@@ -244,9 +305,35 @@ export class Runner {
 		const first = t.seen === undefined;
 		for (const issue of issues.filter((i) => !i.pull_request)) {
 			if (seen.has(issue.number)) continue;
-			seen.add(issue.number);
 			// The first poll only records what already exists.
-			if (first) continue;
+			if (first) {
+				seen.add(issue.number);
+				continue;
+			}
+			// Issue text is untrusted input: it only reaches a run (with the
+			// user's tokens) after an explicit approval. Denied issues are
+			// marked seen so they are not re-prompted; undecided ones are
+			// not, so a host restart re-prompts instead of dropping them.
+			const approvalKey = `${s.id}:${t.repo}#${issue.number}`;
+			if (this.pendingIssueApprovals.has(approvalKey)) continue;
+			this.pendingIssueApprovals.add(approvalKey);
+			let ok = false;
+			try {
+				ok = this.requestApproval
+					? await this.requestApproval(
+							`${s.name}: #${issue.number} ${issue.title}`,
+							"Approve only if you trust this issue: its title and body come from GitHub and may contain instructions for the agent. The run uses your saved tokens.",
+						)
+					: false;
+			} catch {
+				ok = false;
+			}
+			this.pendingIssueApprovals.delete(approvalKey);
+			seen.add(issue.number);
+			if (!ok) {
+				this.notify({ type: "notice", message: `Trigger ${s.name}: issue #${issue.number} was not approved, skipping` });
+				continue;
+			}
 			this.enqueue(
 				`${s.prompt}\n\nGitHub issue ${t.repo}#${issue.number}: ${issue.title}\n\n${issue.body ?? ""}\n\n${issue.html_url}`,
 				s.cwd,
@@ -260,5 +347,6 @@ export class Runner {
 
 	dispose() {
 		if (this.timer) clearInterval(this.timer);
+		if (this.firstTick) clearTimeout(this.firstTick);
 	}
 }
