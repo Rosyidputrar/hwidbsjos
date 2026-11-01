@@ -400,9 +400,9 @@ async function withModel(t, extra = {}) {
 	const c = await dial(d.sock);
 	await c.until((r) => r.type === "ready");
 	await c.call("resume", { since: null });
-	const saved = await c.call("custom_provider_save", { provider: { apiKey: "sk-test", models: [{ id: "mock-model", name: "Mock" }] } });
+	const saved = await c.call("custom_provider_save", { provider: { id: "mock", name: "Mock", api: "openai-completions", baseUrl: "https://mock.router.test/v1", apiKey: "sk-test", models: [{ id: "mock-model", name: "Mock" }] } });
 	assert.equal(saved.ok, true, saved.error);
-	const set = await c.call("set_model", { provider: "griphub", model: "mock-model" });
+	const set = await c.call("set_model", { provider: "mock", model: "mock-model" });
 	assert.equal(set.ok, true, set.error);
 	const requests = () => (existsSync(mock.MOCK_LOG) ? readFileSync(mock.MOCK_LOG, "utf8").split("\n").filter(Boolean).length : 0);
 	return { dir, d, c, mock, requests };
@@ -591,8 +591,8 @@ test("server mode: a background run nobody watches is refused a risky command, a
 	writeFileSync(join(ws, "build", "keep.txt"), "still here");
 	const tool = JSON.stringify({ name: "bash", arguments: { command: "rm -rf build" } });
 	const { c } = await connected(t, dir, { MOCK_TOOL: tool }, ["--import", mockRouter]);
-	assert.equal((await c.call("custom_provider_save", { provider: { apiKey: "sk-test", models: [{ id: "mock-model", name: "Mock" }] } })).ok, true);
-	assert.equal((await c.call("set_model", { provider: "griphub", model: "mock-model" })).ok, true);
+	assert.equal((await c.call("custom_provider_save", { provider: { id: "mock", name: "Mock", api: "openai-completions", baseUrl: "https://mock.router.test/v1", apiKey: "sk-test", models: [{ id: "mock-model", name: "Mock" }] } })).ok, true);
+	assert.equal((await c.call("set_model", { provider: "mock", model: "mock-model" })).ok, true);
 	const queued = await c.call("run_enqueue", { prompt: "Bersihkan build", dir: ws });
 	assert.equal(queued.ok, true, queued.error);
 	const done = await c.until((r) => r.type === "run_finished", 30_000, "for the run");
@@ -807,7 +807,7 @@ test("phone mode: automatic backups into its own folder, no secrets in them, and
 	};
 	writeFileSync(join(dir, "workspace", "notes.md"), "catatan penting");
 	// A secret on the phone, as saved keys are (the secure store).
-	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk-phone-key", models: [{ id: "m", name: "M" }] } })).ok, true);
+	assert.equal((await call("custom_provider_save", { provider: { id: "mock", name: "Mock", api: "openai-completions", baseUrl: "https://mock.router.test/v1", apiKey: "sk-phone-key", models: [{ id: "m", name: "M" }] } })).ok, true);
 
 	const off = await call("auto_backup_status");
 	assert.equal(off.data.enabled, false, "off until turned on");
@@ -923,8 +923,8 @@ async function phoneWithModel(t, contextWindow, compactAt, extra = {}, model = "
 		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
 		return until((r) => r.type === "response" && r.id === n);
 	};
-	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk", models: [{ id: model, name: "Mock", contextWindow }] } })).ok, true);
-	assert.equal((await call("set_model", { provider: "griphub", model })).ok, true);
+	assert.equal((await call("custom_provider_save", { provider: { id: "mock", name: "Mock", api: "openai-completions", baseUrl: "https://mock.router.test/v1", apiKey: "sk", models: [{ id: model, name: "Mock", contextWindow, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } }] } })).ok, true);
+	assert.equal((await call("set_model", { provider: "mock", model })).ok, true);
 	const before = (await call("settings_get")).data;
 	assert.equal(before.compactAt, null, "no limit set: the default follows the model");
 	assert.equal(before.compactAtShare, 0.65, "the app can say what the default is");
@@ -980,8 +980,8 @@ test("review before a commit: lines per file against the last commit, and a mess
 
 	const noModel = await call("git_commit_message");
 	assert.equal(noModel.ok, false, "no model chosen yet");
-	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk", models: [{ id: "mock-model", name: "Mock", contextWindow: 200000 }] } })).ok, true);
-	assert.equal((await call("set_model", { provider: "griphub", model: "mock-model" })).ok, true);
+	assert.equal((await call("custom_provider_save", { provider: { id: "mock", name: "Mock", api: "openai-completions", baseUrl: "https://mock.router.test/v1", apiKey: "sk", models: [{ id: "mock-model", name: "Mock", contextWindow: 200000 }] } })).ok, true);
+	assert.equal((await call("set_model", { provider: "mock", model: "mock-model" })).ok, true);
 	const msg = await call("git_commit_message");
 	assert.equal(msg.ok, true, msg.error);
 	assert.match(msg.data.message, /^Trim the email before signing in/);
@@ -1023,12 +1023,12 @@ test("a summary says what it cost, and the turns it replaced can still be read",
 	assert.deepEqual((await h.call("summarized_messages")).data, [], "nothing summarized yet");
 	for (let i = 0; i < 4; i++) await h.say(i);
 	const end = await h.until((r) => r.type === "event" && r.event.type === "compaction_end", 30_000, "for the summary");
-	const cost = end.event.result.griphubCost;
-	assert.ok(cost?.credits > 0, `a summary is a paid request: ${JSON.stringify(cost)}`);
+	const cost = end.event.result.cost;
+	assert.ok(cost > 0, `a summary is a paid request: ${JSON.stringify(cost)}`);
 
 	const history = (await h.call("messages")).data;
 	const line = history.find((m) => m.role === "compactionSummary");
-	assert.equal(line.griphubCost?.credits, cost.credits, "the chat opened again says the same");
+	assert.equal(line.cost, cost, "the chat opened again says the same");
 
 	const gone = (await h.call("summarized_messages")).data;
 	assert.ok(gone.length > 0);
@@ -1036,7 +1036,7 @@ test("a summary says what it cost, and the turns it replaced can still be read",
 	const asked = (list) => list.filter((m) => m.role === "user").map((m) => m.content[0].text.split(":")[0]);
 	assert.equal(asked(gone)[0], "Langkah 0", "from the start of the chat");
 	assert.deepEqual([...asked(gone), ...asked(history)], ["Langkah 0", "Langkah 1", "Langkah 2", "Langkah 3"], "each turn once: replaced or kept");
-	assert.ok(gone.some((m) => m.role === "assistant" && m.griphubCost), "replies with their cost, like messages");
+	assert.ok(gone.some((m) => m.role === "assistant" && typeof m.usage?.cost?.total === "number"), "replies with their cost, like messages");
 });
 
 test("a summary that fails is not bought again after every turn, and gives up after a few in a row", async (t) => {
@@ -1081,7 +1081,7 @@ test("server mode: with the daily budget used up, a plan, a retry, a subagent an
 	const m = await withModel(t, { GRIPHUB_TEST_SPENT_CREDITS: "5.02" });
 	const set = await m.c.call("settings_set", { settings: { dailyBudget: 5 } });
 	assert.equal(set.ok, true, set.error);
-	const refused = /Daily budget of 5 credits reached \(5\.02 credits spent today\)/;
+	const refused = /Daily budget of \$5 reached \(\$5\.02 spent today\)/;
 	for (const [type, args] of [
 		["prompt", { text: "Halo" }],
 		["plan_approve", {}],

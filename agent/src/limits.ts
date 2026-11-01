@@ -2,7 +2,7 @@
  * Per-request limits, for chats and background runs alike. pi's agent loop
  * runs for as long as the model keeps calling tools, so without these a
  * model that keeps rephrasing a failing search (or retrying a failing
- * command) never stops, and keeps spending credits while it goes.
+ * command) never stops, and keeps spending money while it goes.
  *
  * A "request" is one agent run: from a prompt until the agent settles.
  */

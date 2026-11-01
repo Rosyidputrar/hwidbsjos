@@ -47,7 +47,7 @@ import { Notifier } from "./notify.js";
 import { syncLauncher } from "./launcher.js";
 import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
-import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
+import { CustomProviders, fetchModels, generateImage, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { onStoreProblem, storeProblemMessage } from "./state.js";
 import { serialQueue, swapSession } from "./sessionswap.js";
@@ -78,9 +78,9 @@ import {
 	wibDay,
 	writeZip,
 } from "./workbench.js";
-import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
+
 import { PromptQueue } from "./promptqueue.js";
-import { Router } from "./router.js";
+
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
@@ -106,7 +106,6 @@ let customProviders: CustomProviders;
 let sync: GitHubSync;
 let subagents: SubagentManager;
 let jobs: Jobs;
-let router: Router;
 let fsService: Fs;
 let preview: Preview;
 /** Server only: hourly encrypted backups for the phone to keep (autobackup.ts). */
@@ -286,28 +285,14 @@ function log(...args: unknown[]) {
 	process.stderr.write(`${args.map(String).join(" ")}\n`);
 }
 
-/**
- * An assistant message as the app gets it: a copy with `griphubCost`, the estimate for that model request
- * (pricing.ts), so the chat can total a turn. A copy, because pi persists the original to the session file.
- */
-function withCost(m: any) {
-	return m?.role === "assistant" ? { ...m, griphubCost: messageCost(m) } : m;
-}
-
-/**
- * What a summary of older turns cost (it is a model request too), as `griphubCost` on its result. Its request has
- * no model of its own on record: it ran on the chat's model ([model]).
- */
-function summaryCost(usage: any, model: { provider?: string; id?: string } | undefined) {
-	return usage && model ? messageCost({ role: "assistant", usage, provider: model.provider, model: model.id }) : null;
-}
-
 /** Drop cumulative snapshots from streaming updates, like pi's JSON mode. */
 function wireEvent(event: AgentSessionEvent): object {
-	if (event.type === "message_end") return { ...event, message: withCost((event as any).message) };
+	// A summary is a paid request too: its result carries pi's cost for it,
+	// the same figure the reopened chat shows for the summary line.
 	if (event.type === "compaction_end" && (event as any).result?.usage) {
 		const result = (event as any).result;
-		event = { ...event, result: { ...result, griphubCost: summaryCost(result.usage, session?.model) } } as AgentSessionEvent;
+		const total = result.usage?.cost?.total;
+		event = { ...event, result: { ...result, cost: typeof total === "number" ? total : null } } as AgentSessionEvent;
 	}
 	// A summary the host started for the context limit (capContext) says so, with the limit, rather than "manual".
 	if ((event.type === "compaction_start" || event.type === "compaction_end") && capping) {
@@ -329,9 +314,6 @@ function wireEvent(event: AgentSessionEvent): object {
 
 function modelInfo(model: any) {
 	if (!model || model.provider === "unknown") return null;
-	// GripHub pricing for the picker: rate, per-request floor, promo, status.
-	const griphub = model.provider === GRIPHUB_ID && router;
-	const rate = griphub ? router.rate(model.id) : undefined;
 	return {
 		provider: model.provider,
 		id: model.id,
@@ -340,22 +322,7 @@ function modelInfo(model: any) {
 		contextWindow: model.contextWindow ?? null,
 		maxTokens: model.maxTokens ?? null,
 		input: model.input ?? ["text"],
-		...(griphub && {
-			pricing: {
-				credits: rate?.credits ?? null,
-				list: rate?.list ?? null,
-				promo: rate?.promo ?? null,
-				promoEndsAt: rate?.promoEndsAt ?? null,
-				floor: router.floor(model.id) ?? null,
-				available: router.modelAvailable(model.id),
-			},
-		}),
 	};
-}
-
-/** Image models a key fetched before they were filtered out must not be offered for chat. */
-function isChatModel(m: any) {
-	return !(m?.provider === GRIPHUB_ID && router?.rate(m.id)?.perImage);
 }
 
 function state() {
@@ -412,11 +379,11 @@ async function buildSession(
 			...webTools(
 				() => ({
 					...integrations.searchKeys(),
-					// The router search backends reuse the saved GripHub key with the dedicated
-					// search models from settings (not the conversation's model). The callback
-					// runs per tool call, so it always reads the current settings.
-					griphubKey: customProviders?.key(GRIPHUB_ID) ?? "",
-					griphubBaseUrl: GRIPHUB_BASE_URL,
+					// The model-backed search legs reuse the user's own gateway endpoint
+					// (searchGateway) with the dedicated search models from settings (not
+					// the conversation's model). The callback runs per tool call, so it
+					// always reads the current settings.
+					...searchGateway(),
 					activeModel: session?.model?.id ?? "",
 				}),
 				() => sessionManager.getCwd(),
@@ -434,6 +401,24 @@ async function buildSession(
 	// Some models send "None" or numbers-as-strings for tool arguments.
 	installLenientTools(result.session.agent);
 	return result;
+}
+
+/**
+ * The endpoint the web search's model-backed legs run on: the first custom
+ * provider the user saved (an OpenAI-compatible one preferred, then an
+ * Anthropic-shaped one). Without one, those legs stay off and the other
+ * backends (Search1API, Brave, Tavily, DDG) carry the search.
+ */
+function searchGateway(): { gatewayKey: string; gatewayBaseUrl: string; gatewayApi: string } {
+	const empty = { gatewayKey: "", gatewayBaseUrl: "", gatewayApi: "" };
+	if (!customProviders) return empty;
+	const all = customProviders.list();
+	const pick =
+		all.find((p) => p.api === "openai-completions" || p.api === "openai-responses") ??
+		all.find((p) => p.api === "anthropic-messages") ??
+		all[0];
+	if (!pick) return empty;
+	return { gatewayKey: customProviders.key(pick.id), gatewayBaseUrl: pick.baseUrl, gatewayApi: pick.api };
 }
 
 /** The open chat, as a subagent's parent. Read lazily: the tool runs later. */
@@ -485,8 +470,7 @@ async function buildSubagentSession(opts: SubagentSessionFactoryOptions) {
 			...webTools(
 				() => ({
 					...integrations.searchKeys(),
-					griphubKey: customProviders?.key(GRIPHUB_ID) ?? "",
-					griphubBaseUrl: GRIPHUB_BASE_URL,
+					...searchGateway(),
 					activeModel: parent.modelId,
 				}),
 				() => cwd,
@@ -615,7 +599,7 @@ function compactAt(): number {
 }
 
 /**
- * Summaries that left the chat over the limit (they failed, or the router refused them): which chat, at how many
+ * Summaries that left the chat over the limit (they failed, or the provider refused them): which chat, at how many
  * tokens the last one was, and how many in a row. Each try is a paid request, and a chat whose summary keeps failing
  * used to buy one after every turn until the daily budget was gone. Now it is tried again only once the chat has grown
  * by a quarter since, and not at all after CAP_MAX_FAILURES in a row (pi's own summary near the model's limit still
@@ -713,9 +697,8 @@ function latestSummaryCost(s: AgentSession) {
 	const branch = s.sessionManager.getBranch() as any[];
 	const at = branch.findLastIndex((e) => e.type === "compaction");
 	if (at < 0 || !branch[at].usage) return null;
-	// The model it ran on: the chat's, as of the last reply before it.
-	const reply = branch.slice(0, at).findLast((e) => e.type === "message" && e.message?.role === "assistant")?.message;
-	return summaryCost(branch[at].usage, reply ? { provider: reply.provider, id: reply.model } : s.model);
+	// pi prices the summary request itself: its usage carries the cost.
+	return typeof branch[at].usage?.cost?.total === "number" ? branch[at].usage.cost.total : null;
 }
 
 /** Turn durations of the open chat, by the timestamp of each turn's last reply. */
@@ -845,40 +828,27 @@ async function tryFallback(error: string) {
 	}
 }
 
-/** Estimated GripHub credits of one pi usage record (rate + floor + cache, see router.ts). */
-function estimateUsage(model: string, u: any): number | null {
-	return requestEstimate(model, usageOf(u));
-}
-
 /**
- * Today's spend in GripHub credits (WIB day): the router's own total from the
- * last refresh (at most a minute old), plus local estimates for this app's
- * requests since that refresh. With no router data yet (offline, no key),
- * the local estimate for the whole day. Refreshes in the background so a
- * prompt never waits on the network.
+ * Today's spend in USD (WIB day), priced by pi's own per-request cost
+ * (usage.cost) summed from the chat files, plus subagents' running totals
+ * (their sessions live in memory, not in chat files).
  */
 /** Only tests set this: what "spent today" says, so the budget can be reached without spending anything. */
 const TEST_SPENT = process.env.GRIPHUB_TEST_SPENT_CREDITS === undefined ? null : Number(process.env.GRIPHUB_TEST_SPENT_CREDITS);
 
-function spentToday(): { credits: number; real: boolean } {
-	if (TEST_SPENT !== null && Number.isFinite(TEST_SPENT)) return { credits: TEST_SPENT, real: true };
-	void router.refreshToday(60_000).catch(() => {});
-	const today = router.today();
+function spentToday(): number {
+	if (TEST_SPENT !== null && Number.isFinite(TEST_SPENT)) return TEST_SPENT;
 	const sessions = join(agentDir, "sessions");
 	const day = wibDay(Date.now());
-	const local = (from?: number) =>
-		usageSummary(sessions, 1, estimateUsage, from)
-			.filter((r) => r.day === day)
-			.reduce((sum, r) => sum + (r.credits ?? 0), 0);
-	// Subagents run on in-memory sessions (no chat file): their spend since the
-	// router snapshot is counted from their own running totals.
-	const subs = (from: number) =>
-		subagents
-			.list()
-			.filter((r) => (r.finishedAt ?? Date.now()) >= from && r.credits !== null)
-			.reduce((sum, r) => sum + (r.credits ?? 0) * subagentShareSince(r, from), 0);
-	if (!today) return { credits: local() + subs(Date.parse(`${day}T00:00:00+07:00`)), real: false };
-	return { credits: today.credits + local(today.fetchedAt) + subs(today.fetchedAt), real: true };
+	const local = usageSummary(sessions, 1)
+		.filter((r) => r.day === day)
+		.reduce((sum, r) => sum + r.cost, 0);
+	const dayStart = Date.parse(`${day}T00:00:00+07:00`);
+	const subs = subagents
+		.list()
+		.filter((r) => (r.finishedAt ?? Date.now()) >= dayStart && r.cost !== null)
+		.reduce((sum, r) => sum + (r.cost ?? 0) * subagentShareSince(r, dayStart), 0);
+	return local + subs;
 }
 
 /** The part of a subagent's spend that falls after [from] (linear over its run). */
@@ -890,43 +860,13 @@ function subagentShareSince(r: { startedAt?: number; finishedAt?: number }, from
 	return (end - from) / Math.max(1, end - start);
 }
 
-/**
- * GripHub's model list, refreshed from /v1/models with the saved key. The
- * open chat keeps its model definition in step (limits, reasoning). Returns
- * what changed; throws without a key or on a network error.
- */
-async function refreshGripHubModels() {
-	const key = customProviders.key(GRIPHUB_ID);
-	if (!key) throw new Error("No GripHub key saved");
-	const before = new Set(customProviders.list().find((p) => p.id === GRIPHUB_ID)?.models.map((m) => m.id) ?? []);
-	const models = await fetchModels(GRIPHUB_API, GRIPHUB_BASE_URL, key);
-	customProviders.save({ id: GRIPHUB_ID, apiKey: "", models }, new Set());
-	await modelRuntime.refresh({ allowNetwork: false });
-	const s = session;
-	if (s?.model?.provider === GRIPHUB_ID) {
-		const fresh = modelRuntime.getModel(GRIPHUB_ID, s.model.id);
-		if (fresh && !s.isStreaming) {
-			const level = s.thinkingLevel;
-			await s.setModel(fresh);
-			s.setThinkingLevel(level);
-		}
-	}
-	const after = new Set(models.map((m) => m.id));
-	return {
-		count: models.length,
-		added: [...after].filter((id) => !before.has(id)),
-		removed: [...before].filter((id) => !after.has(id)),
-		refreshedAt: Date.now(),
-	};
-}
-
 /** Refuses new work once today's spend reaches the configured cap (Settings → Usage). */
 function budgetError(): string | null {
 	const cap = integrations.settings.dailyBudget ?? 0;
 	if (!cap) return null;
-	const { credits } = spentToday();
-	return credits >= cap
-		? `Daily budget of ${cap} credits reached (${credits.toFixed(2)} credits spent today). Raise it in Settings → Usage.`
+	const spent = spentToday();
+	return spent >= cap
+		? `Daily budget of $${cap} reached ($${spent.toFixed(2)} spent today). Raise it in Settings → Usage.`
 		: null;
 }
 
@@ -1091,8 +1031,6 @@ async function login(providerId: string, method: "api_key" | "oauth") {
 async function providers() {
 	const out = [];
 	for (const p of modelRuntime.getProviders()) {
-		// Locked build: pi's built-in providers are never surfaced to the app.
-		if (!customProviders.ids().has(p.id)) continue;
 		const auth = p.auth as any;
 		out.push({
 			id: p.id,
@@ -1476,7 +1414,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "providers":
 			return providers();
 		case "models":
-			return (await modelRuntime.getAvailable(cmd.provider)).filter(isChatModel).map(modelInfo);
+			return (await modelRuntime.getAvailable(cmd.provider)).map(modelInfo);
 		case "set_model": {
 			const model = modelRuntime.getModel(cmd.provider, cmd.model);
 			if (!model) throw new Error(`Unknown model ${cmd.provider}/${cmd.model}`);
@@ -1539,33 +1477,35 @@ async function handle(cmd: Command): Promise<unknown> {
 			customProviders.remove(cmd.providerId);
 			await modelRuntime.refresh({ allowNetwork: false });
 			return customProviders.list();
-		case "custom_provider_fetch_models":
-			return fetchModels(GRIPHUB_API, GRIPHUB_BASE_URL, cmd.apiKey || customProviders.key(GRIPHUB_ID));
-		// Re-reads GripHub's /v1/models with the saved key and updates the model
-		// list (new models appear, retired ones go). Image models stay out of it.
-		case "griphub_models_refresh": {
-			const r = await refreshGripHubModels();
-			return { ...r, providers: customProviders.list() };
+		case "custom_provider_fetch_models": {
+			const api = (["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const).includes(cmd.api)
+				? cmd.api
+				: "openai-completions";
+			const key = cmd.apiKey || (cmd.providerId ? customProviders.key(cmd.providerId) : "");
+			return fetchModels(api, String(cmd.baseUrl ?? ""), key);
 		}
-		case "griphub_image_models": {
-			const key = customProviders.key(GRIPHUB_ID);
-			if (!key) throw new Error("No GripHub key saved");
-			const models = await listImageModels(GRIPHUB_BASE_URL, key);
-			const rates = router.rates();
-			return models.map((m) => ({ ...m, credits: rates[m.id]?.credits ?? null, perImage: rates[m.id]?.perImage ?? true, list: rates[m.id]?.list ?? null, promoEndsAt: rates[m.id]?.promoEndsAt ?? null }));
+		// Image models of one of the user's custom providers (its catalog must
+		// tag them kind:"image"; endpoints without image models return none).
+		case "image_models": {
+			const provider = customProviders.list().find((p) => p.id === cmd.providerId);
+			if (!provider) throw new Error("Unknown provider");
+			return listImageModels(provider.baseUrl, customProviders.key(provider.id));
 		}
-		case "custom_provider_images_generate":
-			// A picture costs several credits (more than most turns): the daily budget applies to it too.
+		case "custom_provider_images_generate": {
+			// A picture can cost more than most turns: the daily budget applies to it too.
 			checkBudget();
+			const provider = customProviders.list().find((p) => p.id === cmd.providerId);
+			if (!provider) throw new Error("Pick a provider for image generation first");
 			return {
 				b64_json: await generateImage(
-					GRIPHUB_BASE_URL,
-					customProviders.key(GRIPHUB_ID),
+					provider.baseUrl,
+					customProviders.key(provider.id),
 					String(cmd.model ?? ""),
 					String(cmd.prompt ?? ""),
 					String(cmd.size ?? "1024x1024"),
 				),
 			};
+		}
 
 		case "new_session":
 			assertIdle();
@@ -1607,14 +1547,14 @@ async function handle(cmd: Command): Promise<unknown> {
 			// Each turn's last reply carries how long the turn took, when the chat kept it.
 			const times = turnTimes(s);
 			return s.messages.map((m: any) => {
-				const out = withCost(m);
-				if (m.role === "compactionSummary") return { ...out, griphubCost: latestSummaryCost(s) };
+				const out = m;
+				if (m.role === "compactionSummary") return { ...out, cost: latestSummaryCost(s) };
 				const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
 				return ms === undefined ? out : { ...out, griphubTurnMs: ms };
 			});
 		}
 		case "summarized_messages":
-			return summarizedMessages(s).map(withCost);
+			return summarizedMessages(s);
 
 		// Accounts, repositories, SSH and deploys (integrations.ts).
 		case "integrations":
@@ -1776,7 +1716,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "tunnels":
 			return tunnels.list();
 		case "usage":
-			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30, estimateUsage);
+			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30);
 
 		// Prompt templates: slash commands pi expands.
 		case "templates":
@@ -1973,32 +1913,6 @@ async function handle(cmd: Command): Promise<unknown> {
 			};
 		}
 
-		// GripHub Router account data (router.ts), with the saved GripHub key.
-		case "router_account": {
-			const [account] = await Promise.all([
-				router.refreshAccount(cmd.force ? 0 : 30_000),
-				router.refreshToday(cmd.force ? 0 : 30_000).catch(() => null),
-				router.refreshRequests().catch(() => null),
-			]);
-			const spent = spentToday();
-			return { ...router.snapshot(), account, spentToday: spent.credits, spentTodayReal: spent.real };
-		}
-		case "router_snapshot":
-			return router.snapshot();
-		case "griphub_credits": {
-			// Older app builds: the trimmed summary the first Usage card used.
-			const a = await router.refreshAccount(30_000);
-			const nearest = a.batches.find((b) => b.expiresAt) ?? null;
-			return {
-				remaining: a.balance,
-				used: a.used,
-				limit: a.granted,
-				suspended: a.suspended,
-				suspendedUntil: a.suspendedUntil,
-				nearestExpiry: nearest ? { credits: nearest.credits, expiresAt: nearest.expiresAt } : null,
-				topModels: a.byModel.slice(0, 5).map((m) => ({ model: m.model, creditsUsed: m.credits })),
-			};
-		}
 		// App settings: DNS, search keys, approvals, fallbacks, budget.
 		// Settings > Server agent > Send a test notification: goes out even with the app open.
 		case "notify_test":
@@ -2186,12 +2100,6 @@ async function main() {
 	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.GRIPHUB_PREVIEW_IDLE_MS) || undefined });
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
-	router = new Router({
-		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
-		cacheFile: join(stateDir, "router-cache.json"),
-		fallbackRates: FALLBACK_RATES,
-	});
-	usePricingRouter(router);
 	modelRuntime = await ModelRuntime.create();
 	// Never auto-trust project code: a cloned repo's .pi/extensions/*.ts
 	// would otherwise run inside the host with the user's tokens on merely
@@ -2216,7 +2124,7 @@ async function main() {
 		limits: () => {
 			const st = integrations.settings;
 			return {
-				creditLimit: st.subagentCreditLimit ?? 50,
+				costLimit: st.subagentCostLimit ?? 5,
 				minutesLimit: st.subagentMinutesLimit ?? 30,
 				approvalMode: st.subagentApprovalMode ?? st.approvalMode ?? "ask_risky",
 			};
@@ -2261,22 +2169,6 @@ async function main() {
 		await settingsManager.flush();
 	}
 	await openSession(SessionManager.continueRecent(workspace));
-	// Account data and live rates in the background; the model list once a day
-	// (new GripHub models show up without re-entering the key).
-	if (customProviders.key(GRIPHUB_ID)) {
-		void router.refreshAccount().catch((e) => log("router account:", (e as Error).message));
-		void router.refreshRequests().catch(() => {});
-		const stamp = join(stateDir, "models-refreshed");
-		const last = existsSync(stamp) ? Number(readFileSync(stamp, "utf8")) || 0 : 0;
-		if (Date.now() - last > 24 * 3600_000) {
-			void refreshGripHubModels()
-				.then((r) => {
-					writeFileSync(stamp, String(r.refreshedAt));
-					if (r.added.length || r.removed.length) send({ type: "models_changed", ...r });
-				})
-				.catch((e) => log("models refresh:", (e as Error).message));
-		}
-	}
 	sync = new GitHubSync({
 		agentDir,
 		workspace,

@@ -1,7 +1,6 @@
-// Preloaded into a test host (node --import): answers GripHub Router's chat completions with a scripted stream, so
-// the real host can run a model turn offline. The provider lock is untouched: the host still talks to the one
-// canonical URL, only fetch underneath it is replaced. Other requests to the router get a 404; everything else
-// goes out as usual.
+// Preloaded into a test host (node --import): answers the mock provider's chat completions with a scripted
+// stream, so the real host can run a model turn offline. The test provider points at ROUTER below; only fetch
+// underneath it is replaced. Other requests to that host get a 404; everything else goes out as usual.
 //
 // Each reply streams MOCK_TEXT, then holds the stream open until the file MOCK_RELEASE exists (or the request is
 // aborted), then ends the turn. Every chat request is counted in MOCK_LOG, one line each, and its last message is
@@ -13,7 +12,7 @@
 // "Job said: ..." instead of calling the tool again.
 import { appendFileSync, existsSync } from "node:fs";
 
-const ROUTER = "https://griphubrouter.web.id/v1";
+const ROUTER = "https://mock.router.test/v1";
 const realFetch = globalThis.fetch;
 
 function chunk(delta, finish = null, extra = {}) {

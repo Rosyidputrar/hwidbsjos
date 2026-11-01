@@ -110,7 +110,7 @@ export interface AppSettings {
 	/** When the agent must ask before acting (see guard.ts). */
 	approvalMode?: "ask_all" | "ask_risky" | "auto";
 	/** Subagent limits, global for all subagents (see subagent.ts); 0 = no limit. */
-	subagentCreditLimit?: number;
+	subagentCostLimit?: number;
 	subagentMinutesLimit?: number;
 	/** Approval mode for subagents; unset = follow the chat's approvalMode. */
 	subagentApprovalMode?: "ask_all" | "ask_risky" | "auto";
@@ -127,7 +127,7 @@ export interface AppSettings {
 	notify?: { enabled?: boolean; url?: string; topic?: string };
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
-	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
+	/** Daily spend cap in USD (pi's own cost); prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
 	/**
 	 * Summarize the chat once its context passes this many tokens (host.ts capContext), on models whose own limit is
@@ -279,7 +279,7 @@ export class Integrations {
 
 	/** Keys are write-only from the app's point of view: it only sees their last four characters. */
 	publicSettings() {
-		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget, subagentCreditLimit, subagentMinutesLimit, subagentApprovalMode, subagentNotifyDone, subagentNotifyFailed, subagentNotifyApproval, subagentNotifyRunning } = this.settings;
+		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget, subagentCostLimit, subagentMinutesLimit, subagentApprovalMode, subagentNotifyDone, subagentNotifyFailed, subagentNotifyApproval, subagentNotifyRunning } = this.settings;
 		const masked = (text?: string) => parseKeys(text).map(maskKey);
 		return {
 			dns,
@@ -293,8 +293,8 @@ export class Integrations {
 			tinyfishSearch: this.settings.tinyfishSearch ?? true,
 			openaiSearch: this.settings.openaiSearch ?? true,
 			anthropicSearch: this.settings.anthropicSearch ?? true,
-			openaiSearchModel: this.settings.openaiSearchModel ?? "gpt-5.6-luna",
-			anthropicSearchModel: this.settings.anthropicSearchModel ?? "claude-haiku-5.5",
+			openaiSearchModel: this.settings.openaiSearchModel ?? "gpt-4o-mini",
+			anthropicSearchModel: this.settings.anthropicSearchModel ?? "claude-haiku-4-5",
 			projectSearch: this.settings.projectSearch ?? {},
 			braveSearch: this.settings.braveSearch ?? true,
 			tavilySearch: this.settings.tavilySearch ?? true,
@@ -310,7 +310,7 @@ export class Integrations {
 			// saved, and said "built-in" for a build that has none.
 			githubClientId: (this.settings.githubClientId ?? "").trim(),
 			githubClientIdBuiltIn: !!GITHUB_CLIENT_ID,
-			subagentCreditLimit: subagentCreditLimit ?? 50,
+			subagentCostLimit: subagentCostLimit ?? 50,
 			subagentMinutesLimit: subagentMinutesLimit ?? 30,
 			subagentApprovalMode: subagentApprovalMode ?? approvalMode ?? "ask_risky",
 			// False while subagents follow the chat's approval mode (no override saved).
@@ -350,7 +350,7 @@ export class Integrations {
 		// (whole minutes). A bad value would otherwise stop every subagent at once.
 		const limit = (v: unknown, whole: boolean) =>
 			typeof v === "number" && Number.isFinite(v) && v >= 0 && (!whole || Number.isInteger(v));
-		if (next.subagentCreditLimit !== undefined && !limit(next.subagentCreditLimit, false)) {
+		if (next.subagentCostLimit !== undefined && !limit(next.subagentCostLimit, false)) {
 			throw new Error("The subagent cost limit must be 0 (no limit) or a positive number");
 		}
 		if (next.subagentMinutesLimit !== undefined && !limit(next.subagentMinutesLimit, true)) {
@@ -384,8 +384,8 @@ export class Integrations {
 			tinyfishSearch: s.tinyfishSearch ?? true,
 			openaiSearch: s.openaiSearch ?? true,
 			anthropicSearch: s.anthropicSearch ?? true,
-			openaiSearchModel: s.openaiSearchModel ?? "gpt-5.6-luna",
-			anthropicSearchModel: s.anthropicSearchModel ?? "claude-haiku-5.5",
+			openaiSearchModel: s.openaiSearchModel ?? "gpt-4o-mini",
+			anthropicSearchModel: s.anthropicSearchModel ?? "claude-haiku-4-5",
 			projectSearch: s.projectSearch ?? {},
 			braveSearch: s.braveSearch ?? true,
 			tavilySearch: s.tavilySearch ?? true,

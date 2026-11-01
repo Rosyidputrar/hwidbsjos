@@ -35,10 +35,10 @@ export interface SearchKeys {
 	s1Screenshot: boolean;
 	/** Whether the agent uses TinyFish Search when it has keys. */
 	tinyfishSearch: boolean;
-	/** GripHub Router search: OpenAI Responses + Anthropic Messages, both with a server-side web_search tool. */
+	/** Gateway search: OpenAI Responses + Anthropic Messages, both with a server-side web_search tool. */
 	openaiSearch: boolean;
 	anthropicSearch: boolean;
-	/** Dedicated search models for the router backends (defaults filled in by the host). */
+	/** Dedicated search models for the gateway backends (defaults filled in by the host). */
 	openaiSearchModel?: string;
 	anthropicSearchModel?: string;
 	/** Per-project web_search toggle, keyed by project path; absent means on. */
@@ -46,10 +46,11 @@ export interface SearchKeys {
 	/** Per-backend switches for the keyed search tools (Search1API already had one). */
 	braveSearch: boolean;
 	tavilySearch: boolean;
-	/** The conversation's active model slug + the saved GripHub key and base URL, merged in by the host (never settings of their own). */
+	/** The conversation's active model slug + the user's gateway endpoint (a custom provider they saved), merged in by the host (never settings of their own). */
 	activeModel?: string;
-	griphubKey?: string;
-	griphubBaseUrl?: string;
+	gatewayKey?: string;
+	gatewayBaseUrl?: string;
+	gatewayApi?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +313,7 @@ async function braveHtmlSearch(q: string, n: number, signal?: AbortSignal): Prom
 }
 
 // ---------------------------------------------------------------------------
-// GripHub Router search (OpenAI Responses + Anthropic Messages)
+// Gateway search (OpenAI Responses + Anthropic Messages)
 //
 // Both are model-driven: the request carries a server-side web_search tool and
 // the model decides when to search. What comes back is citations (OpenAI) or
@@ -321,7 +322,7 @@ async function braveHtmlSearch(q: string, n: number, signal?: AbortSignal): Prom
 // with web_fetch, exactly as it does for the other backends.
 //
 // A model call can take a while on a phone connection, but each backend is
-// only one step of the fallback chain: two slow router calls used to hold one
+// only one step of the fallback chain: two slow gateway calls used to hold one
 // search for four minutes. Any failure (unsupported tool, unknown model, bad
 // key, timeout) just falls through to the next backend in webSearch().
 
@@ -376,7 +377,7 @@ function parseSseBody(raw: string, kind: "responses" | "messages"): any | null {
 	return content.length > 0 ? { content } : null;
 }
 
-async function routerRequest(path: string, key: string, body: unknown, signal?: AbortSignal, extraHeaders?: Record<string, string>, sseKind?: "responses" | "messages") {
+async function gatewayRequest(path: string, key: string, body: unknown, signal?: AbortSignal, extraHeaders?: Record<string, string>, sseKind?: "responses" | "messages") {
 	const timeout = AbortSignal.timeout(45_000);
 	const res = await fetch(path, {
 		method: "POST",
@@ -404,15 +405,15 @@ async function routerRequest(path: string, key: string, body: unknown, signal?: 
 			const reassembled = parseSseBody(raw, sseKind);
 			if (reassembled) return reassembled;
 		}
-		throw new Error("Router returned a response that is neither JSON nor SSE");
+		throw new Error("The gateway returned a response that is neither JSON nor SSE");
 	}
 }
 
 async function openaiResponsesSearch(q: string, n: number, model: string, keys: SearchKeys, signal?: AbortSignal): Promise<SearchResult[]> {
-	const base = (keys.griphubBaseUrl ?? "").replace(/\/+$/, "");
-	const body = await routerRequest(
+	const base = (keys.gatewayBaseUrl ?? "").replace(/\/+$/, "");
+	const body = await gatewayRequest(
 		`${base}/responses`,
-		keys.griphubKey ?? "",
+		keys.gatewayKey ?? "",
 		{ model, input: `Search the web for: ${q}`, tools: [{ type: "web_search" }], stream: false },
 		signal,
 		undefined,
@@ -458,10 +459,10 @@ async function openaiResponsesSearch(q: string, n: number, model: string, keys: 
 }
 
 async function anthropicMessagesSearch(q: string, n: number, model: string, keys: SearchKeys, signal?: AbortSignal): Promise<SearchResult[]> {
-	const base = (keys.griphubBaseUrl ?? "").replace(/\/+$/, "");
-	const body = await routerRequest(
+	const base = (keys.gatewayBaseUrl ?? "").replace(/\/+$/, "");
+	const body = await gatewayRequest(
 		`${base}/messages`,
-		keys.griphubKey ?? "",
+		keys.gatewayKey ?? "",
 		{
 			model,
 			max_tokens: 1024,
@@ -507,17 +508,20 @@ async function anthropicMessagesSearch(q: string, n: number, model: string, keys
 
 export async function webSearch(q: string, n: number, keys: SearchKeys, signal?: AbortSignal, source?: string) {
 	const attempts: [string, () => Promise<SearchResult[]>][] = [];
-	// Router search uses dedicated search models, not the conversation's model:
-	// a DeepSeek/GLM chat still searches through a GPT/Claude model on the
-	// same saved GripHub key. Priority is fixed: OpenAI first, then Anthropic,
-	// then the keyed engines below, then DuckDuckGo. An empty search model
-	// skips that backend (the toggle alone does not decide it).
+	// The model-backed legs run on the user's own gateway endpoint (a custom
+	// provider they saved), with dedicated search models from settings, not
+	// the conversation's model. The OpenAI leg needs an OpenAI-shaped
+	// gateway, the Anthropic leg an Anthropic-shaped one. Priority is fixed:
+	// OpenAI first, then Anthropic, then the keyed engines below, then
+	// DuckDuckGo. An empty search model skips that backend (the toggle alone
+	// does not decide it).
 	const openaiModel = (keys.openaiSearchModel ?? "").trim();
 	const anthropicModel = (keys.anthropicSearchModel ?? "").trim();
-	if (keys.openaiSearch && keys.griphubKey && openaiModel) {
+	const gatewayApi = keys.gatewayApi ?? "";
+	if (keys.openaiSearch && keys.gatewayKey && openaiModel && (gatewayApi === "openai-completions" || gatewayApi === "openai-responses")) {
 		attempts.push(["openai-responses", () => openaiResponsesSearch(q, n, openaiModel, keys, signal)]);
 	}
-	if (keys.anthropicSearch && keys.griphubKey && anthropicModel) {
+	if (keys.anthropicSearch && keys.gatewayKey && anthropicModel && gatewayApi === "anthropic-messages") {
 		attempts.push(["anthropic-messages", () => anthropicMessagesSearch(q, n, anthropicModel, keys, signal)]);
 	}
 	if (keys.s1Search && keys.s1.length) {
@@ -962,7 +966,7 @@ export function webTools(keys: () => SearchKeys, cwd: () => string) {
 			],
 			parameters: Type.Object({
 				query: Type.String({ description: "Search query" }),
-				count: Type.Optional(Type.Number({ description: "Target number of results (default 8, max 20). List engines return this many; OpenAI/Anthropic router backends return however many sources the model cites." })),
+				count: Type.Optional(Type.Number({ description: "Target number of results (default 8, max 20). List engines return this many; OpenAI/Anthropic gateway backends return however many sources the model cites." })),
 				source: Type.Optional(
 					Type.String({
 						description:

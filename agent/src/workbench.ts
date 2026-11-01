@@ -320,10 +320,8 @@ export interface UsageRow {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
-	/** pi's own cost (other providers that report one). */
+	/** pi's own cost (providers that report one). */
 	cost: number;
-	/** Estimated GripHub credits by the router's rule, summed per request; null when the price is unknown. */
-	credits: number | null;
 	requests: number;
 }
 
@@ -341,13 +339,11 @@ export function wibDay(ts: number): string {
  * Usage per day and model from the chat files, for the chart and as the
  * offline fallback. Every billed request counts: assistant replies, and the
  * requests pi makes on its own (cache warming, compaction and branch
- * summaries), which used to be skipped. Each request is priced on its own,
- * so the router's per-request floor applies.
+ * summaries), which used to be skipped.
  */
 export function usageSummary(
 	sessionsDir: string,
 	days = 30,
-	estimate: (model: string, u: any) => number | null = () => null,
 	/** Only requests at or after this instant (ms). */
 	fromTs?: number,
 ) {
@@ -357,14 +353,12 @@ export function usageSummary(
 		if (!u || ts < since) return;
 		const day = wibDay(ts);
 		const key = `${day}|${provider}|${model}`;
-		const r = rows.get(key) ?? { day, provider, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, credits: 0, requests: 0 };
+		const r = rows.get(key) ?? { day, provider, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, requests: 0 };
 		r.input += u.input ?? 0;
 		r.output += u.output ?? 0;
 		r.cacheRead += u.cacheRead ?? 0;
 		r.cacheWrite += u.cacheWrite ?? 0;
 		r.cost += u.cost?.total ?? 0;
-		const c = estimate(model, u);
-		r.credits = c === null || r.credits === null ? null : r.credits + c;
 		r.requests += 1;
 		rows.set(key, r);
 	};
@@ -383,7 +377,7 @@ export function usageSummary(
 						const ts = typeof e.message?.timestamp === "number" ? e.message.timestamp : Date.parse(e.timestamp);
 						if (e.type === "message" && e.message?.role === "assistant" && e.message.usage) {
 							const m = e.message;
-							// Failed requests are not billed by the router.
+							// Failed requests are not billed.
 							if (m.stopReason === "error" && !(m.usage.output > 0)) continue;
 							last = { provider: m.provider, model: m.model };
 							add(ts, m.provider, m.model, m.usage);

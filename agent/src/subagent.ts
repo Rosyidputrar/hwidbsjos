@@ -15,8 +15,8 @@
  * - It sees nothing of the parent conversation, only the brief the parent
  *   wrote. Its report returns to the parent as the result of the `subagent`
  *   tool call, and the parent decides what enters the parent chat.
- * - Limits (credits, wall-clock minutes, approval mode) come from Settings
- *   and are snapshotted when the subagent starts. Credit and time limits are
+ * - Limits (cost, wall-clock minutes, approval mode) come from Settings
+ *   and are snapshotted when the subagent starts. Cost and time limits are
  *   enforced at the next tool call after they are crossed (see
  *   subagentBudgetExtension), not by killing a tool mid-flight.
  * - Queueing and stopping are boundary-safe. A queued message is only sent as
@@ -38,7 +38,6 @@ import type {
 import { Type } from "typebox";
 
 import { Guard, type ApprovalMode } from "./guard.js";
-import { messageCost, rateForModel } from "./pricing.js";
 
 /** Read-only work: research, read files, search the web. Never changes anything. */
 export const READ_TOOLS = ["read", "grep", "find", "ls", "web_search", "web_fetch"];
@@ -59,7 +58,7 @@ export type SubagentStatus =
 
 /** Limits for one subagent, snapshotted from Settings at start. 0 = no limit. */
 export interface SubagentLimits {
-	creditLimit: number;
+	costLimit: number;
 	minutesLimit: number;
 	approvalMode: ApprovalMode;
 }
@@ -102,7 +101,7 @@ export type SubagentTimelineEntry =
  * Why a subagent stopped, as a stable code the app localizes. `stopReason`
  * carries the same thing as English text for the parent model.
  */
-export type SubagentStopCode = "user" | "force" | "time" | "credit" | "before_start" | "limit";
+export type SubagentStopCode = "user" | "force" | "time" | "cost" | "before_start" | "limit";
 
 /** Everything Dart needs to render the card, the modal and the history view. */
 export interface SubagentRecord {
@@ -132,21 +131,17 @@ export interface SubagentRecord {
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
 	/**
-	 * Estimated spend in GripHub credits by the router's rule, summed per model
-	 * request as each one ends (rate × all tokens incl. cache, or the model's
-	 * per-request floor when higher); null when the model has no known rate.
+	 * Spend in USD by pi's own per-request cost (usage.cost), summed as each
+	 * request ends; null when a request's price is unknown.
 	 */
-	credits: number | null;
-	/** Model requests made so far, and how many of them were billed at the floor. */
+	cost: number | null;
+	/** Model requests made so far. */
 	requests: number;
-	flooredRequests: number;
 	/** The model doing the work ("provider/id" split), its display name, and its thinking level. */
 	provider?: string;
 	model?: string;
 	modelName?: string;
 	thinkingLevel?: string;
-	/** The model's rate, for the detail view (credits per 1M tokens, or per image). */
-	rate?: number | null;
 	/** Final assistant text (full report when done, partial report when stopped). */
 	report?: string;
 	error?: string;
@@ -178,7 +173,7 @@ export interface SubagentParent {
 	sessionFile: string;
 	title: string;
 	cwd: string;
-	/** The parent's model id, for credit estimates; "" when unknown. */
+	/** The parent's model id, for cost estimates; "" when unknown. */
 	modelId: string;
 }
 
@@ -209,8 +204,8 @@ export interface SubagentHooks {
  * worst overshoot is therefore one tool call past the limit.
  */
 export interface SubagentBudgetProbe {
-	credits(): number | null;
-	creditLimit(): number;
+	cost(): number | null;
+	costLimit(): number;
 	deadlineMs(): number | null;
 	stopping(): boolean;
 }
@@ -239,12 +234,12 @@ export function subagentBudgetExtension(probe: SubagentBudgetProbe) {
 					terminate: true,
 				};
 			}
-			const cap = probe.creditLimit();
-			const spent = probe.credits();
+			const cap = probe.costLimit();
+			const spent = probe.cost();
 			if (cap > 0 && spent !== null && spent >= cap) {
 				return {
 					block: true,
-					reason: "The subagent credit limit is reached. Do not call any more tools: reply now with a partial report of what you have done and found so far.",
+					reason: "The subagent cost limit is reached. Do not call any more tools: reply now with a partial report of what you have done and found so far.",
 					terminate: true,
 				};
 			}
@@ -399,7 +394,7 @@ interface Runtime {
 	/** Fires at the time limit: a subagent waiting for an approval would otherwise wait past it (see begin). */
 	deadlineTimer?: NodeJS.Timeout;
 	settling: boolean;
-	cachedCredits: number | null;
+	cachedCost: number | null;
 }
 
 export class SubagentManager {
@@ -513,9 +508,8 @@ export class SubagentManager {
 			outputTokens: 0,
 			cacheReadTokens: 0,
 			cacheWriteTokens: 0,
-			credits: null,
+			cost: null,
 			requests: 0,
-			flooredRequests: 0,
 			...(parent.modelId ? { model: parent.modelId } : {}),
 		};
 		// Declared before the guard so its send closure can reference it.
@@ -565,7 +559,7 @@ export class SubagentManager {
 			forceStop: false,
 			deadlineMs: null,
 			settling: false,
-			cachedCredits: null,
+			cachedCost: null,
 		};
 		this.runtimes.set(id, rt);
 		if (this.activeCount() < MAX_RUNNING) void this.begin(rt);
@@ -689,8 +683,8 @@ export class SubagentManager {
 		}
 		this.emitStatus(rt);
 		const probe: SubagentBudgetProbe = {
-			credits: () => rt.cachedCredits,
-			creditLimit: () => rt.limits.creditLimit,
+			cost: () => rt.cachedCost,
+			costLimit: () => rt.limits.costLimit,
 			deadlineMs: () => rt.deadlineMs,
 			stopping: () => rt.stopRequested || rt.forceStop,
 		};
@@ -717,8 +711,6 @@ export class SubagentManager {
 				rec.provider = m.provider;
 				rec.model = m.id;
 				rec.modelName = m.name ?? m.id;
-				const r = rateForModel(m.id);
-				rec.rate = r ? r.credits : null;
 			}
 			const level = (session as any).thinkingLevel;
 			if (typeof level === "string") rec.thinkingLevel = level;
@@ -842,35 +834,32 @@ export class SubagentManager {
 		if (rt.deadlineMs !== null && Date.now() > rt.deadlineMs) {
 			return { reason: `The subagent time limit was reached (${rt.limits.minutesLimit} min).`, code: "time" };
 		}
-		if (rt.limits.creditLimit > 0 && rt.cachedCredits !== null && rt.cachedCredits >= rt.limits.creditLimit) {
-			return { reason: `The subagent cost limit was reached (${rt.limits.creditLimit} credits).`, code: "credit" };
+		if (rt.limits.costLimit > 0 && rt.cachedCost !== null && rt.cachedCost >= rt.limits.costLimit) {
+			return { reason: `The subagent cost limit was reached ($${rt.limits.costLimit}).`, code: "cost" };
 		}
 		return null;
 	}
 
 	/**
-	 * Adds one finished model request to the running cost, the router's way:
-	 * max(floor, rate × all tokens), nothing for a failed request. Called per
-	 * request, so the card's credits move with every step instead of at the end.
+	 * Adds one finished model request to the running cost: pi's own price for
+	 * the request (usage.cost). Called per request, so the card's cost moves
+	 * with every step instead of at the end.
 	 */
 	private chargeRequest(rt: Runtime, m: any) {
 		const rec = rt.record;
-		const model = String(m.model ?? rec.model ?? rt.parent.modelId ?? "");
-		if (!model || !m.usage) return;
-		// The same estimate as the chat's per-turn cost (pricing.ts): floor, cache tokens, failed requests free.
-		const c = messageCost({ ...m, model });
-		const cost = c?.credits ?? null;
+		if (!m?.usage) return;
+		const raw = m.usage?.cost?.total;
+		const cost = typeof raw === "number" ? raw : null;
 		rec.requests += 1;
 		// One request of unknown price makes the total unknown (never a made-up number).
-		const unknown = cost === null || (rec.requests > 1 && rec.credits === null);
-		rec.credits = unknown ? null : (rec.credits ?? 0) + cost;
-		if (c?.floored) rec.flooredRequests += 1;
-		rt.cachedCredits = rec.credits;
+		const unknown = cost === null || (rec.requests > 1 && rec.cost === null);
+		rec.cost = unknown ? null : (rec.cost ?? 0) + cost;
+		rt.cachedCost = rec.cost;
 		this.refreshUsage(rt);
 		this.emitStatus(rt);
 	}
 
-	/** Token totals from the session (credits are summed per request in chargeRequest). */
+	/** Token totals from the session (cost is summed per request in chargeRequest). */
 	private refreshUsage(rt: Runtime) {
 		const s = rt.session;
 		if (!s) return;
@@ -949,14 +938,12 @@ export class SubagentManager {
 			outputTokens: rec.outputTokens,
 			cacheReadTokens: rec.cacheReadTokens,
 			cacheWriteTokens: rec.cacheWriteTokens,
-			credits: rec.credits,
+			cost: rec.cost,
 			requests: rec.requests,
-			flooredRequests: rec.flooredRequests,
 			provider: rec.provider ?? null,
 			model: rec.model ?? null,
 			modelName: rec.modelName ?? null,
 			thinkingLevel: rec.thinkingLevel ?? null,
-			rate: rec.rate ?? null,
 		});
 	}
 }
@@ -996,7 +983,7 @@ export function subagentTool(manager: SubagentManager, getParent: () => Subagent
 			const record = manager.start(parent, params.task, profile, toolCallId);
 			const done = await manager.waitFor(record.id);
 			const elapsed = done.startedAt && done.finishedAt ? formatDuration(done.finishedAt - done.startedAt) : "?";
-			const usage = `(${done.toolCalls.length} tool calls, ${elapsed}${done.credits !== null ? `, ~${done.credits.toFixed(2)} credits (estimate)` : ""})`;
+			const usage = `(${done.toolCalls.length} tool calls, ${elapsed}${done.cost !== null ? `, ~$${done.cost.toFixed(2)} (estimate)` : ""})`;
 			let text: string;
 			if (done.status === "done") {
 				text = `Subagent finished ${usage}.\n\nReport:\n${done.report ?? "(no report)"}`;

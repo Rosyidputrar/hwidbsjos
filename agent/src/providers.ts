@@ -1,11 +1,12 @@
 /**
- * Model providers. This build is locked to a single provider: GripHub Router.
- * The user only supplies an API key; the endpoint, API type and provider id
- * are fixed here and cannot be changed from the app or by editing the store.
+ * Custom model providers: endpoints the user adds themselves (any
+ * OpenAI-compatible server, an Anthropic or Google endpoint, a company
+ * gateway). Built-in providers pi already knows are handled by pi's own
+ * login (OAuth or API key) and never live in this store.
  *
- * The app keeps the provider in its own encrypted store and writes pi's
- * models.json from it. models.json only references the key as
- * `$GRIPHUB_PROVIDER_KEY_GRIPHUB`, which pi resolves from the environment,
+ * The app keeps custom providers in its own encrypted store and writes pi's
+ * models.json from it. models.json only references each key as
+ * `$RYNEX_PROVIDER_KEY_<ID>`, which pi resolves from the environment,
  * so the key never sits there in plain text.
  */
 
@@ -15,12 +16,6 @@ import { atomicWrite } from "./state.js";
 
 export const APIS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
 export type ProviderApi = (typeof APIS)[number];
-
-/** The one and only provider of this build. */
-export const GRIPHUB_ID = "griphub";
-export const GRIPHUB_NAME = "GripHub Router";
-export const GRIPHUB_API: ProviderApi = "openai-completions";
-export const GRIPHUB_BASE_URL = "https://griphubrouter.web.id/v1";
 
 export type CustomModel = {
 	id: string;
@@ -35,6 +30,8 @@ export type CustomModel = {
 	/** False when the endpoint says effort levels make no difference: thinking is just on (or off). */
 	effort?: boolean;
 	input?: string[];
+	/** USD per 1M tokens, pi's cost shape; pi prices usage (and the app's budgets) from it. */
+	cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 };
 
 /** A model as saved: only known fields, with sane types. */
@@ -49,7 +46,18 @@ function cleanModel(m: any): CustomModel {
 		...(m.reasoning === true && typeof m.canDisableThinking === "boolean" && { canDisableThinking: m.canDisableThinking }),
 		...(m.reasoning === true && m.effort === false && { effort: false }),
 		...(Array.isArray(m.input) && m.input.includes("image") && { input: ["text", "image"] }),
+		...(cleanCost(m.cost) && { cost: cleanCost(m.cost) }),
 	};
+}
+
+/** A pi cost object from untrusted JSON: all four prices, finite and non-negative. */
+function cleanCost(v: any): CustomModel["cost"] {
+	const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : undefined);
+	if (!v || typeof v !== "object") return undefined;
+	const input = n(v.input), output = n(v.output), cacheRead = n(v.cacheRead), cacheWrite = n(v.cacheWrite);
+	return input !== undefined && output !== undefined && cacheRead !== undefined && cacheWrite !== undefined
+		? { input, output, cacheRead, cacheWrite }
+		: undefined;
 }
 
 export type CustomProvider = {
@@ -65,7 +73,7 @@ export type CustomProvider = {
 const NO_KEY = "none";
 
 function envName(id: string) {
-	return `GRIPHUB_PROVIDER_KEY_${id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+	return `RYNEX_PROVIDER_KEY_${id.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }
 
 function cleanUrl(url: string) {
@@ -80,16 +88,6 @@ export class CustomProviders {
 		private readonly modelsFile: string,
 	) {
 		this.providers = readSecureJson<CustomProvider[]>(storeFile, [], Array.isArray);
-		// Locked build: anything that is not GripHub (an old store, a synced
-		// backup from another build) is dropped, and GripHub's endpoint is
-		// forced back to the canonical one.
-		const before = JSON.stringify(this.providers);
-		this.providers = this.providers
-			.filter((p) => p.id === GRIPHUB_ID)
-			.map((p) => ({ ...p, name: GRIPHUB_NAME, api: GRIPHUB_API, baseUrl: GRIPHUB_BASE_URL }));
-		if (JSON.stringify(this.providers) !== before) {
-			writeSecureJson(storeFile, this.providers);
-		}
 		// models.json is derived from the store, but how an entry is generated
 		// changes across app versions (e.g. the thinking-level map). Rewrite it
 		// whenever the file on disk differs from what this build would write,
@@ -125,28 +123,35 @@ export class CustomProviders {
 	 * `builtin` holds provider ids pi already knows, which a new provider may not reuse.
 	 */
 	save(input: Partial<CustomProvider> & { previousId?: string }, builtin: Set<string>) {
-		// Locked build: the provider's identity is not negotiable. Only the
-		// API key and the model list come from the caller.
-		const id = GRIPHUB_ID;
-		const api = GRIPHUB_API;
-		const baseUrl = GRIPHUB_BASE_URL;
+		const id = String(input.id ?? "")
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9-_]+/g, "-")
+			.replace(/^-+|-+$/g, "");
+		if (!id) throw new Error("Give the provider an id");
+		const previousId = input.previousId ?? id;
+		const previous = this.providers.find((p) => p.id === previousId);
+		// A custom provider may not shadow a provider pi already knows; the
+		// only exception is editing the custom entry that already owns the id
+		// (impossible while the host builds `builtin` from non-custom ids).
+		if (builtin.has(id)) throw new Error(`"${id}" is a built-in provider; pick another id`);
+		const api = (APIS as readonly string[]).includes(input.api ?? "") ? (input.api as ProviderApi) : "openai-completions";
+		const baseUrl = cleanUrl(String(input.baseUrl ?? ""));
+		if (!/^https?:\/\/[^/]+/.test(baseUrl)) throw new Error("Enter a full base URL (https://…)");
 		const models = (input.models ?? [])
 			.map(cleanModel)
 			.filter((m, i, all) => m.id && all.findIndex((x) => x.id === m.id) === i);
 		if (!models.length) throw new Error("Add at least one model (or fetch them from the endpoint)");
 
-		const previousId = id;
-		const previous = this.providers.find((p) => p.id === previousId);
-
 		const provider: CustomProvider = {
 			id,
-			name: GRIPHUB_NAME,
+			name: String(input.name ?? "").trim() || id,
 			api,
 			baseUrl,
 			apiKey: String(input.apiKey ?? "").trim() || previous?.apiKey || "",
 			models,
 		};
-		this.providers = [...this.providers.filter((p) => p.id !== previousId), provider];
+		this.providers = [...this.providers.filter((p) => p.id !== previousId && p.id !== id), provider];
 		this.persist(previousId === id ? [] : [previousId]);
 		return provider;
 	}
@@ -185,8 +190,6 @@ export class CustomProviders {
 		}
 		const providers = { ...(config.providers ?? {}) };
 		for (const id of removed) delete providers[id];
-		// Locked build: models.json serves GripHub only; drop anything else.
-		for (const id of Object.keys(providers)) if (id !== GRIPHUB_ID) delete providers[id];
 		for (const p of this.providers) {
 			providers[p.id] = {
 				name: p.name,
@@ -200,6 +203,7 @@ export class CustomProviders {
 					...(m.maxTokens ? { maxTokens: requestedOutput(m) } : {}),
 					...(m.reasoning ? { reasoning: true, thinkingLevelMap: thinkingLevels(m, p.api) } : {}),
 					...(m.input?.length ? { input: m.input } : {}),
+					...(m.cost ? { cost: m.cost } : {}),
 				})),
 			};
 		}
@@ -255,6 +259,29 @@ export function capabilitiesOf(m: any): Omit<CustomModel, "id" | "name"> {
 	const contextWindow = context && prompt ? Math.min(context, prompt) : (context ?? prompt);
 
 	const canDisable = flag(caps.thinkingCanDisable, caps.reasoningCanDisable);
+	// Prices, where the catalog gives them: a pi-style cost object (USD per 1M
+	// tokens), or OpenRouter's pricing (USD per token). Cache prices fall back
+	// to the input price when the catalog does not split them out.
+	const price = (v: unknown) => {
+		const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+		return Number.isFinite(n) && n >= 0 ? n : undefined;
+	};
+	let cost: CustomModel["cost"];
+	if (m.cost && typeof m.cost === "object") {
+		cost = cleanCost(m.cost);
+	} else if (m.pricing && typeof m.pricing === "object") {
+		const input = price(m.pricing.prompt);
+		const output = price(m.pricing.completion);
+		if (input !== undefined && output !== undefined) {
+			const per1M = (x: number) => Math.round(x * 1_000_000 * 1e6) / 1e6;
+			cost = {
+				input: per1M(input),
+				output: per1M(output),
+				cacheRead: per1M(price(m.pricing.input_cache_read) ?? input),
+				cacheWrite: per1M(price(m.pricing.input_cache_write) ?? input),
+			};
+		}
+	}
 	return {
 		contextWindow,
 		maxTokens: first(
@@ -269,6 +296,7 @@ export function capabilitiesOf(m: any): Omit<CustomModel, "id" | "name"> {
 		...(reasoning && canDisable !== undefined && { canDisableThinking: canDisable }),
 		...(reasoning && flag(caps.thinkingEffortSupported, caps.reasoningEffortSupported) === false && { effort: false }),
 		...(vision && { input: ["text", "image"] }),
+		...(cost && { cost }),
 	};
 }
 
@@ -287,8 +315,8 @@ function requestedOutput(m: CustomModel) {
  * Which of pi's thinking levels a custom reasoning model offers. "minimal" is an OpenAI-only effort, so it is off
  * the list; models that always think lose "off". When the endpoint says thinking can be turned off, "off" is
  * sent explicitly as reasoning_effort "none" on OpenAI-style APIs, rather than leaving the model at its default.
- * The full low/medium/high ladder stays available even when the catalog claims effort is unsupported: GripHub's
- * metadata uses that flag for "not advertised", while its endpoints accept the standard effort values (medium
+ * The full low/medium/high ladder stays available even when the catalog claims effort is unsupported: some
+ * catalogs use that flag for "not advertised", while their endpoints accept the standard effort values (medium
  * already goes out on every request today). pi only offers xhigh ("Max" in the app) when the map names the
  * level, so OpenAI-style APIs map it explicitly.
  */
@@ -352,8 +380,8 @@ export async function fetchModels(api: ProviderApi, baseUrl: string, apiKey: str
 		const id = typeof m === "string" ? m : String(m.id ?? m.name ?? "");
 		if (!id) continue;
 		// Image (and other non-chat) models are not chat models: pi would offer
-		// them in the model picker and the chat would fail. GripHub marks them
-		// with kind; listImageModels returns them for the image screen.
+		// them in the model picker and the chat would fail. Some catalogs mark
+		// them with kind; listImageModels returns them for the image screen.
 		if (typeof m === "object" && isNonChat(m)) continue;
 		if (typeof m === "string") {
 			models.push({ id });
@@ -370,7 +398,7 @@ function isNonChat(m: any) {
 	return kind === "image" || kind === "video" || kind === "embedding" || kind === "audio";
 }
 
-/** The endpoint's image models (`kind: "image"` on GripHub), id and name. */
+/** The endpoint's image models (`kind: "image"` in its catalog), id and name. */
 export async function listImageModels(baseUrl: string, apiKey: string): Promise<{ id: string; name: string }[]> {
 	const res = await fetch(`${cleanUrl(baseUrl)}/models`, {
 		headers: { accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
@@ -388,7 +416,7 @@ export async function listImageModels(baseUrl: string, apiKey: string): Promise<
 export async function generateImage(baseUrl: string, apiKey: string, model: string, prompt: string, size: string): Promise<string> {
 	const base = cleanUrl(baseUrl);
 	if (!/^https?:\/\/[^/]+/.test(base)) throw new Error("Enter a full base URL (https://…)");
-	if (!apiKey) throw new Error("Connect GripHub first: no API key saved.");
+	if (!apiKey) throw new Error("No API key saved for this provider.");
 	if (!prompt.trim()) throw new Error("Prompt is empty");
 	// Image work takes 20–120s; the long timeout is deliberate. No auto-retry:
 	// a timed-out request may still have produced (and billed) an image server-side.
