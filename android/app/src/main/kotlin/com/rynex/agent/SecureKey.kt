@@ -1,4 +1,4 @@
-package com.imtaqin.andropi
+package com.rynex.agent
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
@@ -17,8 +17,8 @@ import javax.crypto.spec.GCMParameterSpec
  * key, so a copy of the app's files alone can't reveal the tokens.
  */
 object SecureKey {
-    private const val ALIAS = "andropi_store"
-    private const val PREFS = "andropi_secure"
+    private const val ALIAS = "rynex_store"
+    private const val PREFS = "rynex_secure"
 
     @Synchronized
     fun hex(context: Context): String {

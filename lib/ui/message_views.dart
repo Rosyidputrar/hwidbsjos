@@ -9,6 +9,7 @@ import 'package:markdown/markdown.dart' as md;
 
 import '../agent/models.dart';
 import 'code_view.dart';
+import 'i18n.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
 import 'theme.dart';
@@ -25,21 +26,23 @@ class UserMessageView extends StatelessWidget {
     final p = context.palette;
     return Align(
       alignment: Alignment.centerRight,
+      // Tap or hold for edit & resend, fork and copy.
       child: GestureDetector(
+        onTap: onLongPress,
         onLongPress: onLongPress,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: p.raised,
+              color: p.accent.withValues(alpha: 0.12),
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(20),
-                topRight: Radius.circular(20),
-                bottomLeft: Radius.circular(20),
+                topLeft: Radius.circular(Radii.lg),
+                topRight: Radius.circular(Radii.lg),
+                bottomLeft: Radius.circular(Radii.lg),
                 bottomRight: Radius.circular(6),
               ),
-              border: Border.all(color: p.accent.withValues(alpha: 0.18)),
+              border: Border.all(color: p.accent.withValues(alpha: 0.22)),
             ),
             // Plain text so the long-press menu wins over text selection.
             child: Text(entry.text, style: Theme.of(context).textTheme.bodyLarge),
@@ -83,7 +86,7 @@ class AssistantMessageView extends StatelessWidget {
     if (entry.streaming && children.isEmpty) children.add(const _Pending());
     if (entry.error != null) children.add(_ErrorNote(entry.error!));
     if (entry.aborted) {
-      children.add(Text('Stopped', style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint)));
+      children.add(Text(tr('Stopped'), style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint)));
     }
     final reply = [
       for (final b in blocks)
@@ -305,7 +308,9 @@ class _ThinkingViewState extends State<ThinkingView> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(widget.live ? 'Thinking' : 'Thought process', style: label),
+                Icon(LucideIcons.brain, size: 14, color: widget.live ? p.accent : p.muted),
+                const SizedBox(width: 6),
+                Text(widget.live ? tr('Thinking') : tr('Thought process'), style: label),
                 const SizedBox(width: 4),
                 AnimatedRotation(
                   turns: open ? 0.25 : 0,
@@ -325,7 +330,7 @@ class _ThinkingViewState extends State<ThinkingView> {
                   margin: const EdgeInsets.only(top: 6),
                   padding: const EdgeInsets.only(left: 12),
                   decoration: BoxDecoration(
-                    border: Border(left: BorderSide(color: p.border, width: 2)),
+                    border: Border(left: BorderSide(color: p.accent.withValues(alpha: 0.4), width: 2)),
                   ),
                   child: SelectableText(
                     widget.text.trim(),
@@ -440,15 +445,16 @@ class _ToolCallViewState extends State<ToolCallView> {
     };
 
     return Container(
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: p.border),
+        color: p.surface,
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border.all(color: status == ToolStatus.failed ? p.danger.withValues(alpha: 0.4) : p.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(12),
             onTap: () => setState(() => open = !open),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
@@ -478,7 +484,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                         foregroundColor: p.text,
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                        textStyle: const TextStyle(fontFamily: 'Geist', fontSize: 12, fontWeight: FontWeight.w500),
                       ),
                       icon: const Icon(LucideIcons.play, size: 16),
                       label: Text(writing ? 'Live' : 'Preview'),
@@ -579,8 +585,9 @@ class _ErrorNote extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: p.danger.withValues(alpha: 0.4)),
+        color: p.danger.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border.all(color: p.danger.withValues(alpha: 0.35)),
       ),
       child: SelectableText(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.danger)),
     );

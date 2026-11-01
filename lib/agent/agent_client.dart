@@ -10,8 +10,8 @@ class AgentClient {
     _events.receiveBroadcastStream().listen(_onPlatformEvent);
   }
 
-  static const _method = MethodChannel('andropi/agent');
-  static const _events = EventChannel('andropi/agent/events');
+  static const _method = MethodChannel('rynex/agent');
+  static const _events = EventChannel('rynex/agent/events');
 
   final _records = StreamController<Map<String, dynamic>>.broadcast();
   final _pending = <int, Completer<dynamic>>{};
@@ -72,7 +72,7 @@ class AgentClient {
   /// Opens the Android share sheet for a file.
   Future<void> shareFile(String path) => _method.invokeMethod('shareFile', {'path': path});
 
-  /// Copies a file into the phone's Download/AndroPI folder; returns where it landed.
+  /// Copies a file into the phone's Download/Rynex folder; returns where it landed.
   Future<String> saveToDownloads(String path) async =>
       (await _method.invokeMethod<String>('saveToDownloads', {'path': path}))!;
 

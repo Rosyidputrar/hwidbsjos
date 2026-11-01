@@ -1,4 +1,4 @@
-package com.imtaqin.andropi
+package com.rynex.agent
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager

@@ -3,6 +3,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'i18n.dart';
+import 'kit.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
 
@@ -55,13 +57,14 @@ class _ModelSheetState extends State<_ModelSheet> {
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 child: Row(
                   children: [
-                    Expanded(child: Text('Model', style: text.titleLarge)),
-                    TextButton(
+                    Expanded(child: Text(tr('Model'), style: text.titleLarge)),
+                    TextButton.icon(
                       onPressed: () {
                         final nav = Navigator.of(context)..pop();
                         nav.push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
                       },
-                      child: const Text('Providers'),
+                      icon: const Icon(LucideIcons.plugZap, size: 16),
+                      label: Text(tr('Providers')),
                     ),
                   ],
                 ),
@@ -70,9 +73,9 @@ class _ModelSheetState extends State<_ModelSheet> {
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                 child: TextField(
                   onChanged: (v) => setState(() => query = v),
-                  decoration: const InputDecoration(
-                    hintText: 'Search models',
-                    prefixIcon: Icon(LucideIcons.search, size: 18),
+                  decoration: InputDecoration(
+                    hintText: tr('Search models'),
+                    prefixIcon: const Icon(LucideIcons.search, size: 18),
                   ),
                 ),
               ),
@@ -82,7 +85,7 @@ class _ModelSheetState extends State<_ModelSheet> {
                         child: Padding(
                           padding: const EdgeInsets.all(32),
                           child: Text(
-                            'No models yet. Connect a provider to see its models here.',
+                            tr('No models yet. Connect a provider to see its models here.'),
                             style: text.bodyMedium?.copyWith(color: p.muted),
                             textAlign: TextAlign.center,
                           ),
@@ -95,7 +98,13 @@ class _ModelSheetState extends State<_ModelSheet> {
                           for (final entry in byProvider.entries) ...[
                             Padding(
                               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-                              child: Text((names[entry.key] ?? entry.key).toUpperCase(), style: text.labelSmall),
+                              child: Row(
+                                children: [
+                                  BrandTile(id: entry.key, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text((names[entry.key] ?? entry.key).toUpperCase(), style: text.labelSmall),
+                                ],
+                              ),
                             ),
                             for (final m in entry.value) _ModelTile(model: m, agent: agent),
                           ],
@@ -124,14 +133,24 @@ class _ModelTile extends StatelessWidget {
       if (model.reasoning) 'reasoning',
       if (model.acceptsImages) 'vision',
     ].join('  ·  ');
-    return ListTile(
-      onTap: () async {
-        Navigator.of(context).pop();
-        await agent.setModel(model);
-      },
-      title: Text(model.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: details.isEmpty ? null : Text(details),
-      trailing: selected ? Icon(LucideIcons.check, size: 18, color: p.text) : null,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: ListTile(
+        selected: selected,
+        onTap: () async {
+          Navigator.of(context).pop();
+          await agent.setModel(model);
+        },
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        title: Text(
+          model.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: p.text),
+        ),
+        subtitle: details.isEmpty ? null : Text(details),
+        trailing: selected ? Icon(LucideIcons.circleCheck, size: 20, color: p.accent) : null,
+      ),
     );
   }
 }

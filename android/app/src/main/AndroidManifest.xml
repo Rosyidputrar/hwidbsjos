@@ -11,13 +11,13 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
 
     <application
-        android:label="AndroPI"
+        android:label="Rynex AI"
         android:extractNativeLibs="true"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="com.imtaqin.andropi.files"
+            android:authorities="com.rynex.agent.files"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
@@ -55,7 +55,7 @@
                 <data android:mimeType="*/*"/>
             </intent-filter>
         </activity>
-        <receiver android:name=".QuickWidget" android:exported="false" android:label="AndroPI">
+        <receiver android:name=".QuickWidget" android:exported="false" android:label="Rynex AI">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>

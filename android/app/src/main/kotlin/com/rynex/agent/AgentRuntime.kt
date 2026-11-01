@@ -1,4 +1,4 @@
-package com.imtaqin.andropi
+package com.rynex.agent
 
 import android.content.Context
 import android.os.Handler
@@ -77,7 +77,7 @@ object AgentRuntime {
         val env = linkedMapOf(
             "HOME" to home.path,
             "PI_CODING_AGENT_DIR" to agentDir.path,
-            "ANDROPI_WORKSPACE" to workspace.path,
+            "RYNEX_WORKSPACE" to workspace.path,
             "TMPDIR" to tmp.path,
             "PATH" to "${bin.path}:/system/bin:/system/xbin",
             "LD_LIBRARY_PATH" to nativeDir.path,
@@ -85,7 +85,7 @@ object AgentRuntime {
             "TERM" to "dumb",
             "LANG" to "en_US.UTF-8",
             "PI_SKIP_VERSION_CHECK" to "1",
-            // AndroPI sends no telemetry; keep pi's install ping off even if a future version bundles it.
+            // Rynex sends no telemetry; keep pi's install ping off even if a future version bundles it.
             "PI_TELEMETRY" to "0",
             "NODE_OPTIONS" to "--max-old-space-size=1024",
             // The Termux builds look under /data/data/com.termux; point them at ours.
@@ -96,11 +96,11 @@ object AgentRuntime {
             "PAGER" to "cat",
             "GIT_SSH_COMMAND" to "ssh -o UserKnownHostsFile=${home.path}/.ssh/known_hosts",
             // Linux container (see tool/box.sh); the rootfs is installed on demand.
-            "ANDROPI_HOME" to home.path,
-            "ANDROPI_FILES" to context.filesDir.path,
-            "ANDROPI_ROOTFS" to File(context.filesDir, "linux/rootfs").path,
-            "ANDROPI_PROOT" to File(nativeDir, "libproot.so").path,
-            "ANDROPI_PROOT_LOADER" to File(nativeDir, "libproot_loader.so").path,
+            "RYNEX_HOME" to home.path,
+            "RYNEX_FILES" to context.filesDir.path,
+            "RYNEX_ROOTFS" to File(context.filesDir, "linux/rootfs").path,
+            "RYNEX_PROOT" to File(nativeDir, "libproot.so").path,
+            "RYNEX_PROOT_LOADER" to File(nativeDir, "libproot_loader.so").path,
         )
         if (caFile.length() > 0) {
             env["NODE_EXTRA_CA_CERTS"] = caFile.path

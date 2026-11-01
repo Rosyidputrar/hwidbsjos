@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import 'i18n.dart';
 import 'kit.dart';
 import 'illustration.dart';
 import 'theme.dart';
 
-/// First-run welcome: what AndroPI is, then straight to connecting a model.
+/// First-run welcome: what Rynex is, then straight to connecting a model.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key, required this.agent});
   final AgentController agent;
@@ -19,14 +21,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int page = 0;
 
   static const _slides = [
-    ('ai', 'Boost your\nproductivity', 'Chat with a coding agent that runs right on your phone.'),
-    ('linux', 'Real Linux,\nin your pocket', 'Install Python, Node and more with apt. No root needed.'),
-    ('search', 'Search, build\nand preview', 'pi looks things up on the web and shows your pages live.'),
-    ('launch', 'Ship it\nanywhere', 'Deploy to Vercel, GitHub Pages or your own server.'),
+    ('ai', LucideIcons.sparkles, 'Boost your\nproductivity', 'Chat with a coding agent that runs right on your phone.'),
+    (
+      'linux',
+      LucideIcons.squareTerminal,
+      'Real Linux,\nin your pocket',
+      'Install Python, Node and more with apt. No root needed.',
+    ),
+    (
+      'search',
+      LucideIcons.globe,
+      'Search, build\nand preview',
+      'pi looks things up on the web and shows your pages live.',
+    ),
+    ('launch', LucideIcons.rocket, 'Ship it\nanywhere', 'Deploy to Vercel, GitHub Pages or your own server.'),
   ];
 
   // Home takes over from here and offers to connect a model if none is set.
   void _start() => Appearance.instance.finishOnboarding();
+
+  @override
+  void dispose() {
+    pages.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,93 +52,90 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final text = Theme.of(context).textTheme;
     final last = page == _slides.length - 1;
     return Scaffold(
-      body: Stack(
-        children: [
-          // Soft colour washes behind everything, like the cards' mesh art.
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                  child: Row(
-                    children: [
-                      Material(
-                        color: p.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: _start,
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                            child: Text('Skip', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: PageView.builder(
-                    controller: pages,
-                    itemCount: _slides.length,
-                    onPageChanged: (i) => setState(() => page = i),
-                    itemBuilder: (context, i) {
-                      final (art, title, body) = _slides[i];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 28),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _Hero(illustration: art),
-                            const SizedBox(height: 40),
-                            Text(title, textAlign: TextAlign.center, style: text.displayMedium),
-                            const SizedBox(height: 14),
-                            Text(
-                              body,
-                              textAlign: TextAlign.center,
-                              style: text.bodyLarge?.copyWith(color: p.muted),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < _slides.length; i++)
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: i == page ? const Color(0xFF3E63DD) : Colors.transparent,
-                          border: Border.all(color: i == page ? const Color(0xFF3E63DD) : p.faint, width: 1.5),
-                        ),
-                      ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 10),
-                  child: PrimaryButton(
-                    label: last ? 'Get started' : 'Next',
-                    onPressed: last
-                        ? _start
-                        : () => pages.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: StorysetCredit(openUrl: widget.agent.client.openUrl),
-                ),
-              ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.md, 0),
+              child: Row(
+                children: [
+                  const LogoMark(size: 28),
+                  const SizedBox(width: Space.sm),
+                  Text('Rynex', style: text.titleMedium),
+                  const Spacer(),
+                  if (!last)
+                    TextButton(
+                      onPressed: _start,
+                      style: TextButton.styleFrom(foregroundColor: p.muted),
+                      child: Text(tr('Skip')),
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+            Expanded(
+              child: PageView.builder(
+                controller: pages,
+                itemCount: _slides.length,
+                onPageChanged: (i) => setState(() => page = i),
+                itemBuilder: (context, i) {
+                  final (art, icon, title, body) = _slides[i];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: Space.page),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Hero(illustration: art),
+                        const SizedBox(height: Space.xxl),
+                        IconTile(icon: icon, size: 36),
+                        const SizedBox(height: Space.lg),
+                        Text(tr(title), style: text.displayMedium),
+                        const SizedBox(height: Space.md),
+                        Text(tr(body), style: text.bodyLarge?.copyWith(color: p.muted)),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.page, Space.lg, Space.page, Space.md),
+              child: Row(
+                children: [
+                  // Progress: one bar per slide, the current one stretched.
+                  for (var i = 0; i < _slides.length; i++)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      margin: const EdgeInsets.only(right: 6),
+                      width: i == page ? 28 : 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: i <= page ? p.accent : p.border,
+                        borderRadius: BorderRadius.circular(Radii.pill),
+                      ),
+                    ),
+                  const Spacer(),
+                  SizedBox(
+                    width: 170,
+                    child: PrimaryButton(
+                      label: last ? tr('Get started') : tr('Next'),
+                      icon: last ? LucideIcons.arrowRight : null,
+                      onPressed: last
+                          ? _start
+                          : () =>
+                                pages.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: Space.sm),
+              child: StorysetCredit(openUrl: widget.agent.client.openUrl),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -133,40 +148,20 @@ class _Hero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return SizedBox(
-      width: 300,
+    return Container(
       height: 280,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // A soft blob behind the scene.
-          Container(
-            width: 270,
-            height: 250,
-            decoration: BoxDecoration(
-              color: p.accent.withValues(alpha: 0.12),
-              borderRadius: const BorderRadius.all(Radius.elliptical(150, 125)),
-            ),
-          ),
-          Illustration(illustration, height: 270),
-          const Positioned(left: 4, top: 60, child: _Dot(color: Color(0xFF3E63DD), size: 14)),
-          const Positioned(right: 2, top: 30, child: _Dot(color: Color(0xFFFF8C42), size: 8)),
-          const Positioned(right: 10, bottom: 80, child: _Dot(color: Color(0xFF30A46C), size: 12)),
-        ],
+      width: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(Radii.xl),
+        border: Border.all(color: p.border),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [p.accent.withValues(alpha: 0.16), p.surface],
+        ),
       ),
+      padding: const EdgeInsets.all(Space.lg),
+      child: Illustration(illustration, height: 248),
     );
   }
-}
-
-class _Dot extends StatelessWidget {
-  const _Dot({required this.color, required this.size});
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-  );
 }

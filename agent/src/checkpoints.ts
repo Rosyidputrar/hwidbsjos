@@ -35,7 +35,7 @@ export class Checkpoints {
 
 	private repo(cwd: string) {
 		const dir = join(this.root, createHash("sha1").update(cwd).digest("hex").slice(0, 16));
-		return { dir, env: { GIT_DIR: dir, GIT_WORK_TREE: cwd, GIT_AUTHOR_NAME: "AndroPI", GIT_AUTHOR_EMAIL: "andropi@local", GIT_COMMITTER_NAME: "AndroPI", GIT_COMMITTER_EMAIL: "andropi@local" } };
+		return { dir, env: { GIT_DIR: dir, GIT_WORK_TREE: cwd, GIT_AUTHOR_NAME: "Rynex", GIT_AUTHOR_EMAIL: "rynex@local", GIT_COMMITTER_NAME: "Rynex", GIT_COMMITTER_EMAIL: "rynex@local" } };
 	}
 
 	private async ensure(cwd: string) {

@@ -22,7 +22,7 @@ const piVersion = JSON.parse(
 // 1. Production install of the same pi version into a clean staging dir.
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
-writeFileSync(join(stage, "package.json"), JSON.stringify({ name: "andropi-agent", private: true, type: "module" }));
+writeFileSync(join(stage, "package.json"), JSON.stringify({ name: "rynex-agent", private: true, type: "module" }));
 execSync(`npm install --omit=dev --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@${piVersion}`, {
 	cwd: stage,
 	stdio: "inherit",
@@ -102,7 +102,7 @@ await build({
 	logLevel: "warning",
 });
 cpSync(join(stage, "package.json"), join(out, "package.json"));
-// Skills AndroPI ships with; the host seeds them into <agentDir>/skills.
+// Skills Rynex ships with; the host seeds them into <agentDir>/skills.
 cpSync(join(here, "skills"), join(out, "skills"), { recursive: true });
 cpSync(join(stage, "node_modules"), join(out, "node_modules"), { recursive: true });
 

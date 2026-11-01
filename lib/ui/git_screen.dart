@@ -797,16 +797,19 @@ class _TabChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Material(
-      color: selected ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(99),
+      color: selected ? p.accent.withValues(alpha: 0.14) : p.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.pill),
+        side: BorderSide(color: selected ? p.accent.withValues(alpha: 0.4) : p.border),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
           child: Text(
             label,
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.inverse : p.text),
+            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.accent : p.text),
           ),
         ),
       ),
@@ -958,7 +961,7 @@ class _BranchSheetState extends State<_BranchSheet> {
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    style: IconButton.styleFrom(backgroundColor: p.text, foregroundColor: p.inverse),
+                    style: IconButton.styleFrom(backgroundColor: p.accent, foregroundColor: p.onAccent),
                     tooltip: 'Create branch',
                     onPressed: name.isEmpty || _busy != null ? null : () => _checkout(name, create: true),
                     icon: const Icon(LucideIcons.plus, size: 18),

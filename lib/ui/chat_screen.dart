@@ -7,17 +7,14 @@ import '../agent/models.dart';
 import '../agent/features.dart';
 import 'i18n.dart';
 import 'chat_extras.dart';
-import 'deploy_sheet.dart';
 import 'message_views.dart';
 
 import 'package:simple_icons/simple_icons.dart';
 
 import 'repos_screen.dart';
 import 'kit.dart';
-import 'illustration.dart';
 import 'model_sheet.dart';
 import 'tasks_screen.dart';
-import 'terminal_screen.dart';
 import 'settings_screen.dart';
 import 'folder_picker.dart';
 import 'theme.dart';
@@ -211,37 +208,27 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Long-press on one of your messages: edit & resend, fork, copy.
   Future<void> _userMenu(UserEntry entry, int userIndex) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: SettingsGroup(
-            children: [
-              SettingsRow(
-                icon: LucideIcons.pencil,
-                color: const Color(0xFF3E63DD),
-                title: tr('Edit & resend'),
-                subtitle: tr('Rewind to this message and change it'),
-                onTap: () => Navigator.pop(context, 'edit'),
-              ),
-              SettingsRow(
-                icon: LucideIcons.gitFork,
-                color: const Color(0xFF7C5CFC),
-                title: tr('Fork from here'),
-                subtitle: tr('A new chat that branches off before this message'),
-                onTap: () => Navigator.pop(context, 'fork'),
-              ),
-              SettingsRow(
-                icon: LucideIcons.copy,
-                color: const Color(0xFF6B6B73),
-                title: tr('Copy'),
-                onTap: () => Navigator.pop(context, 'copy'),
-              ),
-            ],
-          ),
+    final action = await showActionSheet<String>(
+      context,
+      actions: [
+        (
+          icon: LucideIcons.pencil,
+          title: tr('Edit & resend'),
+          subtitle: tr('Rewind to this message and change it'),
+          value: 'edit',
+          destructive: false,
+          enabled: true,
         ),
-      ),
+        (
+          icon: LucideIcons.gitFork,
+          title: tr('Fork from here'),
+          subtitle: tr('A new chat that branches off before this message'),
+          value: 'fork',
+          destructive: false,
+          enabled: true,
+        ),
+        (icon: LucideIcons.copy, title: tr('Copy'), subtitle: null, value: 'copy', destructive: false, enabled: true),
+      ],
     );
     if (action == null || !mounted) return;
     if (action == 'copy') {
@@ -283,24 +270,21 @@ class _ChatScreenState extends State<ChatScreen> {
               : null,
           title: _Title(agent: agent),
           actions: [
-            IconButton(
-              tooltip: tr('Terminal'),
-              icon: const Icon(LucideIcons.squareTerminal, size: 20),
-              onPressed: () =>
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => TerminalScreen(agent: agent))),
+            AppIconButton(
+              icon: LucideIcons.layoutGrid,
+              label: tr('Workspace'),
+              size: 38,
+              onTap: () => showProjectTools(context, agent, onPrompt: _prefill),
             ),
-            IconButton(
-              tooltip: tr('Deploy'),
-              icon: const Icon(LucideIcons.rocket, size: 20),
-              onPressed: agent.busy ? null : () => showDeploySheet(context, agent),
-            ),
-            IconButton(
-              tooltip: tr('Project tools'),
-              icon: const Icon(LucideIcons.layoutGrid, size: 20),
-              onPressed: () => showProjectTools(context, agent, onPrompt: _prefill),
-            ),
-            const SizedBox(width: 4),
+            const SizedBox(width: Space.md),
           ],
+          // A thin running bar while pi works; a hairline otherwise.
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(2),
+            child: agent.busy
+                ? LinearProgressIndicator(minHeight: 2, backgroundColor: p.border)
+                : Divider(height: 2, thickness: 1, color: p.border),
+          ),
         ),
         body: Column(
           children: [
@@ -311,11 +295,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       ? _EmptyState(
                           agent: agent,
                           onConnect: _connectProvider,
-                          onPrompt: (prompt) {
-                            input.text = prompt;
-                            input.selection = TextSelection.collapsed(offset: prompt.length);
-                            focus.requestFocus();
-                          },
+                          onPrompt: _prefill,
                           onClone: () =>
                               Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReposScreen(agent: agent))),
                         )
@@ -342,11 +322,12 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                   if (!followBottom)
                     Positioned(
-                      right: 16,
-                      bottom: 12,
-                      child: _RoundButton(
+                      right: Space.lg,
+                      bottom: Space.md,
+                      child: AppIconButton(
                         icon: LucideIcons.arrowDown,
                         label: tr('Scroll to bottom'),
+                        size: 38,
                         onTap: () => _jumpToBottom(animate: true),
                       ),
                     ),
@@ -360,7 +341,7 @@ class _ChatScreenState extends State<ChatScreen> {
               SlashMenu(commands: slash!, query: _slashQuery!, onPick: (c) => _prefill('/${c.name} ')),
             if (agent.billingNotice != null)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                padding: const EdgeInsets.fromLTRB(Space.lg, Space.xs, Space.lg, 0),
                 child: Text(
                   agent.billingNotice!,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
@@ -388,16 +369,24 @@ class _ChatScreenState extends State<ChatScreen> {
     final entries = agent.entries;
     return ListView.builder(
       controller: scroll,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, Space.xl),
       itemCount: entries.length,
       itemBuilder: (context, i) {
         final e = entries[i];
+        // pi's replies get a small byline at the start of each turn.
+        final turnStart = i == 0 || entries[i - 1] is UserEntry;
         final child = switch (e) {
           UserEntry() => UserMessageView(
             e,
             onLongPress: () => _userMenu(e, entries.take(i).whereType<UserEntry>().length),
           ),
-          AssistantEntry() => AssistantMessageView(e, tools: agent.tools, cwd: agent.cwd, live: agent),
+          AssistantEntry() => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (turnStart) const _Byline(),
+              AssistantMessageView(e, tools: agent.tools, cwd: agent.cwd, live: agent),
+            ],
+          ),
           NoticeEntry() => NoticeView(e),
         };
         final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
@@ -406,6 +395,29 @@ class _ChatScreenState extends State<ChatScreen> {
           child: child,
         );
       },
+    );
+  }
+}
+
+/// "pi" with the logo, above the first reply of a turn.
+class _Byline extends StatelessWidget {
+  const _Byline();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.sm),
+      child: Row(
+        children: [
+          const LogoMark(size: 20),
+          const SizedBox(width: 6),
+          Text(
+            'pi',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.text),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -419,40 +431,48 @@ class _Title extends StatelessWidget {
     final p = context.palette;
     final name = agent.sessionName?.trim();
     final firstUser = agent.entries.whereType<UserEntry>().firstOrNull?.text.split('\n').first;
-    final title = (name != null && name.isNotEmpty) ? name : (firstUser ?? 'New chat');
+    final title = (name != null && name.isNotEmpty) ? name : (firstUser ?? tr('New chat'));
     // Sessions inside a project folder show which one.
     final project = sessionFolder(agent.cwd, agent.info['workspace'] as String? ?? '');
+    final sub = TextStyle(fontSize: 11.5, color: p.muted, fontWeight: FontWeight.w500);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        if (project != null || agent.model != null)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (project != null) ...[
-                Icon(LucideIcons.folderGit2, size: 12, color: p.accent),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    project,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.muted),
-                  ),
-                ),
-              ] else
-                Flexible(
-                  child: Text(
-                    agent.model!.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11.5, color: p.faint, fontWeight: FontWeight.w500),
-                  ),
-                ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (agent.busy) ...[
+              StatusDot(color: p.warning, size: 6, pulse: true),
+              const SizedBox(width: 5),
+              Text(tr('Working'), style: sub.copyWith(color: p.warning)),
+              const SizedBox(width: 6),
             ],
-          ),
+            if (project != null) ...[
+              Icon(LucideIcons.folderGit2, size: 12, color: p.accent),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  project,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: sub.copyWith(fontFamily: mono, fontWeight: FontWeight.w400),
+                ),
+              ),
+            ] else if (agent.model != null)
+              Flexible(
+                child: Text(
+                  agent.model!.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: sub.copyWith(color: p.faint),
+                ),
+              )
+            else if (!agent.busy)
+              Text(tr('Quick chat'), style: sub.copyWith(color: p.faint)),
+          ],
+        ),
       ],
     );
   }
@@ -473,7 +493,7 @@ class _EmptyState extends StatelessWidget {
     final suggestions = [
       (
         LucideIcons.layoutTemplate,
-        const Color(0xFF8B5CF6),
+        const Color(0xFFF97316),
         'Build a web app',
         'A polished single-page app I can preview',
         'Build me a polished, mobile-first web app: ',
@@ -496,59 +516,71 @@ class _EmptyState extends StatelessWidget {
     ];
     return LayoutBuilder(
       builder: (context, box) => SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+        padding: const EdgeInsets.fromLTRB(Space.page, Space.xl, Space.page, Space.lg),
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: box.maxHeight - 40),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Illustration('ai', height: 190),
-              const SizedBox(height: 24),
+              Center(
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  padding: const EdgeInsets.all(Space.md),
+                  decoration: BoxDecoration(
+                    color: p.surface,
+                    borderRadius: BorderRadius.circular(Radii.lg),
+                    border: Border.all(color: p.border),
+                  ),
+                  child: const LogoMark(size: 48),
+                ),
+              ),
+              const SizedBox(height: Space.xl),
               Text(
-                ready ? 'What should we build?' : 'Connect a model to begin',
-                style: text.displaySmall?.copyWith(fontSize: 26),
+                ready ? tr('What should we build?') : tr('Connect a model to begin'),
+                style: text.headlineSmall,
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: Space.sm),
               Text(
                 ready
-                    ? 'pi codes, runs commands, installs packages and deploys, right here on your phone.'
-                    : 'The agent runs on your phone. Sign in to a provider or add an API key to choose its model.',
+                    ? tr('pi codes, runs commands, installs packages and deploys, right here on your phone.')
+                    : tr('The agent runs on your phone. Sign in to a provider or add an API key to choose its model.'),
                 style: text.bodyMedium?.copyWith(color: p.muted),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: Space.xxl),
               if (!ready)
-                SizedBox(
-                  width: 260,
-                  child: PrimaryButton(label: tr('Connect a model'), icon: LucideIcons.sparkles, onPressed: onConnect),
+                Center(
+                  child: SizedBox(
+                    width: 260,
+                    child: PrimaryButton(
+                      label: tr('Connect a model'),
+                      icon: LucideIcons.sparkles,
+                      onPressed: onConnect,
+                    ),
+                  ),
                 )
-              else
-                GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.35,
+              else ...[
+                SectionLabel(tr('Try one of these'), padding: const EdgeInsets.fromLTRB(4, 0, 4, Space.sm)),
+                SettingsGroup(
                   children: [
                     for (final (icon, color, title, blurb, prompt) in suggestions)
-                      SurfaceCard(
-                        padding: const EdgeInsets.all(14),
-                        onTap: prompt == null ? onClone : () => onPrompt(prompt),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            IconTile(icon: icon, color: color, size: 32),
-                            const Spacer(),
-                            Text(title, style: text.titleSmall),
-                            const SizedBox(height: 2),
-                            Text(blurb, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodySmall),
-                          ],
+                      SettingsRow(
+                        leading: IconTile(icon: icon, color: color, size: 34),
+                        title: tr(title),
+                        subtitle: tr(blurb),
+                        trailing: Icon(
+                          prompt == null ? LucideIcons.arrowUpRight : LucideIcons.cornerDownLeft,
+                          size: 16,
+                          color: p.faint,
                         ),
+                        onTap: prompt == null ? onClone : () => onPrompt(prompt),
                       ),
                   ],
                 ),
+              ],
             ],
           ),
         ),
@@ -591,21 +623,24 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+        padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.md),
         child: ListenableBuilder(
           listenable: focus,
           builder: (context, child) => AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: focus.hasFocus ? p.accent.withValues(alpha: 0.55) : p.border),
+              borderRadius: BorderRadius.circular(Radii.lg),
+              border: Border.all(
+                color: focus.hasFocus ? p.accent.withValues(alpha: 0.7) : p.border,
+                width: focus.hasFocus ? 1.4 : 1,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: (focus.hasFocus ? p.accent : Colors.black).withValues(alpha: focus.hasFocus ? 0.18 : 0.12),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                  spreadRadius: -8,
+                  color: (focus.hasFocus ? p.accent : Colors.black).withValues(alpha: focus.hasFocus ? 0.14 : 0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                  spreadRadius: -6,
                 ),
               ],
             ),
@@ -627,78 +662,79 @@ class _Composer extends StatelessWidget {
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  contentPadding: const EdgeInsets.fromLTRB(18, 16, 18, 6),
+                  contentPadding: const EdgeInsets.fromLTRB(Space.lg, 14, Space.lg, 6),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                padding: const EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, Space.sm),
                 child: Row(
                   children: [
-                    _IconChip(icon: LucideIcons.plus, label: tr('Attach'), onTap: onAttach),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: _Chip(
-                        leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 20),
-                        label: agent.model?.name ?? 'Choose model',
-                        icon: LucideIcons.chevronsUpDown,
-                        onTap: onPickModel,
+                    // The options scroll sideways on narrow phones instead of squeezing the model name;
+                    // the right edge fades so it reads as scrollable.
+                    Expanded(
+                      child: ShaderMask(
+                        blendMode: BlendMode.dstIn,
+                        shaderCallback: (r) => const LinearGradient(
+                          colors: [Colors.white, Colors.white, Colors.transparent],
+                          stops: [0, 0.88, 1],
+                        ).createShader(r),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.only(right: Space.lg),
+                          child: Row(
+                            children: [
+                              AppIconButton(icon: LucideIcons.plus, label: tr('Attach'), size: 34, onTap: onAttach),
+                              const SizedBox(width: 6),
+                              AppChip(
+                                leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 22),
+                                label: agent.model?.name ?? tr('Choose model'),
+                                trailingIcon: LucideIcons.chevronsUpDown,
+                                maxWidth: 110,
+                                onTap: onPickModel,
+                              ),
+                              if (agent.thinkingLevels.length > 1) ...[
+                                const SizedBox(width: 6),
+                                _ThinkingChip(agent: agent),
+                              ],
+                              const SizedBox(width: 6),
+                              AppChip(
+                                icon: LucideIcons.listChecks,
+                                label: tr('Plan'),
+                                selected: agent.planMode,
+                                onTap: () => agent.setPlanMode(!agent.planMode),
+                              ),
+                              const SizedBox(width: 6),
+                              _ApprovalChip(agent: agent),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                    if (agent.thinkingLevels.length > 1) ...[const SizedBox(width: 6), _ThinkingChip(agent: agent)],
-                    const SizedBox(width: 6),
-                    _IconChip(
-                      icon: LucideIcons.listChecks,
-                      label: agent.planMode ? 'Plan mode on' : 'Plan mode',
-                      active: agent.planMode,
-                      onTap: () => agent.setPlanMode(!agent.planMode),
-                    ),
-                    const Spacer(),
+                    const SizedBox(width: Space.sm),
                     if (busy && !hasText)
-                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: true, onTap: agent.abort)
+                      AppIconButton(
+                        icon: LucideIcons.square,
+                        label: tr('Stop'),
+                        size: 38,
+                        filled: true,
+                        onTap: agent.abort,
+                      )
                     else if (!hasText)
-                      _RoundButton(icon: LucideIcons.mic, label: tr('Voice'), filled: false, onTap: onVoice)
+                      AppIconButton(icon: LucideIcons.mic, label: tr('Voice'), size: 38, onTap: onVoice)
                     else
-                      _RoundButton(
-                        onLongPress: onQueue,
+                      AppIconButton(
                         icon: LucideIcons.arrowUp,
                         label: tr('Send'),
+                        size: 38,
                         filled: true,
-                        onTap: hasText ? onSend : null,
+                        onTap: onSend,
+                        // Hold to hand the message to a background agent instead.
+                        onLongPress: onQueue,
                       ),
                   ],
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A round icon-only chip for composer actions.
-class _IconChip extends StatelessWidget {
-  const _IconChip({required this.icon, required this.label, required this.onTap, this.active = false});
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        button: true,
-        label: label,
-        child: Material(
-          color: active ? p.accent : p.raised,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox.square(dimension: 34, child: Icon(icon, size: 17, color: active ? Colors.white : p.text)),
           ),
         ),
       ),
@@ -718,124 +754,89 @@ class _ThinkingChip extends StatelessWidget {
       initialValue: agent.thinkingLevel,
       onSelected: agent.setThinking,
       position: PopupMenuPosition.over,
-      elevation: 0,
       itemBuilder: (_) => [
         for (final level in agent.thinkingLevels)
           PopupMenuItem(value: level, height: 40, child: Text(_levelLabel(level))),
       ],
       child: IgnorePointer(
-        child: _Chip(
-          leading: Icon(LucideIcons.brain, size: 14, color: on ? context.palette.accent : context.palette.muted),
-          label: _levelLabel(agent.thinkingLevel),
-          onTap: () {},
-        ),
+        child: AppChip(icon: LucideIcons.brain, label: _levelLabel(agent.thinkingLevel), selected: on, onTap: () {}),
       ),
     );
   }
 
   static String _levelLabel(String level) => switch (level) {
-    'off' => 'Off',
-    'minimal' => 'Minimal',
-    'low' => 'Low',
-    'medium' => 'Medium',
-    'high' => 'High',
-    'xhigh' => 'Max',
+    'off' => tr('Off'),
+    'minimal' => tr('Minimal'),
+    'low' => tr('Low'),
+    'medium' => tr('Medium'),
+    'high' => tr('High'),
+    'xhigh' => tr('Max'),
     _ => level,
   };
 }
 
-class _Chip extends StatelessWidget {
-  const _Chip({required this.label, required this.onTap, this.icon, this.leading});
-  final String label;
-  final VoidCallback onTap;
-  final IconData? icon;
-  final Widget? leading;
+/// The approval mode, visible and switchable right in the composer.
+class _ApprovalChip extends StatelessWidget {
+  const _ApprovalChip({required this.agent});
+  final AgentController agent;
+
+  static const _modes = ['ask_all', 'ask_risky', 'auto'];
+
+  static String _label(String mode) => switch (mode) {
+    'ask_all' => tr('Ask all'),
+    'auto' => tr('Bypass all'),
+    _ => tr('Risky only'),
+  };
+
+  static IconData _icon(String mode) => switch (mode) {
+    'ask_all' => LucideIcons.shieldCheck,
+    'auto' => LucideIcons.shieldOff,
+    _ => LucideIcons.shield,
+  };
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: p.raised,
-      borderRadius: BorderRadius.circular(99),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(99),
-        child: Container(
-          height: 34,
-          padding: EdgeInsets.fromLTRB(leading == null ? 12 : 6, 0, 10, 0),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (leading != null) ...[leading!, const SizedBox(width: 6)],
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.text),
+    final it = agent.integrations;
+    return ListenableBuilder(
+      listenable: it,
+      builder: (context, _) {
+        final mode = it.settings?.approvalMode ?? agent.approvalMode;
+        return PopupMenuButton<String>(
+          tooltip: tr('Approvals'),
+          initialValue: mode,
+          position: PopupMenuPosition.over,
+          onSelected: (v) async {
+            if (v == mode) return;
+            if (v == 'auto' && !await confirmBypass(context)) return;
+            await it.updateSettings({'approvalMode': v});
+            agent.approvalMode = v;
+          },
+          itemBuilder: (_) => [
+            for (final m in _modes)
+              PopupMenuItem(
+                value: m,
+                height: 44,
+                child: Row(
+                  children: [
+                    Icon(_icon(m), size: 16, color: m == 'auto' ? p.warning : p.muted),
+                    const SizedBox(width: Space.sm),
+                    Text(_label(m)),
+                  ],
                 ),
               ),
-              if (icon != null) ...[const SizedBox(width: 4), Icon(icon, size: 13, color: p.faint)],
-            ],
+          ],
+          child: IgnorePointer(
+            child: AppChip(
+              icon: _icon(mode),
+              label: _label(mode),
+              selected: mode == 'auto',
+              color: p.warning,
+              onTap: () {},
+            ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RoundButton extends StatelessWidget {
-  const _RoundButton({
-    required this.icon,
-    required this.onTap,
-    required this.label,
-    this.filled = false,
-    this.onLongPress,
-  });
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
-  final bool filled;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final enabled = onTap != null;
-    final active = filled && enabled;
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      label: label,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: active ? p.accent : (filled ? p.raised : p.surface),
-          border: filled ? null : Border.all(color: p.border),
-          boxShadow: active
-              ? [
-                  BoxShadow(
-                    color: p.accent.withValues(alpha: 0.45),
-                    blurRadius: 14,
-                    spreadRadius: -4,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            onLongPress: onLongPress,
-            child: Icon(icon, size: 18, color: active ? Colors.white : (filled ? p.faint : p.text)),
-          ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

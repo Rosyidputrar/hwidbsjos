@@ -1,9 +1,9 @@
 ---
 name: web-app
-description: Build polished web pages and small web apps the user can preview live inside AndroPI and deploy. Use for landing pages, tools, games, dashboards, prototypes, or any "make me a website/page/app" request.
+description: Build polished web pages and small web apps the user can preview live inside Rynex and deploy. Use for landing pages, tools, games, dashboards, prototypes, or any "make me a website/page/app" request.
 ---
 
-# Web apps in AndroPI
+# Web apps in Rynex
 
 The app shows a live preview of any `.html` file you write with the write or
 edit tool (a Preview button on the tool call). Design for that.

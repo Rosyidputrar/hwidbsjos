@@ -1,4 +1,4 @@
-package com.imtaqin.andropi
+package com.rynex.agent
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -41,7 +41,7 @@ class AgentService : Service() {
         )
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_agent)
-            .setContentTitle("AndroPI")
+            .setContentTitle("Rynex")
             .setContentText(intent?.getStringExtra("text") ?: "Agent is working")
             .setContentIntent(open)
             .setOngoing(true)

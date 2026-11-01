@@ -393,13 +393,16 @@ class _CheckpointChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final fg = selected ? p.inverse : p.text;
-    final sub = selected ? p.inverse.withValues(alpha: 0.7) : p.muted;
+    final fg = selected ? p.accent : p.text;
+    final sub = p.muted;
     return Material(
-      color: selected ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(18),
+      color: selected ? p.accent.withValues(alpha: 0.12) : p.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.md),
+        side: BorderSide(color: selected ? p.accent.withValues(alpha: 0.4) : p.border),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(Radii.md),
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minWidth: 120, maxWidth: 220),

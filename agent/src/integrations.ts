@@ -1,7 +1,7 @@
 /**
- * Accounts, repositories, SSH and deploy targets for the AndroPI app.
+ * Accounts, repositories, SSH and deploy targets for the Rynex app.
  *
- * Credentials live in <agentDir>/andropi/integrations.json (app-private
+ * Credentials live in <agentDir>/rynex/integrations.json (app-private
  * storage) and are exported into the host's environment, so the agent's own
  * shell can use them too (git push, curl the GitHub API, deploy).
  */
@@ -47,8 +47,8 @@ export interface AppSettings {
 
 const DEFAULT_SETTINGS: AppSettings = { dns: "cloudflare" };
 
-/** Client ID of the AndroPI GitHub OAuth App (device flow enabled). Public by design; no secret is used. */
-const GITHUB_CLIENT_ID = process.env.ANDROPI_GITHUB_CLIENT_ID ?? "Ov23lidVAetnaasSTbSU";
+/** Client ID of the Rynex GitHub OAuth App (device flow enabled). Public by design; no secret is used. */
+const GITHUB_CLIENT_ID = process.env.RYNEX_GITHUB_CLIENT_ID ?? "Ov23lidVAetnaasSTbSU";
 
 /** Line output, plus an optional channel for structured CI progress. */
 export type Log = ((line: string) => void) & { ci?: (snapshot: CiSnapshot) => void };
@@ -83,7 +83,7 @@ export class Integrations {
 		agentDir: string,
 		private readonly workspace: string,
 	) {
-		const dir = join(agentDir, "andropi");
+		const dir = join(agentDir, "rynex");
 		mkdirSync(dir, { recursive: true });
 		this.file = join(dir, "integrations.json");
 		this.home = process.env.HOME ?? agentDir;
@@ -249,7 +249,7 @@ export class Integrations {
 	private async githubOAuth(path: string, body: Record<string, string>) {
 		const res = await fetch(`https://github.com${path}`, {
 			method: "POST",
-			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "AndroPI" },
+			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Rynex" },
 			body: JSON.stringify(body),
 		});
 		const text = await res.text();
@@ -353,7 +353,7 @@ export class Integrations {
 		const key = join(this.home, ".ssh", "id_ed25519");
 		mkdirSync(join(this.home, ".ssh"), { recursive: true, mode: 0o700 });
 		if (!existsSync(key)) {
-			await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "andropi", "-f", key], { cwd: this.home });
+			await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "rynex", "-f", key], { cwd: this.home });
 		}
 		return readFileSync(`${key}.pub`, "utf8").trim();
 	}
@@ -386,8 +386,8 @@ export class Integrations {
 	/** Saved hosts become aliases in ~/.ssh/config so `ssh <name>` just works. */
 	private writeSshConfig() {
 		const file = join(this.home, ".ssh", "config");
-		const begin = "# >>> andropi hosts (managed) >>>";
-		const end = "# <<< andropi hosts <<<";
+		const begin = "# >>> rynex hosts (managed) >>>";
+		const end = "# <<< rynex hosts <<<";
 		let current = existsSync(file) ? readFileSync(file, "utf8") : "";
 		const a = current.indexOf(begin);
 		const b = current.indexOf(end);
@@ -671,7 +671,7 @@ export class Integrations {
 			log(`Creating GitHub repository ${gh.login}/${name}…`);
 			const repo = await this.github("/user/repos", {
 				method: "POST",
-				body: JSON.stringify({ name, private: false, description: "Deployed from AndroPI" }),
+				body: JSON.stringify({ name, private: false, description: "Deployed from Rynex" }),
 			}).catch(async (e) => {
 				if ((e as any).status === 422) return this.github(`/repos/${gh.login}/${name}`);
 				throw e;
@@ -687,7 +687,7 @@ export class Integrations {
 			const staged = (await quiet(["diff", "--cached", "--name-only"])).trim();
 			const hasHead = await quiet(["rev-parse", "--verify", "HEAD"]).then(() => true, () => false);
 			if (staged || !hasHead) {
-				await git(["commit", "--allow-empty", "-m", options.message || "Deploy from AndroPI"]);
+				await git(["commit", "--allow-empty", "-m", options.message || "Deploy from Rynex"]);
 			} else {
 				log("No changes to commit");
 			}

@@ -73,7 +73,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
     final recent = widget.agent.integrations.projects.take(4).toList();
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
+        padding: EdgeInsets.fromLTRB(Space.page, 0, Space.page, Space.lg + MediaQuery.viewInsetsOf(context).bottom),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -82,7 +82,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
               Text(tr('New chat'), style: text.titleLarge),
               const SizedBox(height: 4),
               Text(tr('Each chat can have its own folder to work in.'), style: text.bodySmall),
-              const SizedBox(height: 16),
+              const SizedBox(height: Space.lg),
               SurfaceCard(
                 highlight: true,
                 child: Column(
@@ -133,7 +133,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                 children: [
                   SettingsRow(
                     icon: LucideIcons.folderOpen,
-                    color: const Color(0xFF14B8A6),
+                    color: p.accent,
                     title: tr('Open a folder'),
                     subtitle: tr('Continue in an existing project folder'),
                     onTap: () => Navigator.pop(context, _pick),
@@ -148,19 +148,17 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                 ],
               ),
               if (recent.isNotEmpty) ...[
-                const SectionLabel('Recent projects', padding: EdgeInsets.fromLTRB(4, 20, 4, 8)),
+                SectionLabel(tr('Recent projects'), padding: const EdgeInsets.fromLTRB(4, Space.xl, 4, Space.sm)),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: Space.sm,
+                  runSpacing: Space.sm,
                   children: [
                     for (final pr in recent)
-                      ActionChip(
-                        avatar: Icon(pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder, size: 15, color: p.accent),
-                        label: Text(pr.name, style: const TextStyle(fontFamily: mono, fontSize: 12.5)),
-                        backgroundColor: p.raised,
-                        side: BorderSide(color: p.border),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
-                        onPressed: () => Navigator.pop(context, pr.path),
+                      AppChip(
+                        icon: pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder,
+                        label: pr.name,
+                        maxWidth: 160,
+                        onTap: () => Navigator.pop(context, pr.path),
                       ),
                   ],
                 ),

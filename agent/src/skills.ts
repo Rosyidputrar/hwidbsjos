@@ -1,6 +1,6 @@
 /**
  * Agent Skills (SKILL.md, https://agentskills.io) for pi: list, install from
- * skills.md, GitHub or a URL, remove, and seed the ones AndroPI ships with.
+ * skills.md, GitHub or a URL, remove, and seed the ones Rynex ships with.
  * Skills live in <agentDir>/skills/<name>/, where pi discovers them.
  */
 
@@ -21,7 +21,7 @@ interface Origin {
 	builtin?: boolean;
 }
 
-const ORIGIN_FILE = ".andropi.json";
+const ORIGIN_FILE = ".rynex.json";
 
 /** Curated collections searched first and shown when the query is empty. */
 const COLLECTIONS = [
@@ -78,7 +78,7 @@ export class Skills {
 		private readonly githubToken: () => string | undefined,
 	) {
 		this.dir = join(agentDir, "skills");
-		this.seededFile = join(agentDir, "andropi", "seeded-skills.json");
+		this.seededFile = join(agentDir, "rynex", "seeded-skills.json");
 		mkdirSync(this.dir, { recursive: true });
 	}
 
@@ -95,7 +95,7 @@ export class Skills {
 			if (seeded.includes(name) && !ours) continue;
 			rmSync(dest, { recursive: true, force: true });
 			cpSync(src, dest, { recursive: true });
-			writeOrigin(dest, { source: "AndroPI", installedAt: Date.now(), builtin: true });
+			writeOrigin(dest, { source: "Rynex", installedAt: Date.now(), builtin: true });
 			if (!seeded.includes(name)) seeded.push(name);
 		}
 		mkdirSync(dirname(this.seededFile), { recursive: true });

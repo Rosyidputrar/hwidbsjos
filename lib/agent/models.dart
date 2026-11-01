@@ -38,8 +38,10 @@ class CustomProviderInfo {
   String get api => json['api'] as String? ?? 'openai-completions';
   bool get hasKey => json['hasKey'] == true;
   bool get images => json['images'] == true;
-  List<String> get modelIds =>
-      ((json['models'] as List?) ?? const []).map((m) => (m as Map)['id'] as String? ?? '').where((s) => s.isNotEmpty).toList();
+  List<String> get modelIds => ((json['models'] as List?) ?? const [])
+      .map((m) => (m as Map)['id'] as String? ?? '')
+      .where((s) => s.isNotEmpty)
+      .toList();
 
   String get summary => hasKey ? 'API key · $baseUrl' : 'No key needed · $baseUrl';
 }
@@ -201,7 +203,7 @@ String toolSummary(String? name, Map<String, dynamic>? args) {
 
   final value = switch (name) {
     'bash' => pick(['command'])?.replaceAllMapped(
-      RegExp(r'''(?:/data/(?:data|user/\d+)/com\.imtaqin\.andropi|/storage/emulated/\d+|/sdcard)(?:/[^\s'"/;|&>]+)+'''),
+      RegExp(r'''(?:/data/(?:data|user/\d+)/com\.rynex\.agent|/storage/emulated/\d+|/sdcard)(?:/[^\s'"/;|&>]+)+'''),
       (m) => _shortPath(m[0]) ?? m[0]!,
     ),
     'read' || 'write' || 'edit' || 'ls' => _shortPath(pick(['path', 'file_path'])),

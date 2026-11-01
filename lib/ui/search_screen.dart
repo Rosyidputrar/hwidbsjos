@@ -246,19 +246,22 @@ class _Toggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Material(
-      color: on ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(18),
+      color: on ? p.accent.withValues(alpha: 0.14) : p.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.pill),
+        side: BorderSide(color: on ? p.accent.withValues(alpha: 0.4) : p.border),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(Radii.pill),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 15, color: on ? p.inverse : p.muted),
+              Icon(icon, size: 15, color: on ? p.accent : p.muted),
               const SizedBox(width: 6),
-              Text(label, style: TextStyle(fontSize: 12.5, color: on ? p.inverse : p.text)),
+              Text(label, style: TextStyle(fontSize: 12.5, color: on ? p.accent : p.text)),
             ],
           ),
         ),

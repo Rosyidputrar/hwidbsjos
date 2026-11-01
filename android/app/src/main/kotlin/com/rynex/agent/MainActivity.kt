@@ -1,4 +1,4 @@
-package com.imtaqin.andropi
+package com.rynex.agent
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -30,8 +30,8 @@ import java.io.File
  */
 class MainActivity : FlutterFragmentActivity() {
     companion object {
-        const val ACTION_NEW_CHAT = "com.imtaqin.andropi.NEW_CHAT"
-        const val ACTION_VOICE = "com.imtaqin.andropi.VOICE"
+        const val ACTION_NEW_CHAT = "com.rynex.agent.NEW_CHAT"
+        const val ACTION_VOICE = "com.rynex.agent.VOICE"
         private const val VOICE_REQUEST = 4101
         private const val UPDATES_CHANNEL = "updates"
     }
@@ -56,7 +56,7 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
-        EventChannel(messenger, "andropi/agent/events").setStreamHandler(object : EventChannel.StreamHandler {
+        EventChannel(messenger, "rynex/agent/events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, sink: EventChannel.EventSink) {
                 events = sink
             }
@@ -81,7 +81,7 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
 
-        MethodChannel(messenger, "andropi/agent").setMethodCallHandler { call, result ->
+        MethodChannel(messenger, "rynex/agent").setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
                     "start" -> {
@@ -91,7 +91,7 @@ class MainActivity : FlutterFragmentActivity() {
                                 @Suppress("UNCHECKED_CAST")
                                 val extra = (call.arguments as? Map<String, String>) ?: emptyMap()
                                 // The store key goes to the agent host only, never to shells.
-                                AgentRuntime.start(applicationContext, extra + ("ANDROPI_STORE_KEY" to SecureKey.hex(applicationContext)))
+                                AgentRuntime.start(applicationContext, extra + ("RYNEX_STORE_KEY" to SecureKey.hex(applicationContext)))
                                 runOnUiThread { result.success(AgentRuntime.paths(applicationContext)) }
                             } catch (e: Exception) {
                                 runOnUiThread { result.error("start_failed", e.message, null) }
@@ -139,7 +139,7 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     "shareFile" -> {
                         val file = File(call.argument<String>("path")!!)
-                        val uri = FileProvider.getUriForFile(this, "com.imtaqin.andropi.files", file)
+                        val uri = FileProvider.getUriForFile(this, "com.rynex.agent.files", file)
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = mimeOf(file.name)
                             putExtra(Intent.EXTRA_STREAM, uri)
@@ -183,7 +183,7 @@ class MainActivity : FlutterFragmentActivity() {
                     "notify" -> {
                         notify(
                             call.argument<Int>("id") ?: 100,
-                            call.argument<String>("title") ?: "AndroPI",
+                            call.argument<String>("title") ?: "Rynex",
                             call.argument<String>("body") ?: "",
                         )
                         result.success(null)
@@ -297,23 +297,23 @@ class MainActivity : FlutterFragmentActivity() {
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
             ?: "application/octet-stream"
 
-    /** Copies a file into Download/AndroPI and returns where it went. MediaStore needs no storage permission. */
+    /** Copies a file into Download/Rynex and returns where it went. MediaStore needs no storage permission. */
     private fun saveToDownloads(file: File): String {
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, file.name)
                 put(MediaStore.Downloads.MIME_TYPE, mimeOf(file.name))
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AndroPI")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Rynex")
             }
             val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: throw IllegalStateException("Could not create the download")
             contentResolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
         } else {
             @Suppress("DEPRECATION")
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AndroPI")
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Rynex")
             dir.mkdirs()
             file.copyTo(File(dir, file.name), overwrite = true)
         }
-        return "Download/AndroPI/${file.name}"
+        return "Download/Rynex/${file.name}"
     }
 }

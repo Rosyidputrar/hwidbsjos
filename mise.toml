@@ -1,4 +1,4 @@
-# Project-local toolchain for AndroPI.
+# Project-local toolchain for Rynex.
 # The tools below are only active inside this checkout (`mise install` /
 # `mise exec` / a mise-enabled shell), so the machine's global environment
 # stays untouched.

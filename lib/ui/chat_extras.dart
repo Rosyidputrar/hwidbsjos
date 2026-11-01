@@ -11,13 +11,16 @@ import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import 'i18n.dart';
 import 'changes_screen.dart';
+import 'deploy_sheet.dart';
 import 'editor_screen.dart';
 import 'files_screen.dart';
+import 'folder_picker.dart';
 import 'git_screen.dart';
 import 'kit.dart';
 import 'preview_screen.dart';
 import 'search_screen.dart';
 import 'tasks_screen.dart';
+import 'terminal_screen.dart';
 import 'theme.dart';
 import 'usage_screen.dart';
 
@@ -70,38 +73,35 @@ Future<({String text, List<Map<String, String>> images})> preparePrompt(
 }
 
 Future<List<Attachment>> pickAttachments(BuildContext context) async {
-  final choice = await showModalBottomSheet<String>(
-    context: context,
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: SettingsGroup(
-          children: [
-            SettingsRow(
-              icon: LucideIcons.images,
-              color: const Color(0xFF3E63DD),
-              title: tr('Photos'),
-              subtitle: tr('Screenshots, sketches, error photos'),
-              onTap: () => Navigator.pop(context, 'gallery'),
-            ),
-            SettingsRow(
-              icon: LucideIcons.camera,
-              color: const Color(0xFF30A46C),
-              title: tr('Camera'),
-              subtitle: tr('Take a picture now'),
-              onTap: () => Navigator.pop(context, 'camera'),
-            ),
-            SettingsRow(
-              icon: LucideIcons.paperclip,
-              color: const Color(0xFFF76B15),
-              title: tr('Files'),
-              subtitle: tr('PDFs, code, data, anything'),
-              onTap: () => Navigator.pop(context, 'files'),
-            ),
-          ],
-        ),
+  final choice = await showActionSheet<String>(
+    context,
+    title: tr('Attach'),
+    actions: [
+      (
+        icon: LucideIcons.images,
+        title: tr('Photos'),
+        subtitle: tr('Screenshots, sketches, error photos'),
+        value: 'gallery',
+        destructive: false,
+        enabled: true,
       ),
-    ),
+      (
+        icon: LucideIcons.camera,
+        title: tr('Camera'),
+        subtitle: tr('Take a picture now'),
+        value: 'camera',
+        destructive: false,
+        enabled: true,
+      ),
+      (
+        icon: LucideIcons.paperclip,
+        title: tr('Files'),
+        subtitle: tr('PDFs, code, data, anything'),
+        value: 'files',
+        destructive: false,
+        enabled: true,
+      ),
+    ],
   );
   final picker = ImagePicker();
   switch (choice) {
@@ -143,7 +143,7 @@ class AttachmentStrip extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(Radii.sm),
                 child: a.isImage
                     ? Image.file(File(a.path), width: 56, height: 56, fit: BoxFit.cover)
                     : Container(
@@ -221,13 +221,16 @@ class ApprovalCards extends StatelessWidget {
         if (features.approvals.isEmpty) return const SizedBox.shrink();
         final a = features.approvals.first;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: p.warning.withValues(alpha: 0.6), width: 1.2),
+              borderRadius: BorderRadius.circular(Radii.lg),
+              border: Border.all(color: p.warning.withValues(alpha: 0.55), width: 1.2),
+              boxShadow: [
+                BoxShadow(color: p.warning.withValues(alpha: 0.12), blurRadius: 20, offset: const Offset(0, 6)),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -240,7 +243,7 @@ class ApprovalCards extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Allow ${a.toolName}?', style: text.titleSmall),
+                          Text('${tr('Allow')} ${a.toolName}?', style: text.titleSmall),
                           Text(a.reason, style: text.bodySmall),
                         ],
                       ),
@@ -253,7 +256,11 @@ class ApprovalCards extends StatelessWidget {
                   width: double.infinity,
                   constraints: const BoxConstraints(maxHeight: 110),
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(
+                    color: p.raised,
+                    borderRadius: BorderRadius.circular(Radii.sm),
+                    border: Border.all(color: p.border),
+                  ),
                   child: SingleChildScrollView(
                     child: Text(
                       a.summary,
@@ -325,23 +332,26 @@ class PlanBar extends StatelessWidget {
     final p = context.palette;
     if (!agent.planMode || agent.busy || agent.entries.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(18)),
-        child: Row(
+      padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
+      child: InlineBanner(
+        tone: p.accent,
+        icon: LucideIcons.listChecks,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(LucideIcons.listChecks, size: 18, color: p.accent),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(tr('Plan mode'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-            ),
             TextButton(onPressed: () => agent.setPlanMode(false), child: Text(tr('Exit'))),
             FilledButton(
               onPressed: agent.approvePlan,
               style: FilledButton.styleFrom(minimumSize: const Size(0, 38)),
               child: Text(tr('Approve & run')),
             ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(tr('Plan mode'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+            Text(tr('Review the plan, then run it'), style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),
@@ -397,20 +407,17 @@ class _DevServerBannerState extends State<DevServerBanner> {
           children: [
             for (final e in f.devServers.entries)
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
                 child: Container(
-                  padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
+                  padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
                   decoration: BoxDecoration(
-                    color: p.success.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(18),
+                    color: p.success.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(Radii.md),
+                    border: Border.all(color: p.success.withValues(alpha: 0.28)),
                   ),
                   child: Row(
                     children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(color: p.success, shape: BoxShape.circle),
-                      ),
+                      StatusDot(color: p.success, pulse: true),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -470,11 +477,12 @@ class SlashMenu extends StatelessWidget {
     final matches = commands.where((c) => c.name.toLowerCase().contains(q)).take(8).toList();
     if (matches.isEmpty) return const SizedBox.shrink();
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      margin: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, 0),
       constraints: const BoxConstraints(maxHeight: 260),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: p.bg,
-        borderRadius: BorderRadius.circular(20),
+        color: p.surface,
+        borderRadius: BorderRadius.circular(Radii.lg),
         border: Border.all(color: p.border),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
       ),
@@ -500,8 +508,10 @@ class SlashMenu extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Project tools menu
+// Workspace sheet
 
+/// Everything that acts on the chat's folder: files, git, terminal, deploy,
+/// history, memory, tasks and usage, as one grid.
 Future<void> showProjectTools(
   BuildContext context,
   AgentController agent, {
@@ -509,87 +519,100 @@ Future<void> showProjectTools(
 }) async {
   void push(Widget w) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
   final memory = '${agent.cwd}/AGENTS.md';
+  final workspace = agent.info['workspace'] as String? ?? '';
+  final folder = sessionFolder(agent.cwd, workspace);
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (sheet) {
+      final p = sheet.palette;
+      final text = Theme.of(sheet).textTheme;
       void go(Widget w) {
         Navigator.pop(sheet);
         push(w);
       }
 
+      final tiles = <(IconData, String, Color, VoidCallback?)>[
+        (LucideIcons.folderOpen, tr('Files'), const Color(0xFFF97316), () => go(FilesScreen(agent: agent))),
+        (
+          LucideIcons.gitBranch,
+          tr('Git'),
+          const Color(0xFFEF4444),
+          () => go(GitScreen(agent: agent, onWork: onPrompt)),
+        ),
+        (LucideIcons.squareTerminal, tr('Terminal'), const Color(0xFF64748B), () => go(TerminalScreen(agent: agent))),
+        (
+          LucideIcons.rocket,
+          tr('Deploy'),
+          const Color(0xFFEC4899),
+          agent.busy
+              ? null
+              : () {
+                  Navigator.pop(sheet);
+                  showDeploySheet(context, agent);
+                },
+        ),
+        (LucideIcons.search, tr('Search'), const Color(0xFF3B82F6), () => go(SearchScreen(agent: agent))),
+        (LucideIcons.history, tr('Changes'), const Color(0xFF8B5CF6), () => go(ChangesScreen(agent: agent))),
+        (
+          LucideIcons.brain,
+          tr('Memory'),
+          const Color(0xFFD946EF),
+          () {
+            final f = File(memory);
+            if (!f.existsSync()) {
+              f.writeAsStringSync('# Project notes for pi\n\n- Stack:\n- How to run:\n- Conventions:\n');
+            }
+            go(EditorScreen(agent: agent, path: memory));
+          },
+        ),
+        (LucideIcons.listTodo, tr('Tasks'), const Color(0xFF14B8A6), () => go(TasksScreen(agent: agent))),
+        (LucideIcons.chartColumn, tr('Usage'), const Color(0xFFEAB308), () => go(UsageScreen(agent: agent))),
+      ];
+
       return SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: const EdgeInsets.fromLTRB(Space.page, 0, Space.page, Space.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(tr('Project'), style: Theme.of(sheet).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              SettingsGroup(
+              Row(
                 children: [
-                  SettingsRow(
-                    icon: LucideIcons.folderOpen,
-                    color: const Color(0xFFF76B15),
-                    title: tr('Files'),
-                    subtitle: tr('Browse and edit the project'),
-                    onTap: () => go(FilesScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.search,
-                    color: const Color(0xFF3E63DD),
-                    title: tr('Search'),
-                    subtitle: tr('Find text across every file'),
-                    onTap: () => go(SearchScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.history,
-                    color: const Color(0xFF7C5CFC),
-                    title: tr('Changes & undo'),
-                    subtitle: tr('What pi changed, and roll it back'),
-                    onTap: () => go(ChangesScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.gitBranch,
-                    color: const Color(0xFF111113),
-                    title: tr('Git'),
-                    subtitle: tr('Commit, push, branches, issues and PRs'),
-                    onTap: () => go(GitScreen(agent: agent, onWork: onPrompt)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.brain,
-                    color: const Color(0xFFEC4899),
-                    title: tr('Project memory'),
-                    subtitle: tr('AGENTS.md: rules pi follows in this folder'),
-                    onTap: () {
-                      final f = File(memory);
-                      if (!f.existsSync()) {
-                        f.writeAsStringSync('# Project notes for pi\n\n- Stack:\n- How to run:\n- Conventions:\n');
-                      }
-                      go(EditorScreen(agent: agent, path: memory));
-                    },
+                  IconTile(icon: folder != null ? LucideIcons.folderGit2 : LucideIcons.messageSquare, size: 40),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(folder ?? tr('Workspace'), style: text.titleMedium),
+                        Text(
+                          agent.cwd,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.faint),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              SettingsGroup(
+              const SizedBox(height: Space.lg),
+              GridView.count(
+                crossAxisCount: 3,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: Space.sm,
+                crossAxisSpacing: Space.sm,
+                childAspectRatio: 1.15,
                 children: [
-                  SettingsRow(
-                    icon: LucideIcons.listTodo,
-                    color: const Color(0xFF14B8A6),
-                    title: tr('Background tasks'),
-                    subtitle: tr('Queue, parallel agents and schedules'),
-                    onTap: () => go(TasksScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.chartColumn,
-                    color: const Color(0xFFF59E0B),
-                    title: tr('Usage'),
-                    subtitle: tr('Tokens and cost'),
-                    onTap: () => go(UsageScreen(agent: agent)),
-                  ),
+                  for (final (icon, label, color, onTap) in tiles)
+                    ActionTile(icon: icon, label: label, color: color, onTap: onTap),
                 ],
               ),
+              if (agent.busy) ...[
+                const SizedBox(height: Space.sm),
+                Text(tr('Deploy is available once pi finishes.'), style: text.bodySmall, textAlign: TextAlign.center),
+              ],
             ],
           ),
         ),

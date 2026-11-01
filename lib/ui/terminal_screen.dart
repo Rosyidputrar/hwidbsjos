@@ -43,7 +43,7 @@ class ShellSession {
     final env = await agent.client.environment();
     final home = env['HOME']!;
     // mksh reads $ENV for interactive shells: a short prompt and a few aliases.
-    final rc = File('$home/.andropirc');
+    final rc = File('$home/.rynexrc');
     rc.writeAsStringSync(r'''
 PS1='${PWD##*/} $ '
 alias ll='ls -la'
@@ -456,10 +456,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
     Widget pill({required Widget child, required bool on, VoidCallback? onTap, VoidCallback? onLongPress}) => Padding(
       padding: const EdgeInsets.only(right: 6),
       child: Material(
-        color: on ? p.text : p.surface,
-        borderRadius: BorderRadius.circular(16),
+        color: on ? p.accent.withValues(alpha: 0.14) : p.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.sm),
+          side: BorderSide(color: on ? p.accent.withValues(alpha: 0.4) : p.border),
+        ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(Radii.sm),
           onTap: onTap,
           onLongPress: onLongPress,
           child: SizedBox(height: 32, child: child),
@@ -482,7 +485,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   builder: (context) {
                     final s = sessions[i];
                     final on = s == session;
-                    final fg = on ? p.inverse : (s.exited ? p.faint : p.text);
+                    final fg = on ? p.accent : (s.exited ? p.faint : p.text);
                     return pill(
                       on: on,
                       onTap: () => _select(i),
@@ -507,7 +510,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                             onTap: () => _close(i),
                             child: Padding(
                               padding: const EdgeInsets.fromLTRB(6, 6, 10, 6),
-                              child: Icon(LucideIcons.x, size: 13, color: on ? p.inverse : p.muted),
+                              child: Icon(LucideIcons.x, size: 13, color: on ? p.accent : p.muted),
                             ),
                           ),
                         ],
@@ -646,7 +649,7 @@ class _KeyBar extends StatelessWidget {
     Widget key(String label, VoidCallback onTap, {bool active = false, IconData? icon}) => Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Material(
-        color: active ? p.text : p.raised,
+        color: active ? p.accent : p.raised,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
@@ -660,10 +663,10 @@ class _KeyBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             alignment: Alignment.center,
             child: icon != null
-                ? Icon(icon, size: 16, color: active ? p.inverse : p.text)
+                ? Icon(icon, size: 16, color: active ? p.onAccent : p.text)
                 : Text(
                     label,
-                    style: TextStyle(fontFamily: mono, fontSize: 12.5, color: active ? p.inverse : p.text),
+                    style: TextStyle(fontFamily: mono, fontSize: 12.5, color: active ? p.onAccent : p.text),
                   ),
           ),
         ),

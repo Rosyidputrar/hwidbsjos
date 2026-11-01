@@ -66,4 +66,4 @@ asked.
 Review your own output as a picky designer: alignment, consistent radii and
 spacing, no orphaned words in headings, real-looking content instead of lorem
 ipsum, dark and light both good, nothing overflowing at 360 px wide. In
-AndroPI, write the page to a file so the user can tap Preview.
+Rynex, write the page to a file so the user can tap Preview.

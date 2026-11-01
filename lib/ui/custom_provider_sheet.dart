@@ -170,9 +170,7 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
       final found = await widget.agent.discoverModels(baseUrl: url, apiKey: apiKey.text.trim());
       final lines = [
         for (final m in found)
-          (m['name'] as String? ?? '').isEmpty || m['name'] == m['id']
-              ? '${m['id']}'
-              : '${m['id']} | ${m['name']}',
+          (m['name'] as String? ?? '').isEmpty || m['name'] == m['id'] ? '${m['id']}' : '${m['id']} | ${m['name']}',
       ];
       if (!mounted) return;
       setState(() => models.text = lines.join('\n'));
@@ -197,30 +195,29 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
       bool simple = false,
       bool secret = false,
       TextInputType? type,
-    }) =>
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: TextField(
-            controller: c,
-            maxLines: lines,
-            minLines: lines,
-            keyboardType: type,
-            autocorrect: false,
-            enableSuggestions: false,
-            obscureText: secret && obscure,
-            style: simple ? const TextStyle(fontFamily: mono, fontSize: 13.5) : null,
-            decoration: InputDecoration(
-              labelText: label,
-              hintText: hint,
-              suffixIcon: secret
-                  ? IconButton(
-                      icon: Icon(obscure ? LucideIcons.eye : LucideIcons.eyeOff, size: 18),
-                      onPressed: () => setState(() => obscure = !obscure),
-                    )
-                  : null,
-            ),
-          ),
-        );
+    }) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: c,
+        maxLines: lines,
+        minLines: lines,
+        keyboardType: type,
+        autocorrect: false,
+        enableSuggestions: false,
+        obscureText: secret && obscure,
+        style: simple ? const TextStyle(fontFamily: mono, fontSize: 13.5) : null,
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          suffixIcon: secret
+              ? IconButton(
+                  icon: Icon(obscure ? LucideIcons.eye : LucideIcons.eyeOff, size: 18),
+                  onPressed: () => setState(() => obscure = !obscure),
+                )
+              : null,
+        ),
+      ),
+    );
 
     return SafeArea(
       child: Padding(
@@ -238,19 +235,21 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
               ),
               const SizedBox(height: 16),
               field(name, 'Name', hint: 'Home Ollama'),
-              field(
-                baseUrl,
-                'Base URL',
-                hint: 'http://192.168.1.20:11434/v1',
-                simple: true,
-                type: TextInputType.url,
-              ),
+              field(baseUrl, 'Base URL', hint: 'http://192.168.1.20:11434/v1', simple: true, type: TextInputType.url),
               DropdownButtonFormField<String>(
                 initialValue: apis.any((a) => a.id == api) || apis.isEmpty ? api : null,
                 decoration: const InputDecoration(labelText: 'Protocol'),
                 items: [
-                  for (final a in apis.isEmpty ? [CustomApiInfo({'id': api, 'label': api})] : apis)
-                    DropdownMenuItem(value: a.id, child: Text(a.label, maxLines: 2, overflow: TextOverflow.ellipsis)),
+                  for (final a
+                      in apis.isEmpty
+                          ? [
+                              CustomApiInfo({'id': api, 'label': api}),
+                            ]
+                          : apis)
+                    DropdownMenuItem(
+                      value: a.id,
+                      child: Text(a.label, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    ),
                 ],
                 onChanged: apis.isEmpty ? null : (v) => setState(() => api = v ?? api),
               ),
@@ -279,10 +278,7 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
                 child: TextButton.icon(
                   onPressed: fetching ? null : _fetch,
                   icon: fetching
-                      ? const SizedBox.square(
-                          dimension: 14,
-                          child: CircularProgressIndicator(strokeWidth: 1.8),
-                        )
+                      ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 1.8))
                       : const Icon(LucideIcons.download, size: 16),
                   label: Text(fetching ? 'Asking the server...' : 'Fetch models from the server'),
                 ),
@@ -301,13 +297,7 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: field(
-                      maxTokens,
-                      'Max output',
-                      hint: '16384',
-                      simple: true,
-                      type: TextInputType.number,
-                    ),
+                    child: field(maxTokens, 'Max output', hint: '16384', simple: true, type: TextInputType.number),
                   ),
                 ],
               ),
@@ -323,7 +313,10 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
                 Text(error!, style: text.bodySmall?.copyWith(color: p.danger)),
               ],
               const SizedBox(height: 14),
-              FilledButton(onPressed: busy ? null : _save, child: busy ? const _Busy() : Text(editing ? 'Save' : 'Add endpoint')),
+              FilledButton(
+                onPressed: busy ? null : _save,
+                child: busy ? const _Busy() : Text(editing ? 'Save' : 'Add endpoint'),
+              ),
               if (editing) ...[
                 const SizedBox(height: 8),
                 TextButton(
@@ -344,8 +337,6 @@ class _Busy extends StatelessWidget {
   const _Busy();
 
   @override
-  Widget build(BuildContext context) => const SizedBox.square(
-    dimension: 16,
-    child: CircularProgressIndicator(strokeWidth: 2),
-  );
+  Widget build(BuildContext context) =>
+      const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2));
 }

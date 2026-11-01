@@ -1,7 +1,7 @@
 /**
  * At-rest encryption for the app's own secrets (GitHub/Vercel tokens, search
  * keys, MCP env/headers). The key is created and wrapped by the Android
- * Keystore on the Kotlin side and handed to the host as ANDROPI_STORE_KEY.
+ * Keystore on the Kotlin side and handed to the host as RYNEX_STORE_KEY.
  * Files written before encryption was enabled are read as plain JSON and
  * encrypted on the next save.
  */
@@ -12,7 +12,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 const PREFIX = "enc1:";
 
 function key(): Buffer | null {
-	const hex = process.env.ANDROPI_STORE_KEY;
+	const hex = process.env.RYNEX_STORE_KEY;
 	return hex && /^[0-9a-f]{64}$/i.test(hex) ? Buffer.from(hex, "hex") : null;
 }
 

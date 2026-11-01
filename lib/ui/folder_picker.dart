@@ -156,7 +156,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
-                'Projects live in the AndroPI workspace. To bring in files from your phone, open a project and use '
+                'Projects live in the Rynex workspace. To bring in files from your phone, open a project and use '
                 'Files → Import from phone.',
                 style: text.bodySmall,
               ),
@@ -222,8 +222,8 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                             Text('Allow file access', style: text.titleMedium),
                             const SizedBox(height: 6),
                             Text(
-                              'To work in Download, Documents or any other folder on your phone, AndroPI needs '
-                              '"All files access". Turn it on for AndroPI on the next screen, then come back.',
+                              'To work in Download, Documents or any other folder on your phone, Rynex needs '
+                              '"All files access". Turn it on for Rynex on the next screen, then come back.',
                               style: text.bodySmall,
                             ),
                             const SizedBox(height: 16),

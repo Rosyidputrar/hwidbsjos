@@ -15,14 +15,15 @@ import 'chat_extras.dart';
 import 'chat_screen.dart';
 import 'folder_picker.dart';
 import 'kit.dart';
-import 'illustration.dart';
 import 'mesh.dart';
+import 'model_sheet.dart';
 import 'new_chat_sheet.dart';
 import 'repos_screen.dart';
 import 'settings_hub.dart';
 import 'settings_screen.dart';
 import 'skills_screen.dart';
 import 'tasks_screen.dart';
+import 'terminal_screen.dart';
 import 'theme.dart';
 
 /// Opens the chat for the agent's current session.
@@ -39,7 +40,7 @@ Future<void> openChat(
   ),
 );
 
-/// The app's home: tabs plus a floating navigation bar.
+/// The app's home: four tabs and a docked navigation bar with a create button.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.agent});
   final AgentController agent;
@@ -118,8 +119,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       case 'new_chat':
         await _newChat();
       case 'voice':
-        await agent.newSession();
-        if (mounted) await openChat(context, agent, listen: true);
+        await _voiceChat();
       case 'share':
         final files = [
           for (final f in (launch['files'] as List? ?? const []).cast<Map>())
@@ -136,24 +136,49 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (mounted && agent.sessionId != before) await openChat(context, agent);
   }
 
+  Future<void> _voiceChat() async {
+    await agent.newSession();
+    if (mounted) await openChat(context, agent, listen: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      _HomeTab(agent: agent, onSeeAll: () => setState(() => tab = 1), onNewChat: _newChat),
-      _ChatsTab(agent: agent),
-      SkillsScreen(agent: agent, embedded: true),
-      _ProjectsTab(agent: agent),
-    ];
-    return Scaffold(
-      extendBody: true,
-      // Every tab stays built (scroll positions survive); the active one fades
-      // and drifts in, the others fade out and stop ticking.
-      body: Stack(
-        children: [
-          for (var i = 0; i < tabs.length; i++) _TabLayer(active: i == tab, forward: i >= tab, child: tabs[i]),
-        ],
+      _HomeTab(
+        agent: agent,
+        onSeeAll: () => setState(() => tab = 1),
+        onNewChat: _newChat,
+        onVoice: _voiceChat,
+        onProjects: () => setState(() => tab = 2),
       ),
-      bottomNavigationBar: _NavBar(index: tab, onTap: (i) => setState(() => tab = i), onCreate: _newChat),
+      _ChatsTab(agent: agent, onNewChat: _newChat),
+      _ProjectsTab(agent: agent),
+      SettingsHub(agent: agent, embedded: true),
+    ];
+    return PopScope(
+      // Back on another tab returns to Home before leaving the app.
+      canPop: tab == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => tab = 0);
+      },
+      child: Scaffold(
+        // Every tab stays built (scroll positions survive); the active one fades
+        // and drifts in, the others fade out and stop ticking.
+        body: Stack(
+          children: [
+            for (var i = 0; i < tabs.length; i++) _TabLayer(active: i == tab, forward: i >= tab, child: tabs[i]),
+          ],
+        ),
+        bottomNavigationBar: ListenableBuilder(
+          listenable: agent.features,
+          builder: (context, _) => _NavBar(
+            index: tab,
+            onTap: (i) => setState(() => tab = i),
+            onCreate: _newChat,
+            settingsDot: agent.features.approvals.isNotEmpty,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -190,14 +215,14 @@ class _TabLayerState extends State<_TabLayer> {
           ignoring: !active,
           child: AnimatedOpacity(
             opacity: active ? 1 : 0,
-            duration: const Duration(milliseconds: 240),
+            duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
             onEnd: () {
               if (!widget.active && mounted) setState(() => hidden = true);
             },
             child: AnimatedSlide(
-              offset: active ? Offset.zero : Offset(widget.forward ? 0.04 : -0.04, 0),
-              duration: const Duration(milliseconds: 300),
+              offset: active ? Offset.zero : Offset(widget.forward ? 0.03 : -0.03, 0),
+              duration: const Duration(milliseconds: 280),
               curve: Curves.easeOutCubic,
               child: widget.child,
             ),
@@ -209,127 +234,40 @@ class _TabLayerState extends State<_TabLayer> {
 }
 
 // ---------------------------------------------------------------------------
-// Navigation bar: two tabs, a raised create button, two tabs.
+// Navigation bar
 
+/// Docked bar: Home, Chats, the create button, Projects, Settings.
 class _NavBar extends StatelessWidget {
-  const _NavBar({required this.index, required this.onTap, required this.onCreate});
+  const _NavBar({required this.index, required this.onTap, required this.onCreate, this.settingsDot = false});
   final int index;
-  final void Function(int) onTap;
+  final ValueChanged<int> onTap;
   final VoidCallback onCreate;
-
-  static const _items = [
-    (LucideIcons.house, 'Home'),
-    (LucideIcons.messagesSquare, 'Chats'),
-    (LucideIcons.compass, 'Skills'),
-    (LucideIcons.layoutGrid, 'Projects'),
-  ];
+  final bool settingsDot;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    Widget item(int i) =>
-        _NavItem(icon: _items[i].$1, label: _items[i].$2, selected: i == index, onTap: () => onTap(i));
-    return SafeArea(
-      top: false,
-      child: SizedBox(
-        height: 96,
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.bottomCenter,
-          children: [
-            Positioned(
-              left: 18,
-              right: 18,
-              bottom: 12,
-              child: Container(
-                height: 68,
-                decoration: BoxDecoration(
-                  color: p.nav,
-                  borderRadius: BorderRadius.circular(34),
-                  boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 26, offset: const Offset(0, 12)),
-                  ],
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [item(0), item(1)]),
-                    ),
-                    const SizedBox(width: 76), // room for the create button
-                    Expanded(
-                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [item(2), item(3)]),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(bottom: 30, child: _CreateButton(onTap: onCreate)),
-          ],
-        ),
-      ),
+    Widget item(int i, IconData icon, String label, {bool dot = false}) => Expanded(
+      child: _NavItem(icon: icon, label: tr(label), selected: i == index, dot: dot, onTap: () => onTap(i)),
     );
-  }
-}
-
-/// A tab icon; the selected one sits in a white circle that pops in.
-class _NavItem extends StatefulWidget {
-  const _NavItem({required this.icon, required this.label, required this.selected, required this.onTap});
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  State<_NavItem> createState() => _NavItemState();
-}
-
-class _NavItemState extends State<_NavItem> {
-  bool pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    const ink = Color(0xFF111113);
-    final selected = widget.selected;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: widget.label,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (_) => setState(() => pressed = true),
-        onTapCancel: () => setState(() => pressed = false),
-        onTapUp: (_) {
-          setState(() => pressed = false);
-          HapticFeedback.selectionClick();
-          widget.onTap();
-        },
-        child: SizedBox.square(
-          dimension: 52,
-          child: Stack(
-            alignment: Alignment.center,
+    return Container(
+      decoration: BoxDecoration(
+        color: p.nav,
+        border: Border(top: BorderSide(color: p.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 66,
+          child: Row(
             children: [
-              // The white disc grows in with a little overshoot.
-              AnimatedScale(
-                scale: selected ? 1 : 0,
-                duration: const Duration(milliseconds: 380),
-                curve: selected ? Curves.easeOutBack : Curves.easeInCubic,
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                ),
+              item(0, LucideIcons.house, 'Home'),
+              item(1, LucideIcons.messagesSquare, 'Chats'),
+              Expanded(
+                child: Center(child: _CreateButton(onTap: onCreate)),
               ),
-              AnimatedScale(
-                scale: pressed ? 0.8 : (selected ? 1.08 : 1),
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
-                child: TweenAnimationBuilder<Color?>(
-                  tween: ColorTween(end: selected ? ink : Colors.white.withValues(alpha: 0.78)),
-                  duration: const Duration(milliseconds: 220),
-                  builder: (context, color, _) => Icon(widget.icon, size: 21, color: color),
-                ),
-              ),
+              item(2, LucideIcons.folderGit2, 'Projects'),
+              item(3, LucideIcons.settings2, 'Settings', dot: settingsDot),
             ],
           ),
         ),
@@ -338,7 +276,80 @@ class _NavItemState extends State<_NavItem> {
   }
 }
 
-/// The raised round "new chat" button in the middle of the bar.
+/// A tab: icon in a pill indicator that fills in when selected, label below.
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.dot = false,
+  });
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final bool dot;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final color = selected ? p.accent : p.muted;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        customBorder: const StadiumBorder(),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: selected ? 52 : 36,
+              height: 30,
+              decoration: BoxDecoration(
+                color: selected ? p.accent.withValues(alpha: 0.14) : Colors.transparent,
+                borderRadius: BorderRadius.circular(Radii.pill),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(icon, size: 20, color: color),
+                  if (dot)
+                    Positioned(
+                      right: selected ? 12 : 4,
+                      top: 4,
+                      child: StatusDot(color: p.warning, size: 7),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: selected ? p.text : p.muted,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The accent "new chat" button in the middle of the bar.
 class _CreateButton extends StatefulWidget {
   const _CreateButton({required this.onTap});
   final VoidCallback onTap;
@@ -373,21 +384,25 @@ class _CreateButtonState extends State<_CreateButton> {
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOutBack,
           child: Container(
-            width: 66,
-            height: 66,
+            width: 52,
+            height: 42,
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
               color: p.accent,
-              border: Border.all(color: p.bg, width: 5),
+              borderRadius: BorderRadius.circular(Radii.md),
               boxShadow: [
-                BoxShadow(color: p.accent.withValues(alpha: 0.45), blurRadius: 22, offset: const Offset(0, 8)),
+                BoxShadow(
+                  color: p.accent.withValues(alpha: 0.25),
+                  blurRadius: 12,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 3),
+                ),
               ],
             ),
             child: AnimatedRotation(
               turns: turns,
               duration: const Duration(milliseconds: 420),
               curve: Curves.easeOutBack,
-              child: const Icon(LucideIcons.plus, size: 28, color: Colors.white),
+              child: Icon(LucideIcons.plus, size: 22, color: p.onAccent),
             ),
           ),
         ),
@@ -400,69 +415,82 @@ class _CreateButtonState extends State<_CreateButton> {
 // Home
 
 class _Quick {
-  const _Quick(this.title, this.icon, this.color, this.category, this.art, {this.prompt, this.clone = false});
+  const _Quick(this.title, this.subtitle, this.icon, this.color, this.category, {this.prompt});
   final String title;
-
-  /// Storyset illustration shown on the card.
-  final String art;
+  final String subtitle;
   final IconData icon;
   final Color color;
   final String category;
+
+  /// Null starts an empty chat through the new-chat sheet.
   final String? prompt;
-  final bool clone;
 }
 
 const _quick = [
   _Quick(
     'Build a web app',
+    'A polished page you can preview',
     LucideIcons.layoutTemplate,
-    Color(0xFFFF7A1A),
+    Color(0xFFF97316),
     'Build',
-    'projects',
     prompt: 'Build me a polished, mobile-first web app: ',
   ),
-  _Quick('Chat with the smartest agent', LucideIcons.sparkles, Color(0xFF7C5CFC), 'Code', 'ai'),
-  _Quick('Clone a GitHub repo', SimpleIcons.github, Color(0xFF111113), 'Code', 'git', clone: true),
   _Quick(
     'Design a modern UI',
+    'With the ui-designer skill',
     LucideIcons.palette,
     Color(0xFF14B8A6),
     'Build',
-    'design',
     prompt: 'Using the ui-designer skill, design and build a modern screen for: ',
+  ),
+  _Quick('Chat with the smartest agent', 'Ask anything, no template', LucideIcons.sparkles, Color(0xFF8B5CF6), 'Code'),
+  _Quick(
+    'Fix a bug',
+    'Find the cause and patch it',
+    LucideIcons.bug,
+    Color(0xFFEF4444),
+    'Code',
+    prompt: 'Help me find and fix this bug: ',
   ),
   _Quick(
     'Python in Linux',
+    'Scripts in the container',
     SimpleIcons.python,
     Color(0xFF3B82F6),
     'Ops',
-    'python',
     prompt: 'Set up a Python project in the Linux container and write a script that ',
   ),
-  _Quick('Fix a bug', LucideIcons.bug, Color(0xFFEF4444), 'Code', 'bug', prompt: 'Help me find and fix this bug: '),
   _Quick(
     'Deploy a site',
+    'Get a live URL',
     LucideIcons.rocket,
     Color(0xFFEC4899),
     'Ops',
-    'launch',
     prompt: 'Deploy this project and give me the live URL. Project: ',
   ),
   _Quick(
     'Automate a task',
+    'A script that does it for you',
     LucideIcons.zap,
-    Color(0xFFF59E0B),
+    Color(0xFFEAB308),
     'Ops',
-    'automate',
     prompt: 'Write a script that automates: ',
   ),
 ];
 
 class _HomeTab extends StatefulWidget {
-  const _HomeTab({required this.agent, required this.onSeeAll, required this.onNewChat});
+  const _HomeTab({
+    required this.agent,
+    required this.onSeeAll,
+    required this.onNewChat,
+    required this.onVoice,
+    required this.onProjects,
+  });
   final AgentController agent;
   final VoidCallback onSeeAll;
   final VoidCallback onNewChat;
+  final VoidCallback onVoice;
+  final VoidCallback onProjects;
 
   @override
   State<_HomeTab> createState() => _HomeTabState();
@@ -478,12 +506,12 @@ class _HomeTabState extends State<_HomeTab> {
     recent = agent.listSessions();
   });
 
+  Future<void> _push(Widget screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    if (mounted) _refresh();
+  }
+
   Future<void> _run(_Quick q) async {
-    if (q.clone) {
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReposScreen(agent: agent)));
-      _refresh();
-      return;
-    }
     if (q.prompt == null) {
       widget.onNewChat();
       return;
@@ -499,6 +527,14 @@ class _HomeTabState extends State<_HomeTab> {
     _refresh();
   }
 
+  Future<void> _openFolder() async {
+    final dir = await FolderPicker.pick(context, agent);
+    if (dir == null) return;
+    await agent.newSession(dir: dir);
+    if (mounted) await openChat(context, agent);
+    _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -508,63 +544,108 @@ class _HomeTabState extends State<_HomeTab> {
       builder: (context, _) {
         final gh = agent.integrations.github;
         final running = agent.features.runs.where((r) => r.active).length;
-        final name = (gh?.name ?? gh?.login ?? 'there').split(' ').first;
+        final name = (gh?.name ?? gh?.login ?? '').split(' ').first;
         final quick = _quick.where((q) => category == 'All' || q.category == category).toList();
         return SafeArea(
           bottom: false,
           child: RefreshIndicator(
             onRefresh: () async => _refresh(),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
+              padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.page, Space.xxl),
               children: [
+                // Brand, status and the two personal shortcuts.
                 Row(
                   children: [
-                    _CircleButton(
-                      icon: LucideIcons.alignLeft,
-                      label: tr('Settings'),
-                      onTap: () async {
-                        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsHub(agent: agent)));
-                        _refresh();
-                      },
+                    const LogoMark(size: 30),
+                    const SizedBox(width: Space.sm),
+                    Text('Rynex', style: text.titleMedium),
+                    const SizedBox(width: Space.sm),
+                    Pill(
+                      agent.busy ? tr('Working') : tr('Ready'),
+                      color: agent.busy ? p.warning : p.success,
+                      dot: true,
                     ),
                     const Spacer(),
-                    Badge(
-                      isLabelVisible: running > 0,
-                      label: Text('$running'),
-                      backgroundColor: p.accent,
-                      child: _CircleButton(
-                        icon: LucideIcons.listTodo,
-                        label: tr('Tasks'),
-                        onTap: () =>
-                            Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(agent: agent))),
-                      ),
+                    AppIconButton(
+                      icon: LucideIcons.listTodo,
+                      label: tr('Tasks'),
+                      badge: running,
+                      onTap: () => _push(TasksScreen(agent: agent)),
                     ),
-                    const SizedBox(width: 10),
-                    GestureDetector(
-                      onTap: () =>
-                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
-                      child: Avatar(name: gh?.name ?? gh?.login ?? 'AndroPI', url: gh?.avatarUrl, size: 44),
+                    const SizedBox(width: Space.sm),
+                    Semantics(
+                      button: true,
+                      label: tr('Accounts & servers'),
+                      child: GestureDetector(
+                        onTap: () => _push(AccountsScreen(agent: agent)),
+                        child: Avatar(name: gh?.name ?? gh?.login ?? 'Rynex', url: gh?.avatarUrl, size: 40),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 26),
-                Text('${tr('Hello,')}\n$name', style: text.displayMedium),
-                const SizedBox(height: 8),
+                const SizedBox(height: Space.xxl),
                 Text(
-                  agent.hasModel ? tr('What should we build today?') : tr('Connect a model to get started.'),
-                  style: text.bodyLarge?.copyWith(color: p.muted),
+                  name.isEmpty ? tr('What should we build today?') : '${tr('Hello,')} $name',
+                  style: text.headlineSmall,
                 ),
-                if (!agent.hasModel) ...[const SizedBox(height: 18), _ConnectCard(agent: agent)],
-                const SizedBox(height: 22),
-                SizedBox(
-                  height: 38,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
+                if (name.isNotEmpty) ...[
+                  const SizedBox(height: Space.xs),
+                  Text(tr('What should we build today?'), style: text.bodyMedium?.copyWith(color: p.muted)),
+                ],
+                const SizedBox(height: Space.lg),
+                if (agent.hasModel)
+                  _PromptCard(agent: agent, onStart: widget.onNewChat, onVoice: widget.onVoice)
+                else
+                  _ConnectCard(agent: agent),
+                if (running > 0) ...[
+                  const SizedBox(height: Space.md),
+                  InlineBanner(
+                    tone: p.accent,
+                    icon: LucideIcons.loaderCircle,
+                    onTap: () => _push(TasksScreen(agent: agent)),
+                    trailing: Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+                    padding: const EdgeInsets.fromLTRB(Space.md, Space.md, Space.md, Space.md),
+                    child: Text(
+                      '$running ${tr(running == 1 ? 'background task running' : 'background tasks running')}',
+                      style: text.titleSmall,
+                    ),
+                  ),
+                ],
+                // Shortcuts to the places people go most.
+                const SizedBox(height: Space.xl),
+                Row(
+                  children: [
+                    _Shortcut(
+                      icon: SimpleIcons.github,
+                      label: tr('Clone repo'),
+                      onTap: () async {
+                        await _push(ReposScreen(agent: agent));
+                        agent.integrations.refreshProjects().catchError((_) {});
+                      },
+                    ),
+                    _Shortcut(icon: LucideIcons.folderOpen, label: tr('Open folder'), onTap: _openFolder),
+                    _Shortcut(
+                      icon: LucideIcons.squareTerminal,
+                      label: tr('Terminal'),
+                      onTap: () => _push(TerminalScreen(agent: agent)),
+                    ),
+                    _Shortcut(
+                      icon: LucideIcons.puzzle,
+                      label: tr('Skills'),
+                      onTap: () => _push(SkillsScreen(agent: agent)),
+                    ),
+                  ],
+                ),
+                SectionHeader(tr('Start something')),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  clipBehavior: Clip.none,
+                  child: Row(
                     children: [
                       for (final c in const ['All', 'Build', 'Code', 'Ops'])
                         Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: _PillChip(
+                          padding: const EdgeInsets.only(right: Space.sm),
+                          child: AppChip(
                             label: tr(c == 'All' ? 'All types' : c),
                             selected: category == c,
                             onTap: () => setState(() => category = c),
@@ -573,29 +654,24 @@ class _HomeTabState extends State<_HomeTab> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 218,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    clipBehavior: Clip.none,
-                    itemCount: quick.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 12),
-                    itemBuilder: (context, i) => _QuickCard(q: quick[i], onTap: () => _run(quick[i])),
-                  ),
+                const SizedBox(height: Space.md),
+                LayoutBuilder(
+                  builder: (context, box) {
+                    final width = (box.maxWidth - Space.md) / 2;
+                    return Wrap(
+                      spacing: Space.md,
+                      runSpacing: Space.md,
+                      children: [
+                        for (final q in quick)
+                          SizedBox(
+                            width: width,
+                            child: _QuickCard(q: q, onTap: () => _run(q)),
+                          ),
+                      ],
+                    );
+                  },
                 ),
-                const SizedBox(height: 30),
-                Row(
-                  children: [
-                    Expanded(child: Text(tr('Recent'), style: text.titleLarge)),
-                    TextButton(
-                      onPressed: widget.onSeeAll,
-                      style: TextButton.styleFrom(foregroundColor: const Color(0xFF3E63DD)),
-                      child: Text(tr('See all')),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
+                SectionHeader(tr('Recent'), action: tr('See all'), onAction: widget.onSeeAll),
                 FutureBuilder<List<SessionSummary>>(
                   future: recent,
                   builder: (context, snap) {
@@ -605,17 +681,23 @@ class _HomeTabState extends State<_HomeTab> {
                         .toList();
                     if (!snap.hasData) return const SizedBox(height: 60);
                     if (list.isEmpty) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Text(tr('Your chats will show up here.'), style: text.bodySmall),
+                      return SurfaceCard(
+                        child: Row(
+                          children: [
+                            GlyphTile(icon: LucideIcons.messageSquareDashed, color: p.muted),
+                            const SizedBox(width: Space.md),
+                            Expanded(child: Text(tr('Your chats will show up here.'), style: text.bodySmall)),
+                          ],
+                        ),
                       );
                     }
-                    return Column(
+                    return SettingsGroup(
                       children: [
                         for (final s in list)
-                          _SessionRow(
+                          SessionRow(
                             session: s,
                             workspace: agent.info['workspace'] as String? ?? '',
+                            working: agent.busy && s.id == agent.sessionId,
                             onTap: () async {
                               if (s.id != agent.sessionId) await agent.openSession(s.path);
                               if (context.mounted) await openChat(context, agent);
@@ -626,11 +708,65 @@ class _HomeTabState extends State<_HomeTab> {
                     );
                   },
                 ),
+                const SizedBox(height: Space.md),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: widget.onProjects,
+                    icon: const Icon(LucideIcons.folderGit2, size: 16),
+                    label: Text(tr('Browse projects')),
+                  ),
+                ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+/// Looks like the chat composer; tapping it starts a new chat.
+class _PromptCard extends StatelessWidget {
+  const _PromptCard({required this.agent, required this.onStart, required this.onVoice});
+  final AgentController agent;
+  final VoidCallback onStart;
+  final VoidCallback onVoice;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return SurfaceCard(
+      onTap: onStart,
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.md, Space.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            tr('Ask pi to build, fix or deploy…'),
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: p.faint),
+          ),
+          const SizedBox(height: Space.xl),
+          Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AppChip(
+                    leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 22),
+                    label: agent.model?.name ?? tr('Choose model'),
+                    trailingIcon: LucideIcons.chevronsUpDown,
+                    onTap: () => showModelSheet(context, agent),
+                  ),
+                ),
+              ),
+              const SizedBox(width: Space.sm),
+              AppIconButton(icon: LucideIcons.mic, label: tr('Voice'), size: 38, onTap: onVoice),
+              const SizedBox(width: Space.sm),
+              AppIconButton(icon: LucideIcons.arrowUp, label: tr('New chat'), size: 38, filled: true, onTap: onStart),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -642,39 +778,29 @@ class _ConnectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(24)),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return SurfaceCard(
+      highlight: true,
+      padding: const EdgeInsets.all(Space.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Positioned(right: -8, bottom: -6, child: Illustration('connect', height: 128)),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Connect a model',
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Sign in to a provider or add an API key: Anthropic, OpenAI, Gemini, OpenRouter and more.',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF111113),
-                    minimumSize: const Size(0, 44),
-                  ),
-                  onPressed: () =>
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
-                  child: Text(tr('Choose a model')),
-                ),
-              ],
-            ),
+          IconTile(icon: LucideIcons.plugZap, color: p.accent, size: 40),
+          const SizedBox(height: Space.md),
+          Text(tr('Connect a model'), style: text.titleMedium),
+          const SizedBox(height: Space.xs),
+          Text(
+            tr('Sign in to a provider or add an API key: Anthropic, OpenAI, Gemini, OpenRouter and more.'),
+            style: text.bodySmall,
+          ),
+          const SizedBox(height: Space.lg),
+          PrimaryButton(
+            compact: true,
+            icon: LucideIcons.sparkles,
+            label: tr('Choose a model'),
+            onPressed: () =>
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
           ),
         ],
       ),
@@ -682,51 +808,41 @@ class _ConnectCard extends StatelessWidget {
   }
 }
 
-class _CircleButton extends StatelessWidget {
-  const _CircleButton({required this.icon, required this.onTap, required this.label});
+class _Shortcut extends StatelessWidget {
+  const _Shortcut({required this.icon, required this.label, required this.onTap});
   final IconData icon;
-  final VoidCallback onTap;
   final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Semantics(
-      button: true,
-      label: label,
-      child: Material(
-        color: p.surface,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox.square(dimension: 44, child: Icon(icon, size: 20, color: p.text)),
-        ),
-      ),
-    );
-  }
-}
-
-class _PillChip extends StatelessWidget {
-  const _PillChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: selected ? p.text : Colors.transparent,
-      shape: const StadiumBorder(),
+    return Expanded(
       child: InkWell(
-        customBorder: const StadiumBorder(),
+        borderRadius: BorderRadius.circular(Radii.md),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.inverse : p.muted),
+          padding: const EdgeInsets.symmetric(vertical: Space.xs),
+          child: Column(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: p.surface,
+                  borderRadius: BorderRadius.circular(Radii.lg),
+                  border: Border.all(color: p.border),
+                ),
+                child: Icon(icon, size: 21, color: p.text),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: p.muted),
+              ),
+            ],
           ),
         ),
       ),
@@ -742,112 +858,104 @@ class _QuickCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return SizedBox(
-      width: 164,
-      child: Material(
-        color: p.surface,
-        borderRadius: BorderRadius.circular(24),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final text = Theme.of(context).textTheme;
+    return SurfaceCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(14),
+      child: SizedBox(
+        height: 96,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                SizedBox(
-                  height: 122,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned.fill(
-                        child: MeshArt(
-                          seed: q.title,
-                          radius: 19,
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
-                            child: Center(child: Illustration(q.art, height: 112)),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 10,
-                        bottom: -18,
-                        child: RingBadge(icon: q.icon, color: q.color),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 26, 10, 0),
-                  child: Text(
-                    tr(q.title),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.3),
-                  ),
-                ),
+                IconTile(icon: q.icon, color: q.color, size: 34),
+                const Spacer(),
+                Text(tr(q.category).toUpperCase(), style: text.labelSmall),
               ],
             ),
-          ),
+            const Spacer(),
+            Text(tr(q.title), maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleSmall),
+            const SizedBox(height: 2),
+            Text(
+              tr(q.subtitle),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: p.muted),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _SessionRow extends StatelessWidget {
-  const _SessionRow({required this.session, required this.workspace, required this.onTap, this.onLongPress});
+/// One chat in a list: tinted icon, title, folder, age, and an optional menu.
+class SessionRow extends StatelessWidget {
+  const SessionRow({
+    super.key,
+    required this.session,
+    required this.workspace,
+    required this.onTap,
+    this.onMenu,
+    this.working = false,
+  });
   final SessionSummary session;
   final String workspace;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
+  final VoidCallback? onMenu;
+  final bool working;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final folder = sessionFolder(session.cwd, workspace);
+    final tone = MeshArt.tone(folder ?? session.id);
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
       onTap: onTap,
-      onLongPress: onLongPress,
+      onLongPress: onMenu,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
+        padding: EdgeInsets.fromLTRB(Space.md, Space.md, onMenu != null ? Space.xs : Space.md, Space.md),
         child: Row(
           children: [
-            SizedBox.square(
-              dimension: 52,
-              child: MeshArt(
-                seed: session.id,
-                radius: 16,
-                child: Center(
-                  child: Icon(
-                    folder != null ? LucideIcons.folderGit2 : LucideIcons.messageSquare,
-                    size: 20,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
+            IconTile(icon: folder != null ? LucideIcons.folderGit2 : LucideIcons.messageSquare, color: tone, size: 38),
+            const SizedBox(width: Space.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
-                  const SizedBox(height: 3),
-                  Text(
-                    folder ?? tr('Quick chat'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontFamily: folder != null ? mono : null, fontSize: 12, color: p.muted),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      if (working) ...[StatusDot(color: p.warning, size: 6, pulse: true), const SizedBox(width: 6)],
+                      Flexible(
+                        child: Text(
+                          working ? tr('Working') : (folder ?? tr('Quick chat')),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: folder != null && !working ? mono : null,
+                            fontSize: 12,
+                            color: working ? p.warning : p.muted,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: Space.sm),
             Text(_ago(session.modified), style: TextStyle(fontSize: 11.5, color: p.faint)),
+            if (onMenu != null)
+              IconButton(
+                tooltip: tr('More'),
+                visualDensity: VisualDensity.compact,
+                icon: Icon(LucideIcons.ellipsisVertical, size: 18, color: p.faint),
+                onPressed: onMenu,
+              ),
           ],
         ),
       ),
@@ -869,8 +977,9 @@ String _ago(DateTime t) {
 // Chats
 
 class _ChatsTab extends StatefulWidget {
-  const _ChatsTab({required this.agent});
+  const _ChatsTab({required this.agent, required this.onNewChat});
   final AgentController agent;
+  final VoidCallback onNewChat;
 
   @override
   State<_ChatsTab> createState() => _ChatsTabState();
@@ -888,31 +997,27 @@ class _ChatsTabState extends State<_ChatsTab> {
 
   Future<void> _menu(SessionSummary s) async {
     final active = s.id == agent.sessionId;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: SettingsGroup(
-            children: [
-              SettingsRow(
-                icon: LucideIcons.pencil,
-                color: const Color(0xFF3E63DD),
-                title: tr('Rename'),
-                onTap: () => Navigator.pop(context, 'rename'),
-              ),
-              SettingsRow(
-                icon: LucideIcons.trash2,
-                color: context.palette.danger,
-                title: tr('Delete'),
-                subtitle: active ? 'Open another chat first' : null,
-                destructive: true,
-                onTap: active ? null : () => Navigator.pop(context, 'delete'),
-              ),
-            ],
-          ),
+    final action = await showActionSheet<String>(
+      context,
+      title: s.title,
+      actions: [
+        (
+          icon: LucideIcons.pencil,
+          title: tr('Rename'),
+          subtitle: null,
+          value: 'rename',
+          destructive: false,
+          enabled: true,
         ),
-      ),
+        (
+          icon: LucideIcons.trash2,
+          title: tr('Delete'),
+          subtitle: active ? tr('Open another chat first') : null,
+          value: 'delete',
+          destructive: true,
+          enabled: !active,
+        ),
+      ],
     );
     if (!mounted || action == null) return;
     if (action == 'rename') {
@@ -938,7 +1043,6 @@ class _ChatsTabState extends State<_ChatsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
     final ws = agent.info['workspace'] as String? ?? '';
     return SafeArea(
       bottom: false,
@@ -946,8 +1050,8 @@ class _ChatsTabState extends State<_ChatsTab> {
         future: sessions,
         builder: (context, snap) {
           final q = query.toLowerCase();
-          final all = (snap.data ?? const <SessionSummary>[])
-              .where((s) => s.messageCount > 0)
+          final withMessages = (snap.data ?? const <SessionSummary>[]).where((s) => s.messageCount > 0).toList();
+          final all = withMessages
               .where((s) => q.isEmpty || s.title.toLowerCase().contains(q) || s.cwd.toLowerCase().contains(q))
               .toList();
           final groups = <String, List<SessionSummary>>{};
@@ -956,54 +1060,67 @@ class _ChatsTabState extends State<_ChatsTab> {
           }
           return RefreshIndicator(
             onRefresh: () async => _reload(),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
-              children: [
-                Text(tr('Chats'), style: text.displaySmall),
-                const SizedBox(height: 16),
-                TextField(
-                  onChanged: (v) => setState(() {
-                    query = v;
-                  }),
-                  decoration: InputDecoration(
-                    hintText: tr('Search anything'),
-                    prefixIcon: const Icon(LucideIcons.search, size: 18),
+            child: ListenableBuilder(
+              listenable: agent,
+              builder: (context, _) => ListView(
+                padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.page, Space.xxl),
+                children: [
+                  PageHeader(
+                    tr('Chats'),
+                    subtitle: snap.hasData ? '${withMessages.length} ${tr('conversations')}' : null,
+                    actions: [
+                      AppIconButton(icon: LucideIcons.squarePen, label: tr('New chat'), onTap: widget.onNewChat),
+                    ],
                   ),
-                ),
-                if (!snap.hasData)
-                  const Padding(
-                    padding: EdgeInsets.all(40),
-                    child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                  )
-                else if (all.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 40),
-                    child: Column(
+                  TextField(
+                    onChanged: (v) => setState(() {
+                      query = v;
+                    }),
+                    decoration: InputDecoration(
+                      hintText: tr('Search anything'),
+                      prefixIcon: const Icon(LucideIcons.search, size: 18),
+                    ),
+                  ),
+                  if (!snap.hasData)
+                    const Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    )
+                  else if (all.isEmpty)
+                    EmptyState(
+                      icon: q.isEmpty ? LucideIcons.messagesSquare : LucideIcons.searchX,
+                      title: q.isEmpty ? tr('No chats yet') : tr('Nothing matches.'),
+                      message: q.isEmpty ? tr('Start one and it will be listed here.') : null,
+                      action: q.isEmpty
+                          ? PrimaryButton(
+                              compact: true,
+                              icon: LucideIcons.plus,
+                              label: tr('New chat'),
+                              onPressed: widget.onNewChat,
+                            )
+                          : null,
+                    ),
+                  for (final e in groups.entries) ...[
+                    SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(4, Space.xl, 4, Space.sm)),
+                    SettingsGroup(
                       children: [
-                        if (q.isEmpty) const Illustration('chat', height: 200),
-                        const SizedBox(height: 12),
-                        Text(
-                          q.isEmpty ? 'No chats yet. Tap + to start one.' : 'Nothing matches.',
-                          style: text.bodySmall,
-                        ),
+                        for (final s in e.value)
+                          SessionRow(
+                            session: s,
+                            workspace: ws,
+                            working: agent.busy && s.id == agent.sessionId,
+                            onMenu: () => _menu(s),
+                            onTap: () async {
+                              if (s.id != agent.sessionId) await agent.openSession(s.path);
+                              if (context.mounted) await openChat(context, agent);
+                              _reload();
+                            },
+                          ),
                       ],
                     ),
-                  ),
-                for (final e in groups.entries) ...[
-                  SectionLabel(e.key, padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
-                  for (final s in e.value)
-                    _SessionRow(
-                      session: s,
-                      workspace: ws,
-                      onLongPress: () => _menu(s),
-                      onTap: () async {
-                        if (s.id != agent.sessionId) await agent.openSession(s.path);
-                        if (context.mounted) await openChat(context, agent);
-                        _reload();
-                      },
-                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           );
         },
@@ -1056,10 +1173,20 @@ class _ProjectsTabState extends State<_ProjectsTab> {
     if (mounted) await openChat(context, agent);
   }
 
+  Future<void> _clone() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReposScreen(agent: agent)));
+    it.refreshProjects();
+  }
+
+  Future<void> _openFolder() async {
+    final dir = await FolderPicker.pick(context, agent);
+    if (dir == null) return;
+    await agent.newSession(dir: dir);
+    if (mounted) await openChat(context, agent);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
-    final text = Theme.of(context).textTheme;
     return ListenableBuilder(
       listenable: it,
       builder: (context, _) {
@@ -1071,11 +1198,17 @@ class _ProjectsTabState extends State<_ProjectsTab> {
             child: CustomScrollView(
               slivers: [
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(Space.page, Space.md, Space.page, 0),
                   sliver: SliverList.list(
                     children: [
-                      Text(tr('Projects'), style: text.displaySmall),
-                      const SizedBox(height: 16),
+                      PageHeader(
+                        tr('Projects'),
+                        subtitle: '${it.projects.length} ${tr('folders in the workspace')}',
+                        actions: [
+                          AppIconButton(icon: SimpleIcons.github, label: tr('Clone repo'), onTap: _clone),
+                          AppIconButton(icon: LucideIcons.folderOpen, label: tr('Open folder'), onTap: _openFolder),
+                        ],
+                      ),
                       TextField(
                         onChanged: (v) => setState(() {
                           query = v.toLowerCase();
@@ -1085,134 +1218,48 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                           prefixIcon: const Icon(LucideIcons.search, size: 18),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                await Navigator.of(context)
-                                    .push(MaterialPageRoute(builder: (_) => ReposScreen(agent: agent)));
-                                it.refreshProjects();
-                              },
-                              icon: const Icon(SimpleIcons.github, size: 16),
-                              label: Text(tr('Clone repo')),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                final dir = await FolderPicker.pick(context, agent);
-                                if (dir == null) return;
-                                await agent.newSession(dir: dir);
-                                if (context.mounted) await openChat(context, agent);
-                              },
-                              icon: const Icon(LucideIcons.folderOpen, size: 16),
-                              label: Text(tr('Open folder')),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: Space.lg),
                     ],
                   ),
                 ),
                 if (projects.isEmpty)
                   SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.all(40),
-                      child: Column(
-                        children: [
-                          const Illustration('projects', height: 200),
-                          const SizedBox(height: 12),
-                          Text(tr('Projects you create or clone appear here.'), style: text.bodySmall),
-                        ],
-                      ),
+                    child: EmptyState(
+                      icon: LucideIcons.folderPlus,
+                      title: query.isEmpty ? tr('No projects yet') : tr('Nothing matches.'),
+                      message: query.isEmpty ? tr('Projects you create or clone appear here.') : null,
+                      action: query.isEmpty
+                          ? Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: _clone,
+                                  icon: const Icon(SimpleIcons.github, size: 16),
+                                  label: Text(tr('Clone repo')),
+                                ),
+                                const SizedBox(width: Space.sm),
+                                OutlinedButton.icon(
+                                  onPressed: _openFolder,
+                                  icon: const Icon(LucideIcons.folderOpen, size: 16),
+                                  label: Text(tr('Open folder')),
+                                ),
+                              ],
+                            )
+                          : null,
                     ),
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 130),
+                    padding: const EdgeInsets.fromLTRB(Space.page, 0, Space.page, Space.xxl),
                     sliver: SliverGrid.builder(
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
-                        mainAxisSpacing: 18,
-                        crossAxisSpacing: 14,
-                        childAspectRatio: 0.82,
+                        mainAxisSpacing: Space.md,
+                        crossAxisSpacing: Space.md,
+                        mainAxisExtent: 138,
                       ),
                       itemCount: projects.length,
-                      itemBuilder: (context, i) {
-                        final pr = projects[i];
-                        return GestureDetector(
-                          onTap: () => _open(pr),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: MeshArt(
-                                  seed: pr.name,
-                                  radius: 22,
-                                  child: Stack(
-                                    children: [
-                                      Center(
-                                        child: Icon(
-                                          pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder,
-                                          size: 44,
-                                          color: const Color(0xFF111113).withValues(alpha: 0.55),
-                                        ),
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.all(12),
-                                        child: Align(
-                                          alignment: Alignment.topRight,
-                                          child: pr.isGit
-                                              ? Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white.withValues(alpha: 0.85),
-                                                    borderRadius: BorderRadius.circular(99),
-                                                  ),
-                                                  child: Row(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      const Icon(
-                                                        LucideIcons.gitBranch,
-                                                        size: 11,
-                                                        color: Color(0xFF111113),
-                                                      ),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        pr.branch ?? 'git',
-                                                        style: const TextStyle(
-                                                          fontSize: 10.5,
-                                                          fontWeight: FontWeight.w600,
-                                                          color: Color(0xFF111113),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                )
-                                              : null,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              Text(pr.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
-                              const SizedBox(height: 2),
-                              Text(
-                                pr.githubSlug ?? (pr.dirty ? 'uncommitted changes' : 'local folder'),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 11.5, color: p.muted),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                      itemBuilder: (context, i) => _ProjectCard(project: projects[i], onTap: () => _open(projects[i])),
                     ),
                   ),
               ],
@@ -1220,6 +1267,70 @@ class _ProjectsTabState extends State<_ProjectsTab> {
           ),
         );
       },
+    );
+  }
+}
+
+class _ProjectCard extends StatelessWidget {
+  const _ProjectCard({required this.project, required this.onTap});
+  final ProjectInfo project;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final pr = project;
+    return SurfaceCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IconTile(
+                icon: pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder,
+                color: MeshArt.tone(pr.name),
+                size: 38,
+              ),
+              const Spacer(),
+              if (pr.dirty)
+                Tooltip(
+                  message: tr('Uncommitted changes'),
+                  child: StatusDot(color: p.warning),
+                ),
+            ],
+          ),
+          const Spacer(),
+          Text(pr.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
+          const SizedBox(height: 2),
+          Text(
+            pr.githubSlug ?? (pr.dirty ? tr('uncommitted changes') : tr('local folder')),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11.5, color: p.muted),
+          ),
+          if (pr.isGit) ...[
+            const SizedBox(height: Space.sm),
+            Row(
+              children: [
+                Icon(LucideIcons.gitBranch, size: 12, color: p.faint),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    pr.branch ?? 'git',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontFamily: mono, fontSize: 11, color: p.faint),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -1,23 +1,23 @@
 <p align="center">
-  <img src="assets/brand/logo.png" width="120" alt="AndroPI logo">
+  <img src="assets/brand/logo.png" width="120" alt="Rynex logo">
 </p>
 
-<h1 align="center">AndroPI</h1>
+<h1 align="center">Rynex</h1>
 
 <p align="center">An AI coding agent that runs on your Android phone.<br>
 Write, run, preview and deploy code without a laptop.</p>
 
 <p align="center">
-  <a href="https://play.google.com/store/apps/details?id=com.imtaqin.andropi"><b>Google Play</b></a> ·
-  <a href="https://github.com/imtaqin/andropi/releases/latest"><b>APK downloads</b></a> ·
-  <a href="https://andropi.imtaqin.id"><b>Website</b></a>
+  <a href="https://play.google.com/store/apps/details?id=com.rynex.agent"><b>Google Play</b></a> ·
+  <a href="https://github.com/seseegy/rynex/releases/latest"><b>APK downloads</b></a> ·
+  <a href="https://github.com/seseegy/rynex"><b>Website</b></a>
 </p>
 
 <p align="center">
-  <img src="store/en/screenshots-panorama.png" alt="AndroPI screenshots">
+  <img src="store/en/screenshots-panorama.png" alt="Rynex screenshots">
 </p>
 
-AndroPI puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs locally in a
+Rynex puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs locally in a
 bundled Node.js runtime. It reads and writes files, runs shell commands in a real Debian or Alpine container,
 searches the web, and ships your project to GitHub Pages, Vercel or your own server. You bring the model:
 Anthropic, OpenAI, Gemini, OpenRouter and the other providers pi supports — or any OpenAI-compatible
@@ -44,7 +44,7 @@ endpoint you run yourself.
   - MCP servers, skills (with a searchable skills catalogue), prompt templates and slash commands.
 - **Everyday use.**
   - Image and file attachments, and voice input.
-  - Share to AndroPI from other apps; home screen widget and Quick Settings tile.
+  - Share to Rynex from other apps; home screen widget and Quick Settings tile.
   - Notifications.
   - Usage and cost tracking with a daily budget, and automatic fallback to another model.
   - App lock, encrypted tokens, and backup and restore.
@@ -113,4 +113,4 @@ change `tool/` or `agent/`.
 
 ## License
 
-[MIT](LICENSE) © imtaqin ([@fdciabdul](https://github.com/fdciabdul))
+[BSD 3-Clause](LICENSE) © seseegy. Rynex builds on BSD-licensed open-source code; the original copyright notice stays in [LICENSE](LICENSE) as that license requires.

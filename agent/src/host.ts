@@ -1,5 +1,5 @@
 /**
- * AndroPI agent host.
+ * Rynex agent host.
  *
  * Runs inside the bundled Node runtime on the device and exposes the pi SDK to
  * the Flutter app over JSONL on stdin/stdout:
@@ -57,8 +57,8 @@ type Command = { id?: number; type: string; [key: string]: any };
 const TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search", "web_fetch"];
 
 const agentDir = getAgentDir();
-const workspace = process.env.ANDROPI_WORKSPACE ?? process.cwd();
-const stateDir = join(agentDir, "andropi");
+const workspace = process.env.RYNEX_WORKSPACE ?? process.cwd();
+const stateDir = join(agentDir, "rynex");
 
 let modelRuntime: ModelRuntime;
 let settingsManager: SettingsManager;
@@ -146,7 +146,7 @@ async function buildSession(sessionManager: SessionManager, opts: { interactive:
 		agentDir,
 		settingsManager,
 		// Approvals and plan mode only make sense with someone watching.
-		extensionFactories: opts.interactive ? [{ name: "andropi", factory: guard.extension, hidden: true }] : [],
+		extensionFactories: opts.interactive ? [{ name: "rynex", factory: guard.extension, hidden: true }] : [],
 	});
 	await resourceLoader.reload();
 	const mcpTools = mcp.toolDefinitions();
@@ -256,14 +256,14 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 	};
 }
 
-const AGENTS_MARKER = "<!-- andropi:managed (delete this line to keep your own edits) -->";
+const AGENTS_MARKER = "<!-- rynex:managed (delete this line to keep your own edits) -->";
 
 /** Keeps the environment notes current, unless the user has taken the file over. */
 function ensureAgentsFile() {
 	const path = join(agentDir, "AGENTS.md");
 	if (existsSync(path)) {
 		const current = readFileSync(path, "utf8");
-		const ours = current.includes(AGENTS_MARKER) || current.startsWith("# Environment\n\nYou are running inside AndroPI");
+		const ours = current.includes(AGENTS_MARKER) || current.startsWith("# Environment\n\nYou are running inside Rynex");
 		if (!ours) return;
 	}
 	writeFileSync(
@@ -271,7 +271,7 @@ function ensureAgentsFile() {
 		`${AGENTS_MARKER}
 # Environment
 
-You are running inside AndroPI, an Android app, on the user's phone.
+You are running inside Rynex, an Android app, on the user's phone.
 
 - The shell is Android's /system/bin/sh (mksh) with toybox utilities, not bash.
   Prefer POSIX sh syntax. There is no sudo, apt or pkg.
@@ -362,15 +362,15 @@ async function reloadCustomProviders() {
 function backupTarget() {
 	const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
 	const shared = "/storage/emulated/0/Download";
-	const dir = existsSync(shared) ? join(shared, "AndroPI") : join(workspace, "backups");
+	const dir = existsSync(shared) ? join(shared, "Rynex") : join(workspace, "backups");
 	try {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, ".probe"), "");
 		unlinkSync(join(dir, ".probe"));
-		return join(dir, `andropi-backup-${stamp}.zip`);
+		return join(dir, `rynex-backup-${stamp}.zip`);
 	} catch {
 		mkdirSync(join(workspace, "backups"), { recursive: true });
-		return join(workspace, "backups", `andropi-backup-${stamp}.zip`);
+		return join(workspace, "backups", `rynex-backup-${stamp}.zip`);
 	}
 }
 
@@ -380,7 +380,7 @@ function createBackup(includeWorkspace: boolean) {
 		...collectFiles(join(agentDir, "sessions"), agentDir),
 		...collectFiles(join(agentDir, "skills"), agentDir),
 		...collectFiles(join(agentDir, "prompts"), agentDir),
-		...["settings.json", "AGENTS.md", "andropi/runs.json"]
+		...["settings.json", "AGENTS.md", "rynex/runs.json"]
 			.filter((f) => existsSync(join(agentDir, f)))
 			.map((f) => ({ name: f, data: readFileSync(join(agentDir, f)) })),
 	].map((e) => ({ name: `agent/${e.name}`, data: e.data }));
@@ -844,7 +844,7 @@ async function main() {
 	templates = new Templates(agentDir);
 	templates.seed(join(stateDir, "seeded-templates.json"));
 	checkpoints = new Checkpoints(join(stateDir, "checkpoints"));
-	container = new Container(process.env.ANDROPI_FILES ?? join(agentDir, "..", "..", ".."));
+	container = new Container(process.env.RYNEX_FILES ?? join(agentDir, "..", "..", ".."));
 	mcp = new Mcp(join(stateDir, "mcp.json"), () => send({ type: "mcp", servers: mcp.summary() }));
 	modelRuntime = await ModelRuntime.create();
 	settingsManager = SettingsManager.create(workspace, agentDir);

@@ -1,5 +1,5 @@
-name: andropi
-description: "Run the pi coding agent locally on Android."
+name: rynex
+description: "Rynex: an AI coding agent that runs on Android."
 publish_to: 'none'
 version: 0.1.2+3
 
@@ -33,6 +33,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - LICENSE
     - assets/illustrations/
     - assets/brand/
   fonts:

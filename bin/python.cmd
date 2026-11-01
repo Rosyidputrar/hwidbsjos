@@ -5,9 +5,9 @@ rem App Execution Alias, which just prints "Python was not found" and exits 9009
 rem `mise where` reads the installed tool from its registry rather than PATH, so
 rem this cannot resolve to itself again.
 setlocal
-for /f "delims=" %%i in ('mise where python 2^>nul') do set "ANDROPI_PYTHON_DIR=%%i"
-if not defined ANDROPI_PYTHON_DIR (
+for /f "delims=" %%i in ('mise where python 2^>nul') do set "RYNEX_PYTHON_DIR=%%i"
+if not defined RYNEX_PYTHON_DIR (
   echo python: mise could not resolve a Python for this checkout. Run `mise install`. 1>&2
   exit /b 9009
 )
-"%ANDROPI_PYTHON_DIR%\python.exe" %*
+"%RYNEX_PYTHON_DIR%\python.exe" %*

@@ -72,7 +72,7 @@ export class Mcp {
 
 	private async connect(s: McpServerConfig) {
 		await this.disconnect(s.id);
-		const entry: Live = { client: new Client({ name: "andropi", version: "1.0.0" }), tools: [], status: "connecting" };
+		const entry: Live = { client: new Client({ name: "rynex", version: "1.0.0" }), tools: [], status: "connecting" };
 		this.live.set(s.id, entry);
 		this.onChange();
 		try {
