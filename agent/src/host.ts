@@ -47,6 +47,7 @@ import { Notifier } from "./notify.js";
 import { syncLauncher } from "./launcher.js";
 import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
+import { BUILTIN_PROVIDERS, onlyOwnProviders } from "./own-providers.js";
 import { CustomProviders, fetchModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { onStoreProblem, storeProblemMessage } from "./state.js";
@@ -99,6 +100,8 @@ try {
 } catch { /* a failed rename must not stop the host; it starts empty instead */ }
 
 let modelRuntime: ModelRuntime;
+/** The runtime itself, before own-providers.ts narrows it: what pi knows, whether or not it may be used. */
+let realModelRuntime: ModelRuntime;
 let settingsManager: SettingsManager;
 let session: AgentSession | undefined;
 let integrations: Integrations;
@@ -1257,6 +1260,8 @@ async function handle(cmd: Command): Promise<unknown> {
 				mode,
 				transport: listenPath ? "daemon" : "stdio",
 				protocol: PROTOCOL,
+				// Whether the app should offer pi's built-in providers (sign in, API-key catalogue) next to the person's own endpoints.
+				builtinProviders: BUILTIN_PROVIDERS,
 				...state(),
 			};
 		case "state":
@@ -1440,7 +1445,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			return customProviders.list();
 		case "custom_provider_save": {
 			const custom = customProviders.ids();
-			const builtin = new Set(modelRuntime.getProviders().map((p) => p.id).filter((id) => !custom.has(id)));
+			// Ids pi knows (also while they are turned off): a custom endpoint may not take one.
+			const builtin = new Set(realModelRuntime.getProviders().map((p) => p.id).filter((id) => !custom.has(id)));
 			const saved = customProviders.save(cmd.provider ?? {}, builtin);
 			await modelRuntime.refresh({ allowNetwork: false });
 			// The open chat holds its own copy of the model: swap in the new definition (reasoning, limits) now
@@ -2061,7 +2067,9 @@ async function main() {
 	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.RYNEX_PREVIEW_IDLE_MS) || undefined });
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
-	modelRuntime = await ModelRuntime.create();
+	// Only the endpoints the person added are usable for now (own-providers.ts); pi sees a view of the runtime that says so.
+	realModelRuntime = await ModelRuntime.create();
+	modelRuntime = BUILTIN_PROVIDERS ? realModelRuntime : onlyOwnProviders(realModelRuntime, () => customProviders.ids());
 	// Never auto-trust project code: a cloned repo's .pi/extensions/*.ts
 	// would otherwise run inside the host with the user's tokens on merely
 	// opening the project. Project settings are not loaded while untrusted

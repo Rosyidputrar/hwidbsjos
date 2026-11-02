@@ -1109,3 +1109,37 @@ test("server mode: with no budget set (or room left) the same commands go ahead"
 	writeFileSync(m.mock.MOCK_RELEASE, "");
 	for (const id of [off.data.id, room.data.id]) await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === id, 30_000, "for a subagent to finish");
 });
+
+// ---------------------------------------------------------------------------
+// Only the endpoints the person added are usable (own-providers.ts). A key for a built-in provider in the environment is
+// what makes pi offer its models, so the host is started with some.
+
+test("built-in providers are off: not listed, not pickable, no sign-in, and a custom endpoint still works", async (t) => {
+	const { c, d } = await withModel(t, { ANTHROPIC_API_KEY: "sk-ant-fake", OPENAI_API_KEY: "sk-openai-fake", GEMINI_API_KEY: "fake" });
+	const hello = (await c.call("hello")).data;
+	assert.equal(hello.builtinProviders, false, "the app is told, so it shows only the endpoints");
+	assert.equal(hello.model?.provider, "mock", "the chat is on the endpoint's model");
+
+	const providers = (await c.call("providers")).data;
+	assert.deepEqual(providers.map((p) => p.id), ["mock"], `providers: ${providers.map((p) => p.id).join(", ")}`);
+	assert.equal(providers[0].custom, true);
+
+	const all = (await c.call("models", {})).data;
+	assert.deepEqual([...new Set(all.map((m) => m.provider))], ["mock"], "every model that can be picked belongs to an endpoint");
+	assert.deepEqual((await c.call("models", { provider: "anthropic" })).data, [], "a built-in provider has no models to pick");
+
+	const pick = await c.call("set_model", { provider: "anthropic", model: "claude-sonnet-4-5" });
+	assert.equal(pick.ok, false, "a built-in model cannot be chosen");
+	assert.match(pick.error, /Unknown model/);
+	assert.equal((await c.call("set_model", { provider: "mock", model: "mock-model" })).ok, true, "the endpoint's own still can");
+
+	const login = await c.call("login", { provider: "anthropic", method: "api_key" });
+	assert.equal(login.ok, false);
+	assert.match(login.error, /turned off/);
+
+	// An endpoint cannot take the id of a provider pi knows, even while that provider is off.
+	const shadow = await c.call("custom_provider_save", { provider: { id: "anthropic", name: "Mine", api: "openai-completions", baseUrl: "https://x.example/v1", apiKey: "k", models: [{ id: "m" }] } });
+	assert.equal(shadow.ok, false);
+	assert.match(shadow.error, /built-in provider/);
+	assert.equal(d.child.exitCode, null, "the host is still up");
+});

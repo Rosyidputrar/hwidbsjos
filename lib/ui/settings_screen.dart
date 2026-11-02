@@ -100,27 +100,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
           body: ListView(
             padding: const EdgeInsets.only(bottom: 32),
             children: [
-              _Header(tr('Connected')),
-              if (connected.isEmpty)
+              // Pi's built-in providers (sign in, API-key catalogue) are turned off for now: the host says so, and only the
+              // endpoints below are used.
+              if (!agent.builtinProviders)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Text(tr('No providers yet. Pick one below.'), style: text.bodySmall),
-                ),
-              for (final pr in connected)
-                _ProviderTile(provider: pr, agent: agent, custom: _custom, afterConnect: _afterConnect),
-              _Header(tr('Add provider')),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: TextField(
-                  onChanged: (v) => setState(() => query = v),
-                  decoration: InputDecoration(
-                    hintText: tr('Search providers'),
-                    prefixIcon: const Icon(LucideIcons.search, size: 18),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                  child: Text(
+                    tr('For now Rynex works with the endpoints you add yourself. Built-in providers are turned off.'),
+                    style: text.bodySmall,
                   ),
                 ),
-              ),
-              for (final pr in others)
-                _ProviderTile(provider: pr, agent: agent, custom: _custom, afterConnect: _afterConnect),
+              if (agent.builtinProviders) ...[
+                _Header(tr('Connected')),
+                if (connected.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: Text(tr('No providers yet. Pick one below.'), style: text.bodySmall),
+                  ),
+                for (final pr in connected)
+                  _ProviderTile(provider: pr, agent: agent, custom: _custom, afterConnect: _afterConnect),
+                _Header(tr('Add provider')),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: TextField(
+                    onChanged: (v) => setState(() => query = v),
+                    decoration: InputDecoration(
+                      hintText: tr('Search providers'),
+                      prefixIcon: const Icon(LucideIcons.search, size: 18),
+                    ),
+                  ),
+                ),
+                for (final pr in others)
+                  _ProviderTile(provider: pr, agent: agent, custom: _custom, afterConnect: _afterConnect),
+              ],
               _Header(
                 tr('Custom endpoints'),
                 trailing: TextButton.icon(
@@ -133,7 +145,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                   child: Text(
-                    tr('Point the app at any server that speaks the OpenAI, Anthropic or Google API: Ollama, LM Studio, vLLM, a hosted service, a proxy or your own gateway.'),
+                    tr(
+                      'Point the app at any server that speaks the OpenAI, Anthropic or Google API: Ollama, LM Studio, vLLM, a hosted service, a proxy or your own gateway.',
+                    ),
                     style: text.bodySmall,
                   ),
                 ),
@@ -293,7 +307,10 @@ class _ProviderTile extends StatelessWidget {
               children: [
                 Text(provider.name, style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 4),
-                Text(tr('Remove the stored credential from this device.'), style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  tr('Remove the stored credential from this device.'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 20),
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: context.palette.danger),
@@ -310,7 +327,11 @@ class _ProviderTile extends StatelessWidget {
     }
     if (methods.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr('{name} uses ambient credentials and cannot be set up here.').replaceAll('{name}', provider.name))),
+        SnackBar(
+          content: Text(
+            tr('{name} uses ambient credentials and cannot be set up here.').replaceAll('{name}', provider.name),
+          ),
+        ),
       );
       return;
     }
@@ -344,9 +365,8 @@ class _ProviderTile extends StatelessWidget {
     final wasConnected = agent.providers.any((x) => x.configured);
     final ok = await showLoginSheet(context, agent, provider, method);
     if (ok == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr('{name} connected').replaceAll('{name}', provider.name))),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(tr('{name} connected').replaceAll('{name}', provider.name))));
       await afterConnect(wasConnected);
     }
   }

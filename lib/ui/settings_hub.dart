@@ -267,7 +267,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     color: p.accent,
                     title: tr('Models & providers'),
                     subtitle: connected.isEmpty
-                        ? tr('Connect a provider to start')
+                        ? tr('Add an endpoint to start')
                         : '${connected.map((x) => x.name).join(', ')}${agent.model != null ? ' · ${agent.model!.name}' : ''}',
                     onTap: () => _open(SettingsScreen(agent: agent)),
                   ),
@@ -753,7 +753,7 @@ class _RynexCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            tr('An AI coding agent on your phone. Bring your own provider: sign in with an account, use an API key, or point Rynex at your own server.'),
+            tr('An AI coding agent on your phone. Bring your own endpoint: point Rynex at any server that speaks the OpenAI, Anthropic or Google API.'),
             style: text.bodyMedium?.copyWith(color: p.muted),
           ),
           const SizedBox(height: 12),
