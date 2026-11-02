@@ -33,26 +33,36 @@ class EnergyColors {
   /// How much of the tail's fade is taken back: a tail fading to nearly nothing on white reads as lavender haze.
   final double tailFloor;
 
-  static const dark = EnergyColors(
-    // Blue and indigo a step lighter than the deep ones they started as (3:1 on the page): at 44 px the tail's end
-    // sank into black.
-    palette: [Color(0xFFDBEAFE), Color(0xFF4A6BFF), Color(0xFF6366F1), Color(0xFF7C3AED), Color(0xFFC026D3)],
-    halo: Color(0x297C3AED),
-    success: Color(0xFF4ADE80),
-    failure: Color(0xFFFF6369),
-    tailFloor: .2,
-  );
+  static final _derived = <(Color, Color, bool), EnergyColors>{};
 
-  /// On white a light head disappears and a glow turns into haze: the same hues, deeper, and only a faint halo.
-  static const light = EnergyColors(
-    palette: [Color(0xFF3730A3), Color(0xFF1D4ED8), Color(0xFF4F46E5), Color(0xFF6D28D9), Color(0xFFA21CAF)],
-    halo: Color(0x146D28D9),
-    success: Color(0xFF16A34A),
-    failure: Color(0xFFDC2626),
-    tailFloor: .35,
-  );
-
-  static EnergyColors of(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? dark : light;
+  /// The comet colours follow the accent the user picked: the head is a pale tint of it (a deep shade on the
+  /// light theme, where a pale head would vanish into the page), the tail sweeps the hue on from the accent's
+  /// own, and the check and cross keep the theme's success and danger colours, so an outcome reads the same
+  /// whatever accent is chosen.
+  static EnergyColors of(BuildContext context) {
+    final p = context.palette;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return _derived.putIfAbsent((p.accent, p.accentAlt, dark), () {
+      final hsl = HSLColor.fromColor(p.accent);
+      final head = dark
+          ? hsl.withLightness(0.88).withSaturation((hsl.saturation * 0.75).clamp(0.0, 1.0)).toColor()
+          : hsl.withLightness(0.30).toColor();
+      // The tail sweeps the hue on from the accent's own (+0/+15/+35/+60 degrees, deepening as it goes),
+      // the way the original comet swept blue to magenta; anchored at the accent, the whole comet takes
+      // the picked colour's family instead of washing into the second accent.
+      Color tail(double degrees, double lightnessScale) => hsl
+          .withHue((hsl.hue + degrees) % 360)
+          .withLightness((hsl.lightness * lightnessScale).clamp(0.0, 1.0))
+          .toColor();
+      return EnergyColors(
+        palette: [head, tail(0, 1), tail(15, 0.95), tail(35, 0.85), tail(60, 0.75)],
+        halo: hsl.withHue((hsl.hue + 35) % 360).toColor().withValues(alpha: dark ? 0.16 : 0.08),
+        success: p.success,
+        failure: p.danger,
+        tailFloor: dark ? .2 : .35,
+      );
+    });
+  }
 }
 
 // The comet's tail, head first: how wide, how opaque and which colour each of its 14 parts is.
