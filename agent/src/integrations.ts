@@ -95,7 +95,7 @@ export interface AppSettings {
 	/** Search through the gateway provider (the first custom provider; OpenAI Responses + Anthropic Messages legs); unset means on. */
 	openaiSearch?: boolean;
 	anthropicSearch?: boolean;
-	/** Dedicated search models for the router backends; unset means the defaults below. */
+	/** Dedicated search models for the gateway backends; unset means the defaults below. */
 	openaiSearchModel?: string;
 	anthropicSearchModel?: string;
 	/** Per-project web_search toggle, keyed by project path; absent means on. */

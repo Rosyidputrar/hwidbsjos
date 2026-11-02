@@ -999,7 +999,7 @@ class _ConnectCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  tr('Connect Rynex'),
+                  tr('Connect a provider'),
                   style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
                 ),
               ),
@@ -1017,7 +1017,7 @@ class _ConnectCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            tr('Add your Rynex Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through Rynex.'),
+            tr('Sign in with an account, add an API key, or point Rynex at your own endpoint \u2014 Claude, GPT, Gemini, DeepSeek and more, through any provider you choose.'),
             style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
           ),
           const SizedBox(height: 16),
@@ -1028,7 +1028,7 @@ class _ConnectCard extends StatelessWidget {
               minimumSize: const Size(0, 44),
             ),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
-            child: Text(tr('Add API key')),
+            child: Text(tr('Connect a provider')),
           ),
         ],
       ),

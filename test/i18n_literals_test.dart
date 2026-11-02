@@ -39,7 +39,6 @@ const _allowed = {
   'folder_picker.dart:my-project',
   'skills_screen.dart:owner/repo/skills/name',
   'skills_screen.dart:skills.md',
-  'settings_screen.dart:Rynex Router',
   'server_screen.dart:agent.example.com',
   'server_screen.dart:rynex1:…',
   'illustration.dart:Illustrations by Storyset', // the licence's credit line, shown in English as it is written

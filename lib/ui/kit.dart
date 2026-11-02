@@ -12,7 +12,7 @@ import 'theme.dart';
 
 /// Shared building blocks for the Rynex AI Agent look.
 
-/// The app mark: the Rynex Router logo, with no tile behind it.
+/// The app mark: the Rynex logo, with no tile behind it.
 class LogoMark extends StatelessWidget {
   const LogoMark({super.key, this.size = 40, this.glow = true});
   final double size;

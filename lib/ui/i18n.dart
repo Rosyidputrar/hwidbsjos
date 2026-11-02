@@ -127,7 +127,6 @@ const _id = <String, String>{
   'AI': 'AI',
   'About': 'Tentang',
   'Powered by': 'Ditenagai oleh',
-  'Connect Rynex': 'Hubungkan Rynex',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
   'You sent': 'Kamu mengirim',
@@ -181,8 +180,8 @@ const _id = <String, String>{
   'The agent cannot use any model until you add a key again.':
       'Agent tidak bisa memakai model apa pun sampai kamu memasukkan key lagi.',
   'Provider': 'Provider',
-  'Add your Rynex Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through Rynex.':
-      'Masukkan API key Rynex Router kamu dan dapatkan Claude, GPT, Gemini, DeepSeek, dan lainnya \u2014 semua lewat Rynex.',
+  'Sign in with an account, add an API key, or point Rynex at your own endpoint \u2014 Claude, GPT, Gemini, DeepSeek and more, through any provider you choose.':
+      'Masuk dengan akun, tambahkan API key, atau arahkan Rynex ke endpoint kamu sendiri \u2014 Claude, GPT, Gemini, DeepSeek, dan lainnya, lewat provider pilihanmu.',
 
   'Repositories': 'Repositori',
   'Accounts & servers': 'Akun & server',

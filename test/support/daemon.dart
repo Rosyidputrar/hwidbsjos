@@ -9,7 +9,7 @@ import 'package:rynex/agent/agent_client.dart';
 /// agent/test/build-harness.mjs), with a throwaway home, so Dart tests meet it the way the app does through ssh. The
 /// attach program is the real `server/rynex-attach`.
 ///
-/// Rynex's host only talks to Rynex Router; with a [MockModel] the router's chat completions are sent to it by a
+/// The host talks to whatever provider is connected; with a [MockModel] the provider's chat completions are sent to it by a
 /// preloaded fetch (agent/test/fixtures/router-redirect.mjs), and [useMockModel] saves a key and picks the model.
 ///
 /// Needs the harness built and `node` on the PATH. Otherwise [unavailable] says what is missing and the tests skip,
