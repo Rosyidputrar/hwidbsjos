@@ -476,11 +476,11 @@ void wideScreenTests() {
 }
 
 void backTests() {
-  testWidgets('UI-20: Back on Chats, Skills or Projects goes to Home instead of leaving the app', (tester) async {
+  testWidgets('UI-20: Back on Chats, Projects or Settings goes to Home instead of leaving the app', (tester) async {
     FakeHost();
     await pumpLook(tester, const Look(), HomeShell(agent: newAgent()), height: 1600);
     await frames(tester);
-    for (final tab in ['Chats', 'Skills', 'Projects']) {
+    for (final tab in ['Chats', 'Projects', 'Settings']) {
       await tester.tap(find.bySemanticsLabel(RegExp('^$tab')).first);
       await frames(tester, 12);
       final handled = await tester.binding.handlePopRoute();

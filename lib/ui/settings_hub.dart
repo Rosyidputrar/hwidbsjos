@@ -35,8 +35,11 @@ import 'usage_screen.dart';
 
 /// The settings home: everything the agent can use, grouped.
 class SettingsHub extends StatefulWidget {
-  const SettingsHub({super.key, required this.agent});
+  const SettingsHub({super.key, required this.agent, this.embedded = false});
   final AgentController agent;
+
+  /// Shown as a home tab: no app bar of its own, just the tab's title.
+  final bool embedded;
 
   @override
   State<SettingsHub> createState() => _SettingsHubState();
@@ -193,9 +196,7 @@ class _SettingsHubState extends State<SettingsHub> {
           'custom' => tr('Custom DoH'),
           _ => 'Cloudflare DoH',
         };
-        return Scaffold(
-          appBar: AppBar(title: Text(tr('Settings'))),
-          body: ContentWidth(
+        final body = ContentWidth(
             child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
             children: [
@@ -559,8 +560,23 @@ class _SettingsHubState extends State<SettingsHub> {
               ),
             ],
           ),
-          ),
         );
+        if (widget.embedded) {
+          return SafeArea(
+            bottom: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 2),
+                  child: Text(tr('Settings'), style: text.displaySmall),
+                ),
+                Expanded(child: body),
+              ],
+            ),
+          );
+        }
+        return Scaffold(appBar: AppBar(title: Text(tr('Settings'))), body: body);
       },
     );
   }
