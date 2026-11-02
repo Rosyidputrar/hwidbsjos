@@ -9,7 +9,8 @@
 # answer them 404, which the app took as "up to date". So releases go to a public repository that holds only the
 # APKs (RELEASES_REPO below), with a fine-grained token that can write to that repository alone:
 #   RELEASES_TOKEN     fine-grained token, repository access: RELEASES_REPO only, Contents: read and write
-# RELEASES_REPO needs at least one commit (a README is enough): release tags are made on its default branch.
+# RELEASES_REPO (seseegy/rynex-releases) must be public. It may be brand new and empty: the "Releases repository" step
+# commits a README when it has no commit yet, because release tags are made on its default branch.
 #
 # Versions never collide: the patch number and the build number both grow with the run number, and runs are
 # serialized. The base comes from pubspec.yaml (version: X.Y.Z+B), so bump X.Y there for a bigger release.
@@ -77,6 +78,30 @@ jobs:
         run: |
           # Fail before the long build, not after it.
           if [ -z "$RELEASES_TOKEN" ]; then echo "::error::Repository secret RELEASES_TOKEN is missing (see the top of this file)"; exit 1; fi
+
+      # Fail before the long build, not after it: the releases repository must be reachable with the token, public, and
+      # have a commit (a brand-new empty repository has no branch for the release tag to point at, so `gh release
+      # create` fails there; a README is committed once through the contents API).
+      - name: Releases repository
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/$RELEASES_REPO" --jq .private > "$RUNNER_TEMP/visibility" 2> "$RUNNER_TEMP/err"; then
+            echo "::error::RELEASES_TOKEN cannot see $RELEASES_REPO: it needs repository access to that repository and Contents: read and write. $(cat "$RUNNER_TEMP/err")"
+            exit 1
+          fi
+          if [ "$(cat "$RUNNER_TEMP/visibility")" = true ]; then
+            echo "::error::$RELEASES_REPO is private. Phones check for updates without signing in, so its releases would answer them 404 and the app would say it is up to date. Make it public."
+            exit 1
+          fi
+          if ! gh api "repos/$RELEASES_REPO/commits?per_page=1" > /dev/null 2>&1; then
+            echo "$RELEASES_REPO is empty; committing a README so releases have a branch to tag"
+            readme=$(printf '# Rynex releases\n\nSigned APKs of Rynex, one for each phone ABI, with SHA256SUMS.txt. The app updates itself from the latest release here.\n' | base64 -w0)
+            gh api -X PUT "repos/$RELEASES_REPO/contents/README.md" -f message="Initial commit" -f content="$readme" > /dev/null
+          fi
+          rm -f "$RUNNER_TEMP/visibility" "$RUNNER_TEMP/err"
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

@@ -35,22 +35,11 @@ export interface SearchKeys {
 	s1Screenshot: boolean;
 	/** Whether the agent uses TinyFish Search when it has keys. */
 	tinyfishSearch: boolean;
-	/** Gateway search: OpenAI Responses + Anthropic Messages, both with a server-side web_search tool. */
-	openaiSearch: boolean;
-	anthropicSearch: boolean;
-	/** Dedicated search models for the gateway backends (defaults filled in by the host). */
-	openaiSearchModel?: string;
-	anthropicSearchModel?: string;
 	/** Per-project web_search toggle, keyed by project path; absent means on. */
 	projectSearch?: Record<string, boolean>;
 	/** Per-backend switches for the keyed search tools (Search1API already had one). */
 	braveSearch: boolean;
 	tavilySearch: boolean;
-	/** The conversation's active model slug + the user's gateway endpoint (a custom provider they saved), merged in by the host (never settings of their own). */
-	activeModel?: string;
-	gatewayKey?: string;
-	gatewayBaseUrl?: string;
-	gatewayApi?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,218 +301,8 @@ async function braveHtmlSearch(q: string, n: number, signal?: AbortSignal): Prom
 	return out;
 }
 
-// ---------------------------------------------------------------------------
-// Gateway search (OpenAI Responses + Anthropic Messages)
-//
-// Both are model-driven: the request carries a server-side web_search tool and
-// the model decides when to search. What comes back is citations (OpenAI) or
-// tool-result blocks (Anthropic) — titles + URLs for sure, snippets only where
-// the provider includes them. An empty snippet is fine: the agent follows up
-// with web_fetch, exactly as it does for the other backends.
-//
-// A model call can take a while on a phone connection, but each backend is
-// only one step of the fallback chain: two slow gateway calls used to hold one
-// search for four minutes. Any failure (unsupported tool, unknown model, bad
-// key, timeout) just falls through to the next backend in webSearch().
-
-/** Reassemble a plain-JSON-shaped body from an SSE stream (Responses or Messages shape). Returns null when the stream carries nothing usable. */
-function parseSseBody(raw: string, kind: "responses" | "messages"): any | null {
-	const events: any[] = [];
-	for (const line of raw.split("\n")) {
-		const trimmed = line.trim();
-		if (!trimmed.startsWith("data:")) continue;
-		const payload = trimmed.slice(5).trim();
-		if (!payload || payload === "[DONE]") continue;
-		try {
-			events.push(JSON.parse(payload));
-		} catch { /* a partial line at the cut-off is not fatal */ }
-	}
-	if (events.length === 0) return null;
-	if (kind === "responses") {
-		// The terminal event carries the complete response object.
-		const done = [...events].reverse().find((e) => e.type === "response.completed" && e.response);
-		if (done) return done.response;
-		return null;
-	}
-	// Messages: rebuild the content array from block start/delta events.
-	const blocks: any[] = [];
-	const byIndex = new Map<number, any>();
-	for (const e of events) {
-		if (e.type === "content_block_start" && typeof e.index === "number") {
-			const b: any = { ...(e.content_block ?? {}) };
-			if (b.type === "text") {
-				b.text = b.text ?? "";
-				b.citations = b.citations ?? [];
-			}
-			if (b.type === "web_search_tool_result") b.content = b.content ?? [];
-			blocks[e.index] = b;
-			byIndex.set(e.index, b);
-			continue;
-		}
-		if (e.type === "content_block_delta" && typeof e.index === "number") {
-			const b = byIndex.get(e.index);
-			if (!b) continue;
-			const d = e.delta ?? {};
-			if (d.type === "text_delta" && typeof d.text === "string") b.text = (b.text ?? "") + d.text;
-			// Search citations stream as citation deltas on the text block.
-			if (d.type === "citation" && d.citation) (b.citations ??= []).push(d.citation);
-			if (d.type === "web_search_result_location") (b.citations ??= []).push(d);
-			// Tool-result content may arrive as delta content items.
-			if (Array.isArray(d.content)) (b.content ??= []).push(...d.content);
-			continue;
-		}
-	}
-	const content = blocks.filter(Boolean);
-	return content.length > 0 ? { content } : null;
-}
-
-async function gatewayRequest(path: string, key: string, body: unknown, signal?: AbortSignal, extraHeaders?: Record<string, string>, sseKind?: "responses" | "messages") {
-	const timeout = AbortSignal.timeout(45_000);
-	const res = await fetch(path, {
-		method: "POST",
-		headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...(extraHeaders ?? {}) },
-		body: JSON.stringify(body),
-		signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-	});
-	const raw = await res.text().catch(() => "");
-	if (!res.ok) {
-		let message = raw.slice(0, 200);
-		try {
-			const json = JSON.parse(raw);
-			message = json.error?.message ?? json.error ?? json.message ?? message;
-		} catch { /* keep the raw slice */ }
-		throw new Error(`${res.status}${message ? `: ${message}` : ""}`);
-	}
-	try {
-		return JSON.parse(raw) as any;
-	} catch {
-		// Some gateways answer the Claude path with an SSE stream even when
-		// plain JSON was asked for (proven 2026-10-25: /v1/messages returned
-		// event:/data: lines). Reassemble the same body shape the parsers
-		// below expect instead of failing with "non-JSON".
-		if (sseKind) {
-			const reassembled = parseSseBody(raw, sseKind);
-			if (reassembled) return reassembled;
-		}
-		throw new Error("The gateway returned a response that is neither JSON nor SSE");
-	}
-}
-
-async function openaiResponsesSearch(q: string, n: number, model: string, keys: SearchKeys, signal?: AbortSignal): Promise<SearchResult[]> {
-	const base = (keys.gatewayBaseUrl ?? "").replace(/\/+$/, "");
-	const body = await gatewayRequest(
-		`${base}/responses`,
-		keys.gatewayKey ?? "",
-		{ model, input: `Search the web for: ${q}`, tools: [{ type: "web_search" }], stream: false },
-		signal,
-		undefined,
-		"responses",
-	);
-	// The message item carries the answer text + url_citation annotations. A
-	// web_search_call item proves the model actually searched (vs. answering
-	// directly), so it is tracked: "did not search" and "searched but nothing
-	// parsable" are different failures with different fixes.
-	let text = "";
-	let sawSearchCall = false;
-	const citations: { title: string; url: string; start: number; end: number }[] = [];
-	for (const item of body.output ?? []) {
-		if (item.type === "web_search_call") {
-			sawSearchCall = true;
-			continue;
-		}
-		if (item.type !== "message") continue;
-		for (const part of item.content ?? []) {
-			// Gateways sometimes translate output_text to plain text parts.
-			if (part.type !== "output_text" && part.type !== "text") continue;
-			text += part.text ?? "";
-			for (const a of part.annotations ?? []) {
-				if (a.url && (a.type === "url_citation" || !a.type)) citations.push({ title: a.title ?? "", url: a.url, start: a.start_index ?? 0, end: a.end_index ?? 0 });
-			}
-		}
-	}
-	const out: SearchResult[] = [];
-	const seen = new Set<string>();
-	for (const c of citations) {
-		if (seen.has(c.url) || out.length >= n) continue;
-		seen.add(c.url);
-		const snippet = text
-			.slice(Math.max(0, c.start - 150), Math.min(text.length, c.end + 150))
-			.replace(/\s+/g, " ")
-			.trim();
-		out.push({ title: c.title, url: c.url, snippet });
-	}
-	if (out.length === 0) {
-		throw new Error(sawSearchCall ? "OpenAI search ran but returned no citations" : "OpenAI model did not search for this query");
-	}
-	return out;
-}
-
-async function anthropicMessagesSearch(q: string, n: number, model: string, keys: SearchKeys, signal?: AbortSignal): Promise<SearchResult[]> {
-	const base = (keys.gatewayBaseUrl ?? "").replace(/\/+$/, "");
-	const body = await gatewayRequest(
-		`${base}/messages`,
-		keys.gatewayKey ?? "",
-		{
-			model,
-			max_tokens: 1024,
-			messages: [{ role: "user", content: `Search the web for: ${q}` }],
-			tools: [{ type: "web_search_20250305", name: "web_search", max_uses: n }],
-			stream: false,
-		},
-		signal,
-		{ "anthropic-version": "2023-06-01" },
-		"messages",
-	);
-	const out: SearchResult[] = [];
-	const seen = new Set<string>();
-	let sawSearch = false;
-	const push = (title: string, url: string, snippet: string) => {
-		if (!url || seen.has(url) || out.length >= n) return;
-		seen.add(url);
-		out.push({ title, url, snippet });
-	};
-	for (const block of body.content ?? []) {
-		if (block.type === "server_tool_use" && block.name === "web_search") {
-			sawSearch = true;
-			continue;
-		}
-		if (block.type === "web_search_tool_result") {
-			for (const r of block.content ?? []) {
-				if (r.type === "web_search_result") push(r.title ?? "", r.url, "");
-			}
-			continue;
-		}
-		// Some gateways return search citations on the text blocks instead of tool-result blocks.
-		if (block.type === "text" && Array.isArray(block.citations)) {
-			for (const c of block.citations) {
-				if (c.type === "web_search_result_location") push(c.title ?? "", c.url, c.cited_text ?? "");
-			}
-		}
-	}
-	if (out.length === 0) {
-		throw new Error(sawSearch ? "Anthropic search ran but returned no results" : "Anthropic model did not search for this query");
-	}
-	return out;
-}
-
 export async function webSearch(q: string, n: number, keys: SearchKeys, signal?: AbortSignal, source?: string) {
 	const attempts: [string, () => Promise<SearchResult[]>][] = [];
-	// The model-backed legs run on the user's own gateway endpoint (a custom
-	// provider they saved), with dedicated search models from settings, not
-	// the conversation's model. The OpenAI leg needs an OpenAI-shaped
-	// gateway, the Anthropic leg an Anthropic-shaped one. Priority is fixed:
-	// OpenAI first, then Anthropic, then the keyed engines below, then
-	// DuckDuckGo. An empty search model skips that backend (the toggle alone
-	// does not decide it).
-	const openaiModel = (keys.openaiSearchModel ?? "").trim();
-	const anthropicModel = (keys.anthropicSearchModel ?? "").trim();
-	const gatewayApi = keys.gatewayApi ?? "";
-	if (keys.openaiSearch && keys.gatewayKey && openaiModel && (gatewayApi === "openai-completions" || gatewayApi === "openai-responses")) {
-		attempts.push(["openai-responses", () => openaiResponsesSearch(q, n, openaiModel, keys, signal)]);
-	}
-	if (keys.anthropicSearch && keys.gatewayKey && anthropicModel && gatewayApi === "anthropic-messages") {
-		attempts.push(["anthropic-messages", () => anthropicMessagesSearch(q, n, anthropicModel, keys, signal)]);
-	}
 	if (keys.s1Search && keys.s1.length) {
 		const name = source ? `search1api/${source}` : "search1api";
 		attempts.push([name, () => withKeys("Search1API", keys.s1, (k) => s1Search(q, n, k, source, signal), s1KeyProblem)]);
@@ -966,7 +745,7 @@ export function webTools(keys: () => SearchKeys, cwd: () => string) {
 			],
 			parameters: Type.Object({
 				query: Type.String({ description: "Search query" }),
-				count: Type.Optional(Type.Number({ description: "Target number of results (default 8, max 20). List engines return this many; OpenAI/Anthropic gateway backends return however many sources the model cites." })),
+				count: Type.Optional(Type.Number({ description: "Target number of results (default 8, max 20)." })),
 				source: Type.Optional(
 					Type.String({
 						description:

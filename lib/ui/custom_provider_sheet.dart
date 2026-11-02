@@ -53,6 +53,12 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
   final models = TextEditingController();
   final contextWindow = TextEditingController();
   final maxTokens = TextEditingController();
+  final priceIn = TextEditingController();
+  final priceOut = TextEditingController();
+
+  /// The prices the sheet opened with, to tell "cleared" from "never set".
+  String _priceInStart = '';
+  String _priceOutStart = '';
 
   String api = 'openai-completions';
   bool images = false;
@@ -81,12 +87,32 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
         for (final m in provider.models) (m.name == null || m.name == m.id) ? m.id : '${m.id} | ${m.name}',
       ].join('\n');
       images = provider.models.any((m) => m.vision);
+      // One price for the whole endpoint: the first model that has one shows it.
+      for (final m in provider.models) {
+        final cost = m.json['cost'];
+        if (cost is Map) {
+          priceIn.text = _plain(cost['input']);
+          priceOut.text = _plain(cost['output']);
+          break;
+        }
+      }
+      _priceInStart = priceIn.text;
+      _priceOutStart = priceOut.text;
     }
   }
 
+  /// 3 -> "3", 0.15 -> "0.15"; empty for nothing or zero.
+  static String _plain(Object? v) {
+    final n = v is num ? v.toDouble() : 0.0;
+    if (n <= 0) return '';
+    return n == n.roundToDouble() ? n.round().toString() : n.toString();
+  }
+
+  static double _price(String text) => double.tryParse(text.trim().replaceAll(',', '.')) ?? 0;
+
   @override
   void dispose() {
-    for (final c in [name, baseUrl, apiKey, models, contextWindow, maxTokens]) {
+    for (final c in [name, baseUrl, apiKey, models, contextWindow, maxTokens, priceIn, priceOut]) {
       c.dispose();
     }
     super.dispose();
@@ -121,6 +147,11 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
     }
     final window = int.tryParse(contextWindow.text.trim());
     final output = int.tryParse(maxTokens.text.trim());
+    // Prices apply to every model of the endpoint. Filled in: they replace what the models carried. Emptied after
+    // having been set: the prices go. Untouched and empty: a fetched catalog's own prices stay.
+    final pIn = _price(priceIn.text), pOut = _price(priceOut.text);
+    final hasPrice = pIn > 0 || pOut > 0;
+    final clearPrice = !hasPrice && (_priceInStart.isNotEmpty || _priceOutStart.isNotEmpty);
     setState(() {
       busy = true;
       error = null;
@@ -143,6 +174,8 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
               if (_known[m.id]?['contextWindow'] == null && window != null && window > 0) 'contextWindow': window,
               if (_known[m.id]?['maxTokens'] == null && output != null && output > 0) 'maxTokens': output,
               'input': images ? ['text', 'image'] : ['text'],
+              if (hasPrice) 'cost': {'input': pIn, 'output': pOut, 'cacheRead': 0, 'cacheWrite': 0},
+              if (clearPrice) 'cost': null,
             },
         ],
       });
@@ -333,6 +366,18 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
                   const SizedBox(width: 10),
                   Expanded(child: field(maxTokens, tr('Max output'), hint: '16384', simple: true, type: TextInputType.number)),
                 ],
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: field(priceIn, tr('Input price (\$ / 1M tokens)'), hint: '0.15', simple: true, type: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 10),
+                  Expanded(child: field(priceOut, tr('Output price (\$ / 1M tokens)'), hint: '0.60', simple: true, type: const TextInputType.numberWithOptions(decimal: true))),
+                ],
+              ),
+              Text(
+                tr('Optional. With prices, chats show what they cost and the daily limit can stop spending. Without them the cost is unknown.'),
+                style: text.bodySmall,
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,

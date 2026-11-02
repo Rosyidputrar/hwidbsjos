@@ -1077,7 +1077,7 @@ test("with no limit set, a model at the default's floor is left to its own limit
 // The daily budget: every way of spending asks for it (BE-11). Only prompt and retry did; a plan being carried out, a
 // subagent and a picture started whatever was left. The spend is made up by the test hook (nothing is bought).
 
-test("server mode: with the daily budget used up, a plan, a retry, a subagent and a picture are refused before anything is sent", async (t) => {
+test("server mode: with the daily budget used up, a plan, a retry and a subagent are refused before anything is sent", async (t) => {
 	const m = await withModel(t, { RYNEX_TEST_SPENT_USD: "5.02" });
 	const set = await m.c.call("settings_set", { settings: { dailyBudget: 5 } });
 	assert.equal(set.ok, true, set.error);
@@ -1087,7 +1087,6 @@ test("server mode: with the daily budget used up, a plan, a retry, a subagent an
 		["plan_approve", {}],
 		["retry", {}],
 		["subagent_start", { task: "Periksa lima berkas", profile: "read" }],
-		["custom_provider_images_generate", { model: "gpt-image", prompt: "kucing", size: "1024x1024" }],
 	]) {
 		const r = await m.c.call(type, args);
 		assert.equal(r.ok, false, `${type} was not refused`);

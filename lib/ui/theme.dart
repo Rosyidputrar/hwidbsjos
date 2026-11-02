@@ -169,7 +169,7 @@ const accentChoices = <(Color, Color)>[
   (Color(0xFFD6409F), Color(0xFFF07CC0)),
   (Color(0xFF12A594), Color(0xFF3BD3C0)),
   // Appended, so saved indexes keep pointing at the same colours.
-  (Color(0xFF7C5CFC), Color(0xFFA48CFF)),
+  (Color(0xFF7656F2), Color(0xFFA48CFF)),
   (Color(0xFF5B5BD6), Color(0xFF8B8DFF)),
 ];
 
@@ -325,13 +325,26 @@ class Appearance extends ValueNotifier<ThemeMode> {
 class Radii {
   const Radii._();
 
+  static const double xs = 6;
+  static const double sm = 10;
+  static const double md = 14;
+  static const double lg = 20;
+  static const double xl = 28;
+  static const double sheet = 28;
+  static const double pill = 99;
+}
+
+/// Spacing scale. Every padding and gap in the UI is one of these.
+abstract final class Space {
   static const double xs = 4;
   static const double sm = 8;
   static const double md = 12;
-  static const double lg = 18;
-  static const double xl = 24;
-  static const double sheet = 28;
-  static const double pill = 99;
+  static const double lg = 16;
+  static const double xl = 20;
+  static const double xxl = 28;
+
+  /// Horizontal padding of every page.
+  static const double page = 20;
 }
 
 /// Motion shared by the app's animations, so they feel like one family: short, easing out.
@@ -373,10 +386,10 @@ ThemeData buildTheme(Brightness brightness) {
       TextStyle(fontFamily: 'Geist', fontSize: size, fontWeight: w, color: c, height: height, letterSpacing: spacing);
 
   final text = TextTheme(
-    displayMedium: t(36, FontWeight.w700, p.text, height: 1.08, spacing: -1.4),
-    displaySmall: t(30, FontWeight.w700, p.text, height: 1.12, spacing: -1.1),
-    headlineSmall: t(24, FontWeight.w700, p.text, height: 1.2, spacing: -0.7),
-    titleLarge: t(19, FontWeight.w700, p.text, height: 1.3, spacing: -0.4),
+    displayMedium: t(32, FontWeight.w600, p.text, height: 1.1, spacing: -1.2),
+    displaySmall: t(28, FontWeight.w600, p.text, height: 1.12, spacing: -1),
+    headlineSmall: t(23, FontWeight.w600, p.text, height: 1.2, spacing: -0.6),
+    titleLarge: t(18, FontWeight.w600, p.text, height: 1.3, spacing: -0.3),
     titleMedium: t(16, FontWeight.w600, p.text, spacing: -0.2),
     titleSmall: t(14.5, FontWeight.w600, p.text, spacing: -0.1),
     bodyLarge: t(15.5, FontWeight.w400, p.text, height: 1.6),
@@ -384,15 +397,15 @@ ThemeData buildTheme(Brightness brightness) {
     bodySmall: t(12.5, FontWeight.w400, p.muted, height: 1.45),
     labelLarge: t(14.5, FontWeight.w600, p.text),
     labelMedium: t(12.5, FontWeight.w500, p.muted),
-    labelSmall: t(11, FontWeight.w600, p.faint, spacing: 0.5),
+    labelSmall: t(11, FontWeight.w600, p.faint, spacing: 0.8),
   );
 
   final scheme = ColorScheme(
     brightness: brightness,
-    primary: p.text,
-    onPrimary: p.inverse,
+    primary: p.accent,
+    onPrimary: p.onAccent,
     secondary: p.accent,
-    onSecondary: Colors.white,
+    onSecondary: p.onAccent,
     error: p.danger,
     onError: Colors.white,
     surface: p.bg,
@@ -411,7 +424,8 @@ ThemeData buildTheme(Brightness brightness) {
   );
 
   final overlay = systemOverlayFor(brightness, p);
-  final radius = BorderRadius.circular(Radii.lg);
+  final radius = BorderRadius.circular(Radii.md);
+  final ink = light ? const Color(0xFF18181B) : p.raised;
 
   OutlineInputBorder field(Color c, [double w = 1]) => OutlineInputBorder(
     borderRadius: radius,
@@ -432,7 +446,7 @@ ThemeData buildTheme(Brightness brightness) {
       scrolledUnderElevation: 0,
       centerTitle: false,
       titleSpacing: 4,
-      titleTextStyle: text.titleLarge,
+      titleTextStyle: text.titleMedium,
       iconTheme: IconThemeData(color: p.text, size: 20),
       actionsIconTheme: IconThemeData(color: p.text, size: 20),
       systemOverlayStyle: overlay,
@@ -445,35 +459,39 @@ ThemeData buildTheme(Brightness brightness) {
     drawerTheme: DrawerThemeData(
       backgroundColor: p.bg,
       width: 320,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.horizontal(right: Radius.circular(Radii.sheet))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.horizontal(right: Radius.circular(Radii.xl))),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: p.bg,
       modalBackgroundColor: p.bg,
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
-      dragHandleColor: p.raised,
-      dragHandleSize: const Size(40, 5),
-      modalBarrierColor: Colors.black.withValues(alpha: 0.35),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.sheet))),
+      dragHandleColor: p.border,
+      dragHandleSize: const Size(36, 4),
+      modalBarrierColor: Colors.black.withValues(alpha: 0.45),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.xl))),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: p.bg,
+      backgroundColor: p.surface,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.sheet)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.lg),
+        side: BorderSide(color: p.border),
+      ),
       titleTextStyle: text.titleLarge,
       contentTextStyle: text.bodyMedium,
     ),
     snackBarTheme: SnackBarThemeData(
-      backgroundColor: p.nav,
+      backgroundColor: ink,
       contentTextStyle: text.bodyMedium!.copyWith(color: Colors.white),
-      // The bar is dark in both themes; Material's default action color (inversePrimary) is dark too in the
-      // dark theme, which made Undo / Open / View unreadable there.
-      actionTextColor: light ? null : Colors.white,
+      actionTextColor: light ? accentChoices[look.accent].$2 : p.accent,
       behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.lg)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.md),
+        side: light ? BorderSide.none : BorderSide(color: p.border),
+      ),
       elevation: 0,
-      insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      insetPadding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
     ),
     inputDecorationTheme: InputDecorationTheme(
       isDense: true,
@@ -481,24 +499,26 @@ ThemeData buildTheme(Brightness brightness) {
       fillColor: p.surface,
       hintStyle: text.bodyMedium!.copyWith(color: p.faint),
       labelStyle: text.bodyMedium!.copyWith(color: p.muted),
-      floatingLabelStyle: text.bodyMedium!.copyWith(color: p.text),
+      floatingLabelStyle: text.bodyMedium!.copyWith(color: p.accentText),
       helperStyle: text.bodySmall,
       prefixIconColor: p.faint,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-      border: field(Colors.transparent),
-      enabledBorder: field(Colors.transparent),
-      focusedBorder: field(p.text.withValues(alpha: 0.25), 1.2),
+      contentPadding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: 14),
+      border: field(p.border),
+      enabledBorder: field(p.border),
+      focusedBorder: field(p.accent, 1.4),
       errorBorder: field(p.danger),
+      focusedErrorBorder: field(p.danger, 1.4),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: p.text,
-        foregroundColor: p.inverse,
+        backgroundColor: p.accent,
+        foregroundColor: p.onAccent,
         disabledBackgroundColor: p.raised,
         disabledForegroundColor: p.faint,
-        minimumSize: const Size(0, 50),
-        padding: const EdgeInsets.symmetric(horizontal: 22),
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: Space.xl),
         textStyle: text.labelLarge,
+        elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: radius),
       ),
     ),
@@ -506,18 +526,18 @@ ThemeData buildTheme(Brightness brightness) {
       style: OutlinedButton.styleFrom(
         foregroundColor: p.text,
         backgroundColor: p.surface,
-        minimumSize: const Size(0, 50),
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: Space.lg),
         textStyle: text.labelLarge,
-        side: BorderSide.none,
+        side: BorderSide(color: p.border),
         shape: RoundedRectangleBorder(borderRadius: radius),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: p.text,
+        foregroundColor: p.accentText,
         textStyle: text.labelLarge,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.sm)),
       ),
     ),
     chipTheme: ChipThemeData(
@@ -533,11 +553,11 @@ ThemeData buildTheme(Brightness brightness) {
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
         side: WidgetStatePropertyAll(BorderSide(color: p.border)),
-        shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+        shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md))),
         backgroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected) ? p.accent.withValues(alpha: 0.14) : p.surface,
         ),
-        foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.accentText : p.muted),
+        foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.accent : p.muted),
         textStyle: WidgetStatePropertyAll(text.labelMedium!.copyWith(fontWeight: FontWeight.w600)),
       ),
     ),
@@ -558,24 +578,39 @@ ThemeData buildTheme(Brightness brightness) {
       textColor: p.text,
       titleTextStyle: text.bodyLarge,
       subtitleTextStyle: text.bodySmall,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      selectedColor: p.accent,
+      selectedTileColor: p.accent.withValues(alpha: 0.08),
+      contentPadding: const EdgeInsets.symmetric(horizontal: Space.xl),
       minVerticalPadding: 10,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.lg)),
+      shape: RoundedRectangleBorder(borderRadius: radius),
     ),
     popupMenuTheme: PopupMenuThemeData(
-      color: p.bg,
+      color: p.surface,
       surfaceTintColor: Colors.transparent,
-      elevation: 8,
-      shadowColor: Colors.black.withValues(alpha: 0.15),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.lg)),
+      elevation: 10,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.md),
+        side: BorderSide(color: p.border),
+      ),
+      textStyle: text.bodyMedium,
     ),
     tooltipTheme: TooltipThemeData(
-      decoration: BoxDecoration(color: p.nav, borderRadius: BorderRadius.circular(Radii.md)),
+      decoration: BoxDecoration(color: ink, borderRadius: BorderRadius.circular(Radii.sm)),
       textStyle: text.labelMedium!.copyWith(color: Colors.white),
     ),
-    progressIndicatorTheme: ProgressIndicatorThemeData(color: p.text, linearTrackColor: p.raised),
+    tabBarTheme: TabBarThemeData(
+      labelColor: p.text,
+      unselectedLabelColor: p.muted,
+      indicatorColor: p.accent,
+      dividerColor: p.border,
+      labelStyle: text.labelLarge,
+      unselectedLabelStyle: text.labelLarge,
+    ),
+    badgeTheme: BadgeThemeData(backgroundColor: p.accent, textColor: p.onAccent),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: p.accent, linearTrackColor: p.raised),
     textSelectionTheme: TextSelectionThemeData(
-      cursorColor: p.text,
+      cursorColor: p.accent,
       selectionColor: p.accent.withValues(alpha: 0.25),
       selectionHandleColor: p.accent,
     ),

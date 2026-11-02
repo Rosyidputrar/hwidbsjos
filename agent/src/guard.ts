@@ -100,7 +100,7 @@ export function secretReadRisk(toolName: string, input: Record<string, unknown>,
 
 /** Commands that name where the secrets are, or print the environment the tokens are in. A list, so a speed bump, not a wall. */
 const SECRET_BASH = [
-	/\.rynex\b|RYNEX_STORE_KEY|integrations\.json|custom-providers\.json/i,
+	/\.rynex\b|RYNEX_STORE_KEY|RYNEX_PROVIDER_KEY|integrations\.json|custom-providers\.json/i,
 	/\/proc\/[^\s]*\/(environ|cmdline|mem)\b/i,
 	/\.git-credentials|\.netrc\b|\.gitconfig\b|\.config\/gh\b/i,
 	/\$\{?(GITHUB_TOKEN|GH_TOKEN|VERCEL_TOKEN|CLOUDFLARE_API_TOKEN)\b/,

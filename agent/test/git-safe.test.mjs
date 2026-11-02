@@ -399,3 +399,12 @@ test("git lfs install --skip-smudge writes settings that are allowed too: a proj
 	config(dir, "filter.lfs.process", `${boom} --skip`);
 	await refused(assertRepoConfigSafe(dir), /filter\.lfs\.process/);
 });
+
+test("the providers' API keys are not in git's environment, nor handed to an MCP server", async () => {
+	const { stripSecrets, HOST_KEYS } = await bundle("gitsafe");
+	const base = { PATH: "/bin", HOME: "/h", RYNEX_PROVIDER_KEY_OPENAI: "sk-1", RYNEX_PROVIDER_KEY_CUSTOM_LOCAL: "sk-2", RYNEX_STORE_KEY: "k", GITHUB_TOKEN: "t", LANG: "C" };
+	const git = gitEnv(base);
+	assert.ok(!Object.keys(git).some((n) => /PROVIDER_KEY|STORE_KEY|TOKEN/.test(n)), "git gets none of them");
+	const mcp = stripSecrets(base, HOST_KEYS);
+	assert.deepEqual(Object.keys(mcp).sort(), ["GITHUB_TOKEN", "HOME", "LANG", "PATH"], "an MCP server loses only the host's own keys");
+});

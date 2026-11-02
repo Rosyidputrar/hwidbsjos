@@ -381,7 +381,7 @@ export async function fetchModels(api: ProviderApi, baseUrl: string, apiKey: str
 		if (!id) continue;
 		// Image (and other non-chat) models are not chat models: pi would offer
 		// them in the model picker and the chat would fail. Some catalogs mark
-		// them with kind; listImageModels returns them for the image screen.
+		// them with kind.
 		if (typeof m === "object" && isNonChat(m)) continue;
 		if (typeof m === "string") {
 			models.push({ id });
@@ -396,53 +396,4 @@ export async function fetchModels(api: ProviderApi, baseUrl: string, apiKey: str
 function isNonChat(m: any) {
 	const kind = typeof m?.kind === "string" ? m.kind.toLowerCase() : "";
 	return kind === "image" || kind === "video" || kind === "embedding" || kind === "audio";
-}
-
-/** The endpoint's image models (`kind: "image"` in its catalog), id and name. */
-export async function listImageModels(baseUrl: string, apiKey: string): Promise<{ id: string; name: string }[]> {
-	const res = await fetch(`${cleanUrl(baseUrl)}/models`, {
-		headers: { accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
-		signal: AbortSignal.timeout(20_000),
-	});
-	if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-	const json: any = await res.json();
-	const items: any[] = Array.isArray(json) ? json : (json.data ?? json.models ?? []);
-	return items
-		.filter((m) => m && typeof m === "object" && String(m.kind ?? "").toLowerCase() === "image" && m.id)
-		.map((m) => ({ id: String(m.id), name: String(m.name ?? m.id) }));
-}
-
-/** Generates an image through an OpenAI-compatible Images API (`POST …/images/generations`). */
-export async function generateImage(baseUrl: string, apiKey: string, model: string, prompt: string, size: string): Promise<string> {
-	const base = cleanUrl(baseUrl);
-	if (!/^https?:\/\/[^/]+/.test(base)) throw new Error("Enter a full base URL (https://…)");
-	if (!apiKey) throw new Error("No API key saved for this provider.");
-	if (!prompt.trim()) throw new Error("Prompt is empty");
-	// Image work takes 20–120s; the long timeout is deliberate. No auto-retry:
-	// a timed-out request may still have produced (and billed) an image server-side.
-	const res = await fetch(`${base}/images/generations`, {
-		method: "POST",
-		headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${apiKey}` },
-		body: JSON.stringify({ model, prompt, size }),
-		signal: AbortSignal.timeout(180_000),
-	});
-	const body = await res.text();
-	if (!res.ok) {
-		let detail = body.slice(0, 300);
-		try {
-			const j = JSON.parse(body);
-			const m = j?.error?.message ?? j?.error;
-			if (typeof m === "string" && m) detail = m.slice(0, 300);
-		} catch {}
-		throw new Error(`${res.status} ${res.statusText}: ${detail}`);
-	}
-	let json: any;
-	try {
-		json = JSON.parse(body);
-	} catch {
-		throw new Error(`The endpoint did not return JSON: ${body.slice(0, 200)}`);
-	}
-	const b64 = json?.data?.[0]?.b64_json;
-	if (typeof b64 !== "string" || !b64) throw new Error("The endpoint returned no image data");
-	return b64;
 }
