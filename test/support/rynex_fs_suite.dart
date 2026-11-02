@@ -145,8 +145,8 @@ void rynexFsSuite(FsVariant variant) {
       await tester.tap(find.text('tools'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.ensureVisible(find.text('Project memory'));
-      await tester.tap(find.text('Project memory'));
+      await tester.ensureVisible(find.text('Memory'));
+      await tester.tap(find.text('Memory'));
       await settle(tester);
 
       expect(File(p('proj/AGENTS.md')).readAsStringSync(), startsWith('# Project notes for the agent'));
@@ -174,8 +174,8 @@ void rynexFsSuite(FsVariant variant) {
       await tester.tap(find.text('tools'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.ensureVisible(find.text('Project memory'));
-      await tester.tap(find.text('Project memory'));
+      await tester.ensureVisible(find.text('Memory'));
+      await tester.tap(find.text('Memory'));
       await settle(tester);
 
       expect(File(p('proj/AGENTS.md')).readAsStringSync(), 'mine');

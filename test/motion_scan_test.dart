@@ -14,6 +14,7 @@ const _allowed = {
   'onboarding.dart': ['pages.nextPage(duration: const Duration(milliseconds: 320)'], // jumps when reduced
   'message_views.dart': ['AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))'], // stops when reduced
   'live_clock.dart': ['AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))'], // stops when reduced
+  'kit.dart': ['AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))'], // stops when reduced
 };
 
 void main() {

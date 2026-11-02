@@ -8,6 +8,7 @@ import '../agent/agent_controller.dart';
 import '../agent/models.dart';
 import 'errors.dart';
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// Runs pi's login for [provider] and renders each step of its interaction
@@ -148,7 +149,7 @@ class _LoginSheetState extends State<_LoginSheet> {
               else
                 Row(
                   children: [
-                    const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 1.8)),
+                    const BusySpinner(size: 14),
                     const SizedBox(width: 12),
                     Expanded(child: Text(progress ?? tr('Waiting for provider…'), style: text.bodyMedium)),
                     TextButton(onPressed: _cancel, child: Text(tr('Cancel'))),

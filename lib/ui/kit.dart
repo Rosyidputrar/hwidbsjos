@@ -876,17 +876,25 @@ class StatusDot extends StatefulWidget {
 
 class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMixin {
   late final AnimationController controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
+  bool _reduced = false;
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.pulse) controller.repeat(reverse: true);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // A still dot when animations are off; the status text next to it says what is happening.
+    _reduced = Motion.reduced(context);
+    if (_reduced) {
+      controller.stop();
+      controller.value = 0.5;
+    } else if (widget.pulse && !controller.isAnimating) {
+      controller.repeat(reverse: true);
+    }
   }
 
   @override
   void didUpdateWidget(StatusDot old) {
     super.didUpdateWidget(old);
-    if (widget.pulse && !controller.isAnimating) controller.repeat(reverse: true);
+    if (widget.pulse && !_reduced && !controller.isAnimating) controller.repeat(reverse: true);
     if (!widget.pulse && controller.isAnimating) controller.stop();
   }
 
