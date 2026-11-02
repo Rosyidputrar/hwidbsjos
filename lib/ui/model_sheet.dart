@@ -92,7 +92,7 @@ class _ModelSheetState extends State<_ModelSheet> {
                         final nav = Navigator.of(context)..pop();
                         nav.push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
                       },
-                      style: TextButton.styleFrom(foregroundColor: p.accent),
+                      style: TextButton.styleFrom(foregroundColor: p.accentText),
                       icon: const Icon(LucideIcons.plugZap, size: 16),
                       label: Text(tr('Providers')),
                     ),

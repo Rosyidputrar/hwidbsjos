@@ -201,26 +201,41 @@ class _SettingsHubState extends State<SettingsHub> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
             children: [
               SurfaceCard(
+                onTap: () => _open(SettingsScreen(agent: agent)),
                 child: Row(
                   children: [
-                    const LogoMark(size: 48),
+                    const LogoMark(size: 44),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(tr('Rynex AI Agent'), style: text.titleLarge),
-                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Text(tr('Rynex'), style: text.titleMedium),
+                              const SizedBox(width: 8),
+                              Pill(
+                                agent.busy ? tr('Working') : tr('Ready'),
+                                color: agent.busy ? p.warning : p.success,
+                                dot: true,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
                           Text(
-                            Updater.instance.currentVersion.isEmpty
-                                ? tr('Coding agent on your phone')
-                                : '${tr('Version')} ${Updater.instance.currentVersion}',
-                            style: TextStyle(fontSize: 12.5, color: p.muted),
+                            agent.model?.name ?? tr('No model selected'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: text.bodySmall?.copyWith(color: p.text),
+                          ),
+                          Text(
+                            'pi ${agent.info['version'] ?? ''} · Node ${agent.info['node'] ?? ''}',
+                            style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.faint),
                           ),
                         ],
                       ),
                     ),
-                    Pill(agent.busy ? tr('Working') : tr('Ready'), color: agent.busy ? p.warning : p.success, dot: true),
+                    Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
                   ],
                 ),
               ),
@@ -245,7 +260,7 @@ class _SettingsHubState extends State<SettingsHub> {
                   ],
                 ),
               ),
-              SectionLabel(tr('AI')),
+              SectionLabel(tr('AI & models')),
               SettingsGroup(
                 children: [
                   SettingsRow(
@@ -258,8 +273,15 @@ class _SettingsHubState extends State<SettingsHub> {
                     onTap: () => _open(SettingsScreen(agent: agent)),
                   ),
                   SettingsRow(
+                    icon: LucideIcons.lifeBuoy,
+                    title: tr('Fallback models'),
+                    subtitle: (it.settings?.fallbackModels ?? const []).isEmpty
+                        ? tr('Used when the current model hits a limit or errors')
+                        : it.settings!.fallbackModels.map((m) => m['model']).join(' → '),
+                    onTap: _pickFallbacks,
+                  ),
+                  SettingsRow(
                     icon: LucideIcons.puzzle,
-                    color: const Color(0xFFEC4899),
                     title: tr('Skills'),
                     subtitle: skillCount == null
                         ? tr('Instructions the agent loads on demand')
@@ -267,11 +289,89 @@ class _SettingsHubState extends State<SettingsHub> {
                     onTap: () => _open(SkillsScreen(agent: agent)),
                   ),
                   SettingsRow(
+                    icon: LucideIcons.chartColumn,
+                    title: tr('Usage & budget'),
+                    subtitle: budgetSubtitle(it.settings),
+                    onTap: () => _open(UsageScreen(agent: agent)),
+                  ),
+                  SettingsRow(
                     icon: LucideIcons.image,
-                    color: const Color(0xFF7C3AED),
                     title: tr('Generate image'),
                     subtitle: tr('Make pictures with Rynex image models'),
                     onTap: () => _open(ImageGenScreen(agent: agent)),
+                  ),
+                ],
+              ),
+              SectionLabel(tr('Agent behaviour')),
+              SurfaceCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Segmented<String>(
+                      label: tr('Approvals'),
+                      value: _approvalSaving ?? it.settings?.approvalMode ?? agent.approvalMode,
+                      options: {'ask_all': tr('Ask all'), 'ask_risky': tr('Risky only'), 'auto': tr('Bypass all')},
+                      busy: _approvalSaving != null,
+                      onChanged: _setApprovalMode,
+                    ),
+                    // What the setting is: questions before common risky actions. Not a wall against a page or file that tells the
+                    // agent what to do, so it is not described as one.
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+                      child: Text(
+                        tr('Approvals are prompts for common risky actions, not a security boundary: a model can still reach things they do not list. Open only what you trust.'),
+                        key: const ValueKey('approvals-caption'),
+                        style: text.bodySmall?.copyWith(color: p.muted),
+                      ),
+                    ),
+                    if ((it.settings?.approvalMode ?? agent.approvalMode) == 'auto')
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+                        child: Row(
+                          children: [
+                            Icon(LucideIcons.shieldOff, size: 14, color: p.warning),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                tr('All permissions bypassed: the agent never asks before acting.'),
+                                style: text.bodySmall?.copyWith(color: p.warning),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              SettingsGroup(
+                children: [
+                  SettingsRow(
+                    icon: LucideIcons.listTodo,
+                    title: tr('Background tasks'),
+                    subtitle: tr('Queue, parallel agents and schedules'),
+                    trailing: _count(agent.features.runs.where((r) => r.active).length),
+                    onTap: () => _open(TasksScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.plug,
+                    title: tr('MCP servers'),
+                    subtitle: agent.features.mcpServers.isEmpty
+                        ? tr('Extra tools from Model Context Protocol servers')
+                        : serverCount(agent.features.mcpServers.length),
+                    onTap: () => _open(McpScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.squareSlash,
+                    title: tr('Prompt templates'),
+                    subtitle: tr('Slash commands like /review and /test'),
+                    onTap: () => _open(TemplatesScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.bot,
+                    title: tr('Subagent'),
+                    subtitle: subagentLimitsSummary(it.settings),
+                    onTap: () => _open(SubagentSettingsScreen(agent: agent)),
                   ),
                 ],
               ),
@@ -304,7 +404,6 @@ class _SettingsHubState extends State<SettingsHub> {
                   ),
                   SettingsRow(
                     icon: LucideIcons.keyRound,
-                    color: const Color(0xFFF59E0B),
                     title: tr('Accounts & servers'),
                     subtitle: [
                       if (it.github != null) 'GitHub @${it.github!.login}',
@@ -316,191 +415,45 @@ class _SettingsHubState extends State<SettingsHub> {
                   ),
                   SettingsRow(
                     icon: LucideIcons.globe,
-                    color: const Color(0xFF06B6D4),
                     title: tr('Web & DNS'),
                     subtitle: '$dnsLabel · ${tr('web search for the agent')}',
                     onTap: () => _open(NetworkScreen(agent: agent)),
                   ),
                 ],
               ),
-              SectionLabel(tr('Agent behaviour')),
-              _Segmented<String>(
-                label: tr('Approvals'),
-                value: _approvalSaving ?? it.settings?.approvalMode ?? agent.approvalMode,
-                options: {'ask_all': tr('Ask all'), 'ask_risky': tr('Risky only'), 'auto': tr('Bypass all')},
-                busy: _approvalSaving != null,
-                onChanged: _setApprovalMode,
-              ),
-              // What the setting is: questions before common risky actions. Not a wall against a page or file that tells the
-              // agent what to do, so it is not described as one.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-                child: Text(
-                  tr('Approvals are prompts for common risky actions, not a security boundary: a model can still reach things they do not list. Open only what you trust.'),
-                  key: const ValueKey('approvals-caption'),
-                  style: text.bodySmall?.copyWith(color: p.muted),
-                ),
-              ),
-              if ((it.settings?.approvalMode ?? agent.approvalMode) == 'auto')
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-                  child: Row(
-                    children: [
-                      Icon(LucideIcons.shieldOff, size: 14, color: p.warning),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          tr('All permissions bypassed: the agent never asks before acting.'),
-                          style: text.bodySmall?.copyWith(color: p.warning),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              const SizedBox(height: 10),
-              SettingsGroup(
-                children: [
-                  SettingsRow(
-                    icon: LucideIcons.lifeBuoy,
-                    color: const Color(0xFF8B5CF6),
-                    title: tr('Fallback models'),
-                    subtitle: (it.settings?.fallbackModels ?? const []).isEmpty
-                        ? tr('Used when the current model hits a limit or errors')
-                        : it.settings!.fallbackModels.map((m) => m['model']).join(' → '),
-                    onTap: _pickFallbacks,
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.chartColumn,
-                    color: const Color(0xFF10B981),
-                    title: tr('Usage & budget'),
-                    subtitle: budgetSubtitle(it.settings),
-                    onTap: () => _open(UsageScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.bot,
-                    color: const Color(0xFF7C3AED),
-                    title: tr('Subagent'),
-                    subtitle: subagentLimitsSummary(it.settings),
-                    onTap: () => _open(SubagentSettingsScreen(agent: agent)),
-                  ),
-                ],
-              ),
-              SectionLabel(tr('Automation')),
-              SettingsGroup(
-                children: [
-                  SettingsRow(
-                    icon: LucideIcons.listTodo,
-                    color: context.palette.accentAlt,
-                    title: tr('Background tasks'),
-                    subtitle: tr('Queue, parallel agents and schedules'),
-                    onTap: () => _open(TasksScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.plug,
-                    color: const Color(0xFFF97316),
-                    title: tr('MCP servers'),
-                    subtitle: agent.features.mcpServers.isEmpty
-                        ? tr('Extra tools from Model Context Protocol servers')
-                        : serverCount(agent.features.mcpServers.length),
-                    onTap: () => _open(McpScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.squareSlash,
-                    color: const Color(0xFF64748B),
-                    title: tr('Prompt templates'),
-                    subtitle: tr('Slash commands like /review and /test'),
-                    onTap: () => _open(TemplatesScreen(agent: agent)),
-                  ),
-                ],
-              ),
-              SectionLabel(tr('Data & security')),
-              SettingsGroup(
-                children: [
-                  SettingsRow(
-                    icon: LucideIcons.server,
-                    color: const Color(0xFF0F766E),
-                    title: tr('Agent on a VPS / server'),
-                    subtitle: agent.remote.active
-                        ? tr('The agent runs on your server')
-                        : agent.remote.configured
-                        ? tr('Set up; this phone runs the agent')
-                        : tr('Run the agent on your own VPS, around the clock'),
-                    onTap: () => _open(ServerScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.refreshCw,
-                    color: const Color(0xFF16A34A),
-                    title: tr('GitHub sync'),
-                    subtitle: it.sync?.enabled == true
-                        ? (it.sync!.lastError != null
-                              ? tr('Sync failed; tap for details')
-                              : '${tr('Last synced')}: ${syncAgo(it.sync!.lastSync)}')
-                        : tr('Chats and projects on all your phones'),
-                    onTap: () => _open(SyncScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.archive,
-                    color: const Color(0xFF0EA5E9),
-                    title: tr('Backup & restore'),
-                    subtitle: tr('Chats, skills and schedules in one file'),
-                    onTap: () => _open(BackupScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.link,
-                    color: const Color(0xFF6366F1),
-                    title: tr('Trusted domains'),
-                    subtitle: look.trustedDomains.isEmpty
-                        ? tr('Links ask before leaving the app')
-                        : tr('{n} open without asking').replaceAll('{n}', '${look.trustedDomains.length}'),
-                    onTap: () => _open(const TrustedDomainsScreen()),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.fingerprint,
-                    color: const Color(0xFFE11D48),
-                    title: tr('App lock'),
-                    subtitle: tr('Fingerprint or screen lock when opening Rynex AI Agent'),
-                    trailing: LabeledSwitch(label: tr('App lock'), value: look.appLock, onChanged: _setAppLock),
-                    onTap: () => _setAppLock(!look.appLock),
-                  ),
-                ],
-              ),
               SectionLabel(tr('Appearance')),
-              _Segmented<ThemeMode>(
-                value: look.value,
-                options: {ThemeMode.light: tr('Light'), ThemeMode.dark: tr('Dark'), ThemeMode.system: tr('System')},
-                onChanged: look.set,
-              ),
-              const SizedBox(height: 10),
-              _Segmented<double>(
-                label: tr('Text size'),
-                value: look.textScale,
-                options: {0.9: tr('Small'), 1.0: tr('Default'), 1.12: tr('Large'), 1.25: tr('Huge')},
-                onChanged: (v) => look.update(textScale: v),
-              ),
-              const SizedBox(height: 10),
-              SettingsGroup(
-                children: [
-                  SettingsRow(
-                    icon: LucideIcons.rows3,
-                    color: p.muted,
-                    title: tr('Compact layout'),
-                    subtitle: tr('Tighter spacing, more on screen'),
-                    trailing: LabeledSwitch(
-                      label: tr('Compact layout'),
-                      value: look.compact,
-                      onChanged: (v) => look.update(compact: v),
+              SurfaceCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Segmented<ThemeMode>(
+                      label: tr('Theme'),
+                      value: look.value,
+                      options: {ThemeMode.light: tr('Light'), ThemeMode.dark: tr('Dark'), ThemeMode.system: tr('System')},
+                      onChanged: look.set,
                     ),
-                    onTap: () => look.update(compact: !look.compact),
-                  ),
-                  // The title on its own line and the swatches under it, so neither starves on a narrow phone; each swatch
-                  // is a 48 dp target that says its colour and whether it is the one chosen.
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                    child: Column(
+                    const SizedBox(height: 16),
+                    _Segmented<double>(
+                      label: tr('Text size'),
+                      value: look.textScale,
+                      options: {0.9: tr('Small'), 1.0: tr('Default'), 1.12: tr('Large'), 1.25: tr('Huge')},
+                      onChanged: (v) => look.update(textScale: v),
+                    ),
+                    const SizedBox(height: 16),
+                    _Segmented<String>(
+                      label: tr('Language'),
+                      value: look.language,
+                      options: languages,
+                      onChanged: (v) => look.update(language: v),
+                    ),
+                    const SizedBox(height: 16),
+                    // The title on its own line and the swatches under it, so neither starves on a narrow phone; each swatch
+                    // is a 48 dp target that says its colour and whether it is the one chosen.
+                    Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(tr('Accent colour'), style: text.titleSmall),
-                        const SizedBox(height: 4),
+                        Text(tr('Accent colour'), style: text.labelMedium),
+                        const SizedBox(height: 8),
                         Wrap(
                           children: [
                             for (var i = 0; i < accentChoices.length; i++)
@@ -528,36 +481,100 @@ class _SettingsHubState extends State<SettingsHub> {
                         ),
                       ],
                     ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              SettingsGroup(
+                children: [
+                  SettingsRow(
+                    icon: LucideIcons.rows3,
+                    title: tr('Compact layout'),
+                    subtitle: tr('Tighter spacing, more on screen'),
+                    trailing: LabeledSwitch(
+                      label: tr('Compact layout'),
+                      value: look.compact,
+                      onChanged: (v) => look.update(compact: v),
+                    ),
+                    onTap: () => look.update(compact: !look.compact),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              _Segmented<String>(
-                label: tr('Language'),
-                value: look.language,
-                options: languages,
-                onChanged: (v) => look.update(language: v),
+              SectionLabel(tr('Data & security')),
+              SettingsGroup(
+                children: [
+                  SettingsRow(
+                    icon: LucideIcons.server,
+                    title: tr('Agent on a VPS / server'),
+                    subtitle: agent.remote.active
+                        ? tr('The agent runs on your server')
+                        : agent.remote.configured
+                        ? tr('Set up; this phone runs the agent')
+                        : tr('Run the agent on your own VPS, around the clock'),
+                    onTap: () => _open(ServerScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.refreshCw,
+                    title: tr('GitHub sync'),
+                    subtitle: it.sync?.enabled == true
+                        ? (it.sync!.lastError != null
+                              ? tr('Sync failed; tap for details')
+                              : '${tr('Last synced')}: ${syncAgo(it.sync!.lastSync)}')
+                        : tr('Chats and projects on all your phones'),
+                    onTap: () => _open(SyncScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.archive,
+                    title: tr('Backup & restore'),
+                    subtitle: tr('Chats, skills and schedules in one file'),
+                    onTap: () => _open(BackupScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.link,
+                    title: tr('Trusted domains'),
+                    subtitle: look.trustedDomains.isEmpty
+                        ? tr('Links ask before leaving the app')
+                        : tr('{n} open without asking').replaceAll('{n}', '${look.trustedDomains.length}'),
+                    onTap: () => _open(const TrustedDomainsScreen()),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.fingerprint,
+                    title: tr('App lock'),
+                    subtitle: tr('Fingerprint or screen lock when opening Rynex AI Agent'),
+                    trailing: LabeledSwitch(label: tr('App lock'), value: look.appLock, onChanged: _setAppLock),
+                    onTap: () => _setAppLock(!look.appLock),
+                  ),
+                ],
               ),
-              _RynexCard(openUrl: agent.client.openUrl),
               SectionLabel(tr('About')),
               SettingsGroup(
                 children: [
                   if (Updater.instance.supported) _updatesRow(context),
                   _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—'),
                   _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—'),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    child: StorysetCredit(openUrl: agent.client.openUrl),
+                  SettingsRow(
+                    icon: LucideIcons.scale,
+                    title: tr('Open-source licenses'),
+                    subtitle: tr('Rynex AI Agent and the libraries it is built on'),
+                    onTap: () => showLicensePage(
+                      context: context,
+                      applicationName: 'Rynex AI Agent',
+                      applicationVersion: Updater.instance.currentVersion.isEmpty ? null : Updater.instance.currentVersion,
+                      applicationIcon: const Padding(padding: EdgeInsets.all(14), child: LogoMark(size: 56)),
+                    ),
                   ),
                   SettingsRow(
                     icon: LucideIcons.rotateCcw,
-                    color: p.muted,
                     title: tr('Restart agent'),
                     subtitle: tr('Reload the runtime, keeping your chats'),
                     onTap: agent.busy ? null : agent.restart,
                   ),
                 ],
               ),
+              SectionLabel(tr('Made by')),
+              _RynexCard(openUrl: agent.client.openUrl),
+              const SizedBox(height: 16),
+              Center(child: StorysetCredit(openUrl: agent.client.openUrl)),
             ],
           ),
         );
@@ -578,6 +595,20 @@ class _SettingsHubState extends State<SettingsHub> {
         }
         return Scaffold(appBar: AppBar(title: Text(tr('Settings'))), body: body);
       },
+    );
+  }
+
+  /// A small count badge before the chevron, hidden at zero.
+  Widget? _count(int n) {
+    if (n == 0) return null;
+    final p = context.palette;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Pill('$n', color: p.accent),
+        const SizedBox(width: 6),
+        Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+      ],
     );
   }
 }
@@ -673,7 +704,18 @@ class _Segmented<T> extends StatelessWidget {
           ),
         IgnorePointer(
           ignoring: busy,
-          child: PillSegments<T>(value: value, options: options, onChanged: onChanged),
+          child: SegmentedButton<T>(
+            showSelectedIcon: false,
+            segments: [
+              for (final e in options.entries)
+                ButtonSegment(
+                  value: e.key,
+                  label: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            selected: {options.containsKey(value) ? value : options.keys.first},
+            onSelectionChanged: (s) => onChanged(s.first),
+          ),
         ),
       ],
     );

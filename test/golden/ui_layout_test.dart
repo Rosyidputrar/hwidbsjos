@@ -140,7 +140,7 @@ void firstRunTests() {
       // Skip has a 48 dp touch box, and the dots say which page this is.
       final skip = tester.getSize(find.ancestor(of: find.text(look.language == 'id' ? 'Lewati' : 'Skip'), matching: find.byType(TapTarget)));
       expect(skip.width >= 48 && skip.height >= 48, isTrue, reason: 'Skip is $skip');
-      expect(find.bySemanticsLabel(look.language == 'id' ? 'Halaman 1 dari 3' : 'Page 1 of 3'), findsOneWidget);
+      expect(find.bySemanticsLabel(look.language == 'id' ? 'Halaman 1 dari 4' : 'Page 1 of 4'), findsOneWidget);
     });
   }
 

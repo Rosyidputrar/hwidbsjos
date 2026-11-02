@@ -268,6 +268,46 @@ class PillSegments<T> extends StatelessWidget {
   }
 }
 
+/// A full-width segmented control with an optional caption above it; the
+/// selected segment is tinted with the accent (see the theme's
+/// segmentedButtonTheme).
+class Segmented<T> extends StatelessWidget {
+  const Segmented({super.key, required this.value, required this.options, required this.onChanged, this.label});
+  final T value;
+  final Map<T, String> options;
+  final ValueChanged<T> onChanged;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (label != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
+            child: Text(label!, style: Theme.of(context).textTheme.labelMedium),
+          ),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<T>(
+            showSelectedIcon: false,
+            segments: [
+              for (final e in options.entries)
+                ButtonSegment(
+                  value: e.key,
+                  label: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            selected: {options.containsKey(value) ? value : options.keys.first},
+            onSelectionChanged: (s) => onChanged(s.first),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// A rounded square holding an icon, tinted by [color] (or the accent).
 class IconTile extends StatelessWidget {
   const IconTile({super.key, required this.icon, this.color, this.size = 36, this.solid = false});
@@ -292,6 +332,26 @@ class IconTile extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Icon(icon, size: size * 0.5, color: solid ? onFill(c) : c),
+    );
+  }
+}
+
+/// A neutral tile for list rows: the icon carries the colour, the tile does not.
+class GlyphTile extends StatelessWidget {
+  const GlyphTile({super.key, required this.icon, this.color, this.size = 34});
+  final IconData icon;
+  final Color? color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(size * 0.3)),
+      alignment: Alignment.center,
+      child: Icon(icon, size: size * 0.5, color: color ?? p.text),
     );
   }
 }
@@ -345,13 +405,17 @@ class SettingsGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.xl)),
+      decoration: BoxDecoration(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: p.border),
+      ),
       clipBehavior: Clip.antiAlias,
       child: OnSurface(
         child: Column(
           children: [
             for (var i = 0; i < children.length; i++) ...[
-              if (i > 0) Divider(height: 1, indent: 66, endIndent: 16, color: p.border),
+              if (i > 0) Divider(height: 1, indent: 62, endIndent: 0, color: p.border),
               children[i],
             ],
           ],
@@ -407,7 +471,7 @@ class SettingsRow extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
         child: Row(
           children: [
-            leading ?? (icon != null ? IconTile(icon: icon!, color: color, size: 36) : const SizedBox.shrink()),
+            leading ?? (icon != null ? GlyphTile(icon: icon!, color: destructive ? p.danger : color) : const SizedBox.shrink()),
             if (leading != null || icon != null) const SizedBox(width: 14),
             Expanded(
               child: Column(

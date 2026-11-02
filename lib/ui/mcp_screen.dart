@@ -537,12 +537,15 @@ class _McpSheetState extends State<_McpSheet> {
               decoration: InputDecoration(labelText: tr('Name'), hintText: 'memory'),
             ),
             const SizedBox(height: 14),
-            PillSegments<String>(
-              value: _type,
-              options: {'stdio': tr('Command'), 'http': 'HTTP'},
-              icons: const {'stdio': LucideIcons.squareTerminal, 'http': LucideIcons.globe},
-              onChanged: (v) => setState(() {
-                _type = v;
+            SegmentedButton<String>(
+              showSelectedIcon: false,
+              segments: [
+                ButtonSegment(value: 'stdio', label: Text(tr('Command')), icon: const Icon(LucideIcons.squareTerminal, size: 16)),
+                ButtonSegment(value: 'http', label: Text(tr('HTTP')), icon: const Icon(LucideIcons.globe, size: 16)),
+              ],
+              selected: {_type},
+              onSelectionChanged: (s) => setState(() {
+                _type = s.first;
                 _problem = null;
               }),
             ),

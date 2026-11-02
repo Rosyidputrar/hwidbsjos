@@ -5,9 +5,10 @@ import '../agent/agent_controller.dart';
 import 'settings_screen.dart';
 import 'kit.dart';
 import 'i18n.dart';
+import 'illustration.dart';
 import 'theme.dart';
 
-/// First-run welcome: what the agent is, then straight to connecting a
+/// First-run welcome: what Rynex is, then straight to connecting a
 /// provider — an account, an API key, or the user's own endpoint.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key, required this.agent});
@@ -21,20 +22,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final pages = PageController();
   int page = 0;
 
-  // Carousel: slide 1 is the brand, slide 2 the bring-your-own models,
-  // slide 3 ends on the connect action.
   static const _slides = [
-    (_Hero.logo, 'Rynex AI Agent', 'An AI coding agent on your phone.'),
+    ('ai', LucideIcons.sparkles, 'Boost your\nproductivity', 'Chat with a coding agent that runs right on your phone.'),
     (
-      _Hero.models,
-      'Every model,\nyour choice',
-      'Claude, GPT, Gemini, DeepSeek and more — bring your own account, API key or endpoint.'
+      'linux',
+      LucideIcons.squareTerminal,
+      'Real Linux,\nin your pocket',
+      'Install Python, Node and more with apt. No root needed.',
     ),
     (
-      _Hero.key,
-      'Connect a provider\nto start',
-      'Sign in, paste an API key, or point Rynex at your own server. Nothing else to configure.'
+      'search',
+      LucideIcons.globe,
+      'Search, build\nand preview',
+      'pi looks things up on the web and shows your pages live.',
     ),
+    ('launch', LucideIcons.rocket, 'Ship it\nanywhere', 'Deploy to Vercel, GitHub Pages or your own server.'),
   ];
 
   // Home takes over from here and offers to connect a model if none is set.
@@ -72,35 +74,39 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
               child: Row(
                 children: [
-                  // A 48 dp touch box around the small pill it draws.
-                  Semantics(
-                    button: true,
-                    label: tr('Skip'),
-                    child: TapTarget(
-                      onTap: _start,
-                      child: ExcludeSemantics(
-                        child: Material(
-                          color: p.surface,
-                          borderRadius: BorderRadius.circular(Radii.md),
-                          child: InkWell(
+                  const LogoMark(size: 28),
+                  const SizedBox(width: 8),
+                  Text(tr('Rynex'), style: text.titleMedium),
+                  const Spacer(),
+                  if (!last)
+                    // A 48 dp touch box around the small pill it draws.
+                    Semantics(
+                      button: true,
+                      label: tr('Skip'),
+                      child: TapTarget(
+                        onTap: _start,
+                        child: ExcludeSemantics(
+                          child: Material(
+                            color: p.surface,
                             borderRadius: BorderRadius.circular(Radii.md),
-                            onTap: _start,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                              child: Text(
-                                tr('Skip'),
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(Radii.md),
+                              onTap: _start,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                                child: Text(
+                                  tr('Skip'),
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  const Spacer(),
                 ],
               ),
             ),
@@ -110,30 +116,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 itemCount: _slides.length,
                 onPageChanged: (i) => setState(() => page = i),
                 itemBuilder: (context, i) {
-                  final (hero, title, body) = _slides[i];
+                  final (art, icon, title, body) = _slides[i];
                   // Scrolls when the page is taller than the room (a phone on its side, very large text), and the picture
                   // shrinks to leave room for the words.
                   return LayoutBuilder(
                     builder: (context, box) => SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: ConstrainedBox(
                         constraints: BoxConstraints(minHeight: box.maxHeight),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SizedBox(
-                              height: (box.maxHeight * 0.45).clamp(96.0, 240.0),
-                              child: Center(child: _heroWidget(hero)),
-                            ),
-                            SizedBox(height: box.maxHeight < 400 ? 16 : 40),
-                            Text(tr(title), textAlign: TextAlign.center, style: text.displayMedium),
-                            const SizedBox(height: 14),
-                            Text(
-                              tr(body),
-                              textAlign: TextAlign.center,
-                              style: text.bodyLarge?.copyWith(color: p.muted),
-                            ),
+                            _Hero(illustration: art, height: (box.maxHeight * 0.42).clamp(120.0, 280.0)),
+                            const SizedBox(height: 28),
+                            IconTile(icon: icon, size: 36),
+                            const SizedBox(height: 16),
+                            Text(tr(title), style: text.displayMedium),
                             const SizedBox(height: 12),
+                            Text(tr(body), style: text.bodyLarge?.copyWith(color: p.muted)),
                           ],
                         ),
                       ),
@@ -142,47 +143,81 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
               ),
             ),
-            // The dots are one thing to a screen reader: which page this is.
-            Semantics(
-              label: tr('Page {n} of {total}')
-                  .replaceAll('{n}', '${page + 1}')
-                  .replaceAll('{total}', '${_slides.length}'),
-              child: ExcludeSemantics(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < _slides.length; i++)
-                      AnimatedContainer(
-                        duration: Motion.of(context, const Duration(milliseconds: 220)),
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          // The app accent, like every other selected state (accentAlt is for categories).
-                          color: i == page ? p.accent : Colors.transparent,
-                          border: Border.all(color: i == page ? p.accent : p.faint, width: 1.5),
-                        ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: Row(
+                children: [
+                  // Progress: one bar per slide, the current one stretched. The bars are one thing to a screen
+                  // reader: which page this is.
+                  Semantics(
+                    label: tr('Page {n} of {total}')
+                        .replaceAll('{n}', '${page + 1}')
+                        .replaceAll('{total}', '${_slides.length}'),
+                    child: ExcludeSemantics(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var i = 0; i < _slides.length; i++)
+                            AnimatedContainer(
+                              duration: Motion.of(context, const Duration(milliseconds: 260)),
+                              curve: Curves.easeOutCubic,
+                              margin: const EdgeInsets.only(right: 6),
+                              width: i == page ? 28 : 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: i <= page ? p.accent : p.border,
+                                borderRadius: BorderRadius.circular(Radii.pill),
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
+                    ),
+                  ),
+                  const Spacer(),
+                  SizedBox(
+                    width: 170,
+                    child: PrimaryButton(
+                      label: last ? tr('Connect a provider') : tr('Next'),
+                      icon: last ? LucideIcons.arrowRight : null,
+                      onPressed: last ? _addKey : _next,
+                    ),
+                  ),
+                ],
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-              child: PrimaryButton(label: last ? tr('Connect a provider') : tr('Next'), onPressed: last ? _addKey : _next),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: StorysetCredit(openUrl: widget.agent.client.openUrl),
             ),
           ],
         ),
       ),
     );
   }
-
-  Widget _heroWidget(_Hero hero) => switch (hero) {
-    _Hero.logo => Image.asset('assets/brand/logo.png', height: 200),
-    _Hero.models => const IconTile(icon: LucideIcons.sparkles, size: 132),
-    _Hero.key => const IconTile(icon: LucideIcons.keyRound, size: 132),
-  };
 }
 
-enum _Hero { logo, models, key }
+class _Hero extends StatelessWidget {
+  const _Hero({required this.illustration, required this.height});
+  final String illustration;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      height: height,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(Radii.xl),
+        border: Border.all(color: p.border),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [p.accent.withValues(alpha: 0.16), p.surface],
+        ),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Illustration(illustration, height: height - 32),
+    );
+  }
+}

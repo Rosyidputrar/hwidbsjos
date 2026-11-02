@@ -214,14 +214,16 @@ class _UsageScreenState extends State<UsageScreen> {
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
           children: [
             SectionLabel(tr('This phone'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: PillSegments<int>(
-                value: _days,
-                options: {for (final d in const [7, 30]) d: '$d ${tr('days')}'},
-                onChanged: _setDays,
-                expand: false,
-              ),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final d in const [7, 30])
+                  ChoiceChip(
+                    label: Text('$d ${tr('days')}'),
+                    selected: _days == d,
+                    onSelected: (_) => _setDays(d),
+                  ),
+              ],
             ),
             const SizedBox(height: 10),
             if (_error != null)

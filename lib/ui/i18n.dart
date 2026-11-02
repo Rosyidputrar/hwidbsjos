@@ -138,6 +138,15 @@ const _id = <String, String>{
   'tasks running': 'tugas berjalan',
   // Settings
   'AI': 'AI',
+  'Boost your\nproductivity': 'Tingkatkan\nproduktivitasmu',
+  'Chat with a coding agent that runs right on your phone.': 'Ngobrol dengan agen coding yang berjalan langsung di HP kamu.',
+  'Real Linux,\nin your pocket': 'Linux asli,\ndi sakumu',
+  'Install Python, Node and more with apt. No root needed.': 'Pasang Python, Node, dan lainnya dengan apt. Tidak perlu root.',
+  'Search, build\nand preview': 'Cari, bangun,\ndan pratinjau',
+  'pi looks things up on the web and shows your pages live.': 'pi mencari di web dan menampilkan halamanmu secara langsung.',
+  'Ship it\nanywhere': 'Rilis ke\nmana saja',
+  'Deploy to Vercel, GitHub Pages or your own server.': 'Deploy ke Vercel, GitHub Pages, atau servermu sendiri.',
+  'AI & models': 'AI & model',
   'About': 'Tentang',
   'Powered by': 'Ditenagai oleh',
   'Add API key': 'Tambah API key',
@@ -241,6 +250,7 @@ const _id = <String, String>{
   'App lock': 'Kunci aplikasi',
   'Fingerprint or screen lock when opening Rynex AI Agent': 'Sidik jari atau kunci layar saat membuka Rynex AI Agent',
   'Text size': 'Ukuran teks',
+  'Theme': 'Tema',
   'Compact layout': 'Tata letak ringkas',
   'Tighter spacing, more on screen': 'Jarak lebih rapat, lebih banyak konten',
   'Accent colour': 'Warna aksen',
@@ -622,6 +632,8 @@ const _id = <String, String>{
   'Continue': 'Lanjut',
   'Reload': 'Muat ulang',
   'No changes': 'Tidak ada perubahan',
+  'No model selected': 'Belum ada model dipilih',
+  'Rynex AI Agent and the libraries it is built on': 'Rynex AI Agent dan pustaka yang membangunnya',
   'No models yet. Connect a provider to see its models here.':
       'Belum ada model. Hubungkan provider untuk melihat modelnya di sini.',
   'Discard changes?': 'Buang perubahan?',
@@ -1855,6 +1867,7 @@ const _id = <String, String>{
   'Daily budget of \${cap} reached (\${spent} spent today). Raise it in Settings → Usage.':
       'Batas harian sebesar \${cap} tercapai (terpakai \${spent} hari ini). Naikkan di Pengaturan → Pemakaian.',
   'Made by seseegy': 'Dibuat oleh seseegy',
+  'Made by': 'Dibuat oleh',
   'An AI coding agent on your phone. Bring your own provider: sign in with an account, use an API key, or point Rynex at your own server.':
       'Agent coding AI di HP kamu. Pakai providermu sendiri: masuk dengan akun, gunakan kunci API, atau arahkan Rynex ke servermu sendiri.',
   'API key': 'Kunci API',
