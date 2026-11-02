@@ -92,12 +92,6 @@ export interface AppSettings {
 	tinyfishKey?: string;
 	/** Whether the agent uses TinyFish Search; unset means on. */
 	tinyfishSearch?: boolean;
-	/** Search through the gateway provider (the first custom provider; OpenAI Responses + Anthropic Messages legs); unset means on. */
-	openaiSearch?: boolean;
-	anthropicSearch?: boolean;
-	/** Dedicated search models for the gateway backends; unset means the defaults below. */
-	openaiSearchModel?: string;
-	anthropicSearchModel?: string;
 	/** Per-project web_search toggle, keyed by project path; absent means on. */
 	projectSearch?: Record<string, boolean>;
 	/** Per-backend switches for the keyed search tools; unset means on. */
@@ -291,10 +285,6 @@ export class Integrations {
 			s1Crawl: this.settings.s1Crawl ?? true,
 			s1Screenshot: this.settings.s1Screenshot ?? true,
 			tinyfishSearch: this.settings.tinyfishSearch ?? true,
-			openaiSearch: this.settings.openaiSearch ?? true,
-			anthropicSearch: this.settings.anthropicSearch ?? true,
-			openaiSearchModel: this.settings.openaiSearchModel ?? "gpt-4o-mini",
-			anthropicSearchModel: this.settings.anthropicSearchModel ?? "claude-haiku-4-5",
 			projectSearch: this.settings.projectSearch ?? {},
 			braveSearch: this.settings.braveSearch ?? true,
 			tavilySearch: this.settings.tavilySearch ?? true,
@@ -382,10 +372,6 @@ export class Integrations {
 			s1Crawl: s.s1Crawl ?? true,
 			s1Screenshot: s.s1Screenshot ?? true,
 			tinyfishSearch: s.tinyfishSearch ?? true,
-			openaiSearch: s.openaiSearch ?? true,
-			anthropicSearch: s.anthropicSearch ?? true,
-			openaiSearchModel: s.openaiSearchModel ?? "gpt-4o-mini",
-			anthropicSearchModel: s.anthropicSearchModel ?? "claude-haiku-4-5",
 			projectSearch: s.projectSearch ?? {},
 			braveSearch: s.braveSearch ?? true,
 			tavilySearch: s.tavilySearch ?? true,

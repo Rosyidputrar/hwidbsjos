@@ -228,7 +228,7 @@ void touchTargetTests() {
     FakeHost();
     await pumpLook(tester, const Look(width: 360), HomeShell(agent: newAgent()), height: 1600);
     await frames(tester);
-    for (final label in ['All types', 'Make', 'Code']) {
+    for (final label in ['All types', 'Build', 'Code']) {
       atLeast48(tester, find.ancestor(of: find.text(label), matching: find.byType(TapTarget)).first, label);
     }
   });

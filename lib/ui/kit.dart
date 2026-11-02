@@ -25,13 +25,21 @@ class LogoMark extends StatelessWidget {
   );
 }
 
-/// Primary call to action: solid, high-contrast, full width.
+/// Primary call to action: solid accent, full width.
 class PrimaryButton extends StatelessWidget {
-  const PrimaryButton({super.key, required this.label, required this.onPressed, this.icon, this.busy = false});
+  const PrimaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.busy = false,
+    this.compact = false,
+  });
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
   final bool busy;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -41,31 +49,32 @@ class PrimaryButton extends StatelessWidget {
       duration: Motion.of(context, const Duration(milliseconds: 150)),
       opacity: enabled ? 1 : 0.45,
       child: Material(
-        color: p.text,
-        borderRadius: BorderRadius.circular(Radii.lg),
+        color: p.accent,
+        borderRadius: BorderRadius.circular(Radii.md),
         child: InkWell(
-          borderRadius: BorderRadius.circular(Radii.lg),
+          borderRadius: BorderRadius.circular(Radii.md),
           onTap: enabled ? onPressed : null,
-          // 54 dp tall, and taller when a long label with large text needs a second line (it ran off the side).
+          // Tall enough to touch, and taller when a long label with large text needs a second line.
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 54),
+            constraints: BoxConstraints(minHeight: compact ? 44 : 52),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: 6),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (busy)
-                    BusySpinner(color: p.inverse)
+                    BusySpinner(color: p.onAccent)
                   else if (icon != null)
-                    Icon(icon, size: 18, color: p.inverse),
-                  if (busy || icon != null) const SizedBox(width: 8),
+                    Icon(icon, size: 18, color: p.onAccent),
+                  if (busy || icon != null) const SizedBox(width: Space.sm),
                   Flexible(
                     child: Text(
                       label,
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: p.inverse, fontWeight: FontWeight.w600, fontSize: 15),
+                      style: TextStyle(color: p.onAccent, fontWeight: FontWeight.w600, fontSize: compact ? 14 : 15),
                     ),
                   ),
                 ],
@@ -78,32 +87,39 @@ class PrimaryButton extends StatelessWidget {
   }
 }
 
-/// A soft grey surface; tappable when [onTap] is set.
+/// A bordered card on the surface colour; tappable when [onTap] is set.
 class SurfaceCard extends StatelessWidget {
   const SurfaceCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(18),
+    this.padding = const EdgeInsets.all(Space.lg),
     this.onTap,
+    this.onLongPress,
     this.highlight = false,
+    this.color,
+    this.radius = Radii.lg,
   });
   final Widget child;
   final EdgeInsets padding;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final bool highlight;
+  final Color? color;
+  final double radius;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Material(
-      color: p.surface,
+      color: color ?? p.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.xl),
-        side: highlight ? BorderSide(color: p.text, width: 1.5) : BorderSide.none,
+        borderRadius: BorderRadius.circular(radius),
+        side: BorderSide(color: highlight ? p.accent : p.border, width: highlight ? 1.5 : 1),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: padding,
           child: OnSurface(child: child),
@@ -407,18 +423,21 @@ class SettingsGroup extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: p.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(Radii.lg),
         border: Border.all(color: p.border),
       ),
       clipBehavior: Clip.antiAlias,
-      child: OnSurface(
-        child: Column(
-          children: [
-            for (var i = 0; i < children.length; i++) ...[
-              if (i > 0) Divider(height: 1, indent: 62, endIndent: 0, color: p.border),
-              children[i],
+      child: Material(
+        type: MaterialType.transparency,
+        child: OnSurface(
+          child: Column(
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0) Divider(height: 1, indent: 62, endIndent: 0, color: p.border),
+                children[i],
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

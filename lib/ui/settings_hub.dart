@@ -19,7 +19,6 @@ import 'kit.dart';
 import 'links.dart';
 import 'i18n.dart';
 import 'illustration.dart';
-import 'image_gen_screen.dart';
 import 'mcp_screen.dart';
 import 'mesh.dart';
 import 'network_screen.dart';
@@ -293,12 +292,6 @@ class _SettingsHubState extends State<SettingsHub> {
                     title: tr('Usage & budget'),
                     subtitle: budgetSubtitle(it.settings),
                     onTap: () => _open(UsageScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.image,
-                    title: tr('Generate image'),
-                    subtitle: tr('Make pictures with Rynex image models'),
-                    onTap: () => _open(ImageGenScreen(agent: agent)),
                   ),
                 ],
               ),

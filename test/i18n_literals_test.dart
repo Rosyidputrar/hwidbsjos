@@ -33,7 +33,6 @@ const _allowed = {
   'tasks_screen.dart:owner/repo',
   'tasks_screen.dart:agent',
   'templates_screen.dart:review',
-  'image_gen_screen.dart:gpt-image',
   'accounts_screen.dart:GitHub connected', // accounts_screen's _snack translates what it is given
   'accounts_screen.dart:Ov23…',
   'accounts_screen.dart:id_ed25519.pub',

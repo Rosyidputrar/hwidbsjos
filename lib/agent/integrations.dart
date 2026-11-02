@@ -212,10 +212,6 @@ class AppSettings {
   bool get s1Search => json['s1Search'] != false;
   bool get s1Crawl => json['s1Crawl'] != false;
   bool get s1Screenshot => json['s1Screenshot'] != false;
-  bool get openaiSearch => json['openaiSearch'] != false;
-  bool get anthropicSearch => json['anthropicSearch'] != false;
-  String get openaiSearchModel => json['openaiSearchModel'] as String? ?? 'gpt-5.6-luna';
-  String get anthropicSearchModel => json['anthropicSearchModel'] as String? ?? 'claude-haiku-5.5';
 
   /// Per-project web_search toggle, keyed by project path; absent means on.
   Map<String, bool> get projectSearch =>

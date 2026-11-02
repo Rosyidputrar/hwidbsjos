@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rynex/ui/code_view.dart';
-import 'package:rynex/ui/home_shell.dart';
 import 'package:rynex/ui/theme.dart';
 
 double contrast(Color a, Color b) {
@@ -100,10 +99,13 @@ void smallContrastTests() {
 }
 
 void fixedColourTests() {
-  test('UI-23: the connect card stands apart from the dark page, and its white text reads on it', () {
-    expect(contrast(connectCardDark, Palette.dark.bg), greaterThanOrEqualTo(1.3), reason: 'it was 1.04:1, the page\'s own colour');
-    expect(contrast(Colors.white, connectCardDark), greaterThanOrEqualTo(4.5));
-    expect(contrast(const Color(0xFF111113), Palette.dark.bg), lessThan(1.1), reason: 'the old fill really vanished');
+  test('UI-23: the primary button\'s label reads on every accent, in both themes', () {
+    for (var i = 0; i < accentChoices.length; i++) {
+      for (final (name, base, fill) in [('light', Palette.light, accentChoices[i].$1), ('dark', Palette.dark, accentChoices[i].$2)]) {
+        final p = base.copyWith(accent: fill);
+        expect(contrast(p.onAccent, p.accent), greaterThanOrEqualTo(4.5), reason: '${accentNames[i]} $name');
+      }
+    }
   });
 
   test('UI-23: the running CI spinner stands out from the page in both themes (the fixed amber was 1.95:1)', () {

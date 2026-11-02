@@ -300,44 +300,6 @@ class _NetworkScreenState extends State<NetworkScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    SettingsGroup(
-                      children: [
-                        _FeatureSwitch(
-                          icon: LucideIcons.search,
-                          title: tr('OpenAI search'),
-                          subtitle: tr('Responses API · GPT models · uses the saved Rynex key'),
-                          value: s.openaiSearch,
-                          onChanged: (v) => _save({'openaiSearch': v}),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    _ModelField(
-                      label: tr('OpenAI search model'),
-                      value: s.openaiSearchModel,
-                      defaultValue: 'gpt-5.6-luna',
-                      onSaved: (v) => _save({'openaiSearchModel': v}),
-                    ),
-                    const SizedBox(height: 10),
-                    SettingsGroup(
-                      children: [
-                        _FeatureSwitch(
-                          icon: LucideIcons.globe,
-                          title: tr('Anthropic search'),
-                          subtitle: tr('Messages API · Claude models · uses the saved Rynex key'),
-                          value: s.anthropicSearch,
-                          onChanged: (v) => _save({'anthropicSearch': v}),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    _ModelField(
-                      label: tr('Anthropic search model'),
-                      value: s.anthropicSearchModel,
-                      defaultValue: 'claude-haiku-5.5',
-                      onSaved: (v) => _save({'anthropicSearchModel': v}),
-                    ),
                   ],
                 ),
         );
@@ -446,60 +408,6 @@ class _FeatureSwitch extends StatelessWidget {
       subtitle: subtitle,
       onTap: () => onChanged(!value),
       trailing: LabeledSwitch(label: title, value: value, onChanged: onChanged),
-    );
-  }
-}
-
-/// A one-line model slug field. An empty submit resets to the default
-/// instead of saving blank (blank would silently mean "default" again).
-class _ModelField extends StatefulWidget {
-  const _ModelField({required this.label, required this.value, required this.defaultValue, required this.onSaved});
-  final String label;
-  final String value;
-  final String defaultValue;
-  final ValueChanged<String> onSaved;
-
-  @override
-  State<_ModelField> createState() => _ModelFieldState();
-}
-
-class _ModelFieldState extends State<_ModelField> {
-  late final controller = TextEditingController(text: widget.value);
-
-  @override
-  void didUpdateWidget(covariant _ModelField old) {
-    super.didUpdateWidget(old);
-    if (old.value != widget.value && controller.text != widget.value) controller.text = widget.value;
-  }
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final next = controller.text.trim().isEmpty ? widget.defaultValue : controller.text.trim();
-    if (controller.text != next) controller.text = next;
-    widget.onSaved(next);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      autocorrect: false,
-      style: const TextStyle(fontFamily: mono, fontSize: 13.5),
-      decoration: InputDecoration(
-        labelText: widget.label,
-        hintText: widget.defaultValue,
-        suffixIcon: IconButton(
-          tooltip: tr('Save'),
-          icon: const Icon(LucideIcons.check, size: 18),
-          onPressed: _submit,
-        ),
-      ),
-      onSubmitted: (_) => _submit(),
     );
   }
 }

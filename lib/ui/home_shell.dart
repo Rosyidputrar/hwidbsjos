@@ -17,7 +17,6 @@ import 'chat_screen.dart';
 import 'delete_flows.dart';
 import 'errors.dart';
 import 'folder_picker.dart';
-import 'image_gen_screen.dart';
 import 'kit.dart';
 import 'illustration.dart';
 import 'mesh.dart';
@@ -618,8 +617,6 @@ class _Quick {
     this.category,
     this.art, {
     this.prompt,
-    this.clone = false,
-    this.openImages = false,
   });
   final String title;
 
@@ -632,12 +629,10 @@ class _Quick {
   final Color color;
   final String category;
   final String? prompt;
-  final bool clone;
-  final bool openImages;
 }
 
 /// Category chips over the quick starts: id -> label.
-const _categories = {'All': 'All types', 'Build': 'Make', 'Code': 'Code', 'Ops': 'Deploy & automate'};
+const _categories = {'All': 'All types', 'Build': 'Build', 'Code': 'Code', 'Ops': 'Ops'};
 
 const _quick = [
   _Quick(
@@ -648,15 +643,6 @@ const _quick = [
     'Build',
     'projects',
     prompt: 'Build me a polished, mobile-first web app: ',
-  ),
-  _Quick(
-    'Generate an image',
-    'Logos, mockups, illustrations',
-    LucideIcons.image,
-    Color(0xFFEC4899),
-    'Build',
-    'ai',
-    openImages: true,
   ),
   _Quick(
     'Design a modern UI',
@@ -674,15 +660,6 @@ const _quick = [
     Color(0xFF7C5CFC),
     'Code',
     'chat',
-  ),
-  _Quick(
-    'Clone a GitHub repo',
-    'Pick up an existing project',
-    SimpleIcons.github,
-    Color(0xFF475569),
-    'Code',
-    'git',
-    clone: true,
   ),
   _Quick(
     'Fix a bug',
@@ -758,16 +735,6 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
   Future<void> _run(_Quick q) async {
     if (busy()) return;
     if (q.prompt != null) return _startQuick(q);
-    if (q.openImages) {
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageGenScreen(agent: agent)));
-      _refresh();
-      return;
-    }
-    if (q.clone) {
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReposScreen(agent: agent)));
-      _refresh();
-      return;
-    }
     widget.onNewChat();
   }
 
@@ -1204,7 +1171,9 @@ class _SectionHeader extends StatelessWidget {
                 foregroundColor: context.palette.accentText,
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                // From the theme, not a bare TextStyle: a button's own textStyle replaces the theme's whole style,
+                // family included, and the label fell back to the platform font.
+                textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 13),
               ),
               child: Text(action!),
             ),
@@ -1221,54 +1190,42 @@ class _ConnectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // A near-black card on the light theme; on the dark one that was the page's own colour (0xFF111113 on 0xFF0B0B0D),
-    // so it gets a lighter fill and an edge there.
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      decoration: BoxDecoration(
-        color: dark ? connectCardDark : const Color(0xFF111113),
-        borderRadius: BorderRadius.circular(Radii.xl),
-        border: dark ? Border.all(color: Colors.white.withValues(alpha: 0.14)) : null,
-      ),
-      clipBehavior: Clip.antiAlias,
-      padding: const EdgeInsets.all(20),
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return SurfaceCard(
+      highlight: true,
+      padding: const EdgeInsets.all(Space.xl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  tr('Connect a provider'),
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
-                ),
-              ),
-              const SizedBox(width: 12),
+              IconTile(icon: LucideIcons.plugZap, color: p.accent, size: 40),
+              const Spacer(),
               // In its own tile, like the quick-start cards, so it never sits on the text.
               const SizedBox.square(
-                dimension: 84,
+                dimension: 72,
                 child: MeshArt(
                   seed: 'connect',
-                  radius: 22,
-                  child: Padding(padding: EdgeInsets.all(6), child: Illustration('connect', height: 72)),
+                  radius: Radii.md,
+                  child: Padding(padding: EdgeInsets.all(6), child: Illustration('connect', height: 60)),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: Space.md),
+          Text(tr('Connect a provider'), style: text.titleMedium),
+          const SizedBox(height: Space.xs),
           Text(
             tr('Sign in with an account, add an API key, or point Rynex at your own endpoint \u2014 Claude, GPT, Gemini, DeepSeek and more, through any provider you choose.'),
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
+            style: text.bodySmall,
           ),
-          const SizedBox(height: 16),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF111113),
-              minimumSize: const Size(0, 44),
-            ),
+          const SizedBox(height: Space.lg),
+          PrimaryButton(
+            compact: true,
+            icon: LucideIcons.sparkles,
+            label: tr('Connect a provider'),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
-            child: Text(tr('Connect a provider')),
           ),
         ],
       ),
@@ -2019,6 +1976,3 @@ class _OnSwitchingState extends State<_OnSwitching> {
   @override
   Widget build(BuildContext context) => widget.builder(context, _switching);
 }
-
-/// The connect card's fill on the dark theme: set apart from the page, with room for its white text.
-const connectCardDark = Color(0xFF26262C);

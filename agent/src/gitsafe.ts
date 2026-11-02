@@ -42,15 +42,28 @@ export const SAFE_GIT_FLAGS: string[] = [
 ];
 
 /** Names of environment variables that hold a secret. */
-const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|STORE_KEY|PRIVATE_KEY|CREDENTIAL)/i;
+const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|STORE_KEY|PROVIDER_KEY|PRIVATE_KEY|CREDENTIAL)/i;
+
+/**
+ * [base] without the variables that hold a secret: the sign-in tokens, the store key, and the API keys of the person's
+ * providers (`RYNEX_PROVIDER_KEY_<ID>`, which pi reads from the host's own environment). What the host starts for
+ * somebody else (git, an MCP server) gets this, not the host's environment.
+ */
+export function stripSecrets(base: NodeJS.ProcessEnv = process.env, names: RegExp = SECRET_NAME): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const [name, value] of Object.entries(base)) if (!names.test(name)) env[name] = value;
+	return env;
+}
+
+/** The host's own keys: the store key and the providers' API keys. Nothing else is taken out. */
+export const HOST_KEYS = /(STORE_KEY|PROVIDER_KEY)/i;
 
 /**
  * The environment for git: [base] without secrets (git signs in with the header the app put in its global config, not
  * with the environment), nothing to prompt or page or edit with, no external diff program.
  */
 export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-	const env: NodeJS.ProcessEnv = {};
-	for (const [name, value] of Object.entries(base)) if (!SECRET_NAME.test(name)) env[name] = value;
+	const env = stripSecrets(base);
 	delete env.GIT_EXTERNAL_DIFF;
 	env.GIT_TERMINAL_PROMPT = "0";
 	// A repository's `core.askPass` is a program git runs when it wants a password; the environment variable comes first.

@@ -133,7 +133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                   child: Text(
-                    tr('Point the app at any server that speaks an OpenAI-compatible API: Ollama, LM Studio, vLLM, a proxy or your own gateway.'),
+                    tr('Point the app at any server that speaks the OpenAI, Anthropic or Google API: Ollama, LM Studio, vLLM, a hosted service, a proxy or your own gateway.'),
                     style: text.bodySmall,
                   ),
                 ),

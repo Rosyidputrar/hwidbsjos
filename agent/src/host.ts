@@ -47,7 +47,7 @@ import { Notifier } from "./notify.js";
 import { syncLauncher } from "./launcher.js";
 import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
-import { CustomProviders, fetchModels, generateImage, listImageModels } from "./providers.js";
+import { CustomProviders, fetchModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { onStoreProblem, storeProblemMessage } from "./state.js";
 import { serialQueue, swapSession } from "./sessionswap.js";
@@ -390,15 +390,7 @@ async function buildSession(
 		tools: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...mcpTools.map((t) => t.name)],
 		customTools: [
 			...webTools(
-				() => ({
-					...integrations.searchKeys(),
-					// The model-backed search legs reuse the user's own gateway endpoint
-					// (searchGateway) with the dedicated search models from settings (not
-					// the conversation's model). The callback runs per tool call, so it
-					// always reads the current settings.
-					...searchGateway(),
-					activeModel: session?.model?.id ?? "",
-				}),
+				() => integrations.searchKeys(),
 				() => sessionManager.getCwd(),
 			),
 			todoTool(),
@@ -414,24 +406,6 @@ async function buildSession(
 	// Some models send "None" or numbers-as-strings for tool arguments.
 	installLenientTools(result.session.agent);
 	return result;
-}
-
-/**
- * The endpoint the web search's model-backed legs run on: the first custom
- * provider the user saved (an OpenAI-compatible one preferred, then an
- * Anthropic-shaped one). Without one, those legs stay off and the other
- * backends (Search1API, Brave, Tavily, DDG) carry the search.
- */
-function searchGateway(): { gatewayKey: string; gatewayBaseUrl: string; gatewayApi: string } {
-	const empty = { gatewayKey: "", gatewayBaseUrl: "", gatewayApi: "" };
-	if (!customProviders) return empty;
-	const all = customProviders.list();
-	const pick =
-		all.find((p) => p.api === "openai-completions" || p.api === "openai-responses") ??
-		all.find((p) => p.api === "anthropic-messages") ??
-		all[0];
-	if (!pick) return empty;
-	return { gatewayKey: customProviders.key(pick.id), gatewayBaseUrl: pick.baseUrl, gatewayApi: pick.api };
 }
 
 /** The open chat, as a subagent's parent. Read lazily: the tool runs later. */
@@ -481,11 +455,7 @@ async function buildSubagentSession(opts: SubagentSessionFactoryOptions) {
 		tools: profile === "full" ? FULL_TOOLS : READ_TOOLS,
 		customTools: [
 			...webTools(
-				() => ({
-					...integrations.searchKeys(),
-					...searchGateway(),
-					activeModel: parent.modelId,
-				}),
+				() => integrations.searchKeys(),
 				() => cwd,
 			),
 		] as any,
@@ -1496,28 +1466,6 @@ async function handle(cmd: Command): Promise<unknown> {
 				: "openai-completions";
 			const key = cmd.apiKey || (cmd.providerId ? customProviders.key(cmd.providerId) : "");
 			return fetchModels(api, String(cmd.baseUrl ?? ""), key);
-		}
-		// Image models of one of the user's custom providers (its catalog must
-		// tag them kind:"image"; endpoints without image models return none).
-		case "image_models": {
-			const provider = customProviders.list().find((p) => p.id === cmd.providerId);
-			if (!provider) throw new Error("Unknown provider");
-			return listImageModels(provider.baseUrl, customProviders.key(provider.id));
-		}
-		case "custom_provider_images_generate": {
-			// A picture can cost more than most turns: the daily budget applies to it too.
-			checkBudget();
-			const provider = customProviders.list().find((p) => p.id === cmd.providerId);
-			if (!provider) throw new Error("Pick a provider for image generation first");
-			return {
-				b64_json: await generateImage(
-					provider.baseUrl,
-					customProviders.key(provider.id),
-					String(cmd.model ?? ""),
-					String(cmd.prompt ?? ""),
-					String(cmd.size ?? "1024x1024"),
-				),
-			};
 		}
 
 		case "new_session":
