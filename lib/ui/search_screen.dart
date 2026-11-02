@@ -6,8 +6,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import 'editor_screen.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Project-wide search (ripgrep on the host), grouped by file; a match opens
@@ -117,7 +119,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final pattern = _pattern();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Search')),
+      appBar: AppBar(title: Text(tr('Search'))),
       body: Column(
         children: [
           Padding(
@@ -128,16 +130,17 @@ class _SearchScreenState extends State<SearchScreen> {
               textInputAction: TextInputAction.search,
               style: const TextStyle(fontFamily: mono, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'Search in project',
+                hintText: tr('Search in project'),
                 prefixIcon: const Icon(LucideIcons.search, size: 18),
                 suffixIcon: busy
                     ? const Padding(
                         padding: EdgeInsets.all(14),
-                        child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                        child: BusySpinner(),
                       )
                     : query.text.isEmpty
                     ? null
                     : IconButton(
+                        tooltip: tr('Clear'),
                         icon: const Icon(LucideIcons.x, size: 18),
                         onPressed: () {
                           query.clear();
@@ -150,13 +153,14 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
           SizedBox(
-            height: 36,
+            // 48 dp touch boxes around 36 dp toggles.
+            height: 48,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
                 _Toggle(
-                  label: 'Regex',
+                  label: tr('Regex'),
                   icon: LucideIcons.regex,
                   on: regex,
                   onTap: () {
@@ -166,7 +170,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 const SizedBox(width: 8),
                 _Toggle(
-                  label: 'Match case',
+                  label: tr('Match case'),
                   icon: LucideIcons.caseSensitive,
                   on: matchCase,
                   onTap: () {
@@ -201,17 +205,25 @@ class _SearchScreenState extends State<SearchScreen> {
             child: error != null
                 ? ListView(
                     padding: const EdgeInsets.all(16),
-                    children: [Pill('$error', color: p.danger, icon: LucideIcons.circleAlert)],
+                    children: [Pill(friendlyError(error), color: p.danger, icon: LucideIcons.circleAlert)],
                   )
                 : list == null || list.isEmpty
-                ? _Empty(message: list == null ? 'Search every file in ${_folder()}' : 'No matches')
+                ? _Empty(
+                    message: list == null
+                        ? tr('Search every file in {folder}').replaceAll('{folder}', _folder())
+                        : tr('No matches'),
+                  )
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(0, 8, 0, 40),
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                         child: Text(
-                          truncated ? 'Showing first 500 matches' : '${list.length} matches in ${groups.length} files',
+                          truncated
+                              ? tr('Showing first 500 matches')
+                              : tr('{n} matches in {files} files')
+                                  .replaceAll('{n}', '${list.length}')
+                                  .replaceAll('{files}', '${groups.length}'),
                           style: text.bodySmall?.copyWith(color: truncated ? p.warning : p.muted),
                         ),
                       ),
@@ -230,8 +242,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
   String _folder() {
     final cwd = agent.cwd;
-    if (cwd.isEmpty) return 'the project';
-    return cwd.split('/').where((s) => s.isNotEmpty).lastOrNull ?? 'the project';
+    if (cwd.isEmpty) return tr('the project');
+    return cwd.split('/').where((s) => s.isNotEmpty).lastOrNull ?? tr('the project');
   }
 }
 
@@ -245,24 +257,29 @@ class _Toggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: on ? p.accent.withValues(alpha: 0.14) : p.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.pill),
-        side: BorderSide(color: on ? p.accent.withValues(alpha: 0.4) : p.border),
-      ),
+    // 36 dp to look at, the row's full 48 dp to touch.
+    return Semantics(
+      toggled: on,
       child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.pill),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 15, color: on ? p.accent : p.muted),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(fontSize: 12.5, color: on ? p.accent : p.text)),
-            ],
+        child: Center(
+          child: Material(
+            color: on ? p.text : p.surface,
+            borderRadius: BorderRadius.circular(Radii.lg),
+            child: SizedBox(
+              height: 36,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 15, color: on ? p.inverse : p.muted),
+                    const SizedBox(width: 6),
+                    Text(label, style: TextStyle(fontSize: 12.5, color: on ? p.inverse : p.text)),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),

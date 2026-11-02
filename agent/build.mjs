@@ -9,6 +9,7 @@ import { build, transformSync } from "esbuild";
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SERVER_DIR, serverInstaller } from "./server-installer.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -30,7 +31,8 @@ execSync(`npm install --omit=dev --ignore-scripts --no-audit --no-fund @earendil
 
 // 2. Drop what cannot run on Android or is never read at runtime.
 // prebuilds: desktop-only .node clipboard helpers; pi-tui skips them when missing.
-const dropDirs = new Set(["@esbuild", "@types", "examples", "test", "tests", "__tests__", ".github", "prebuilds"]);
+// .bin: CLI shims the host never runs; pi's points into dist/bundle, which is dropped below.
+const dropDirs = new Set([".bin", "@esbuild", "@types", "examples", "test", "tests", "__tests__", ".github", "prebuilds"]);
 const dropFile = (name) =>
 	name.endsWith(".map") ||
 	// TypeScript sources and typings ship next to the compiled JS; node only loads the JS.
@@ -102,18 +104,27 @@ await build({
 	logLevel: "warning",
 });
 cpSync(join(stage, "package.json"), join(out, "package.json"));
-// Skills Rynex ships with; the host seeds them into <agentDir>/skills.
+// Skills Rynex AI Agent ships with; the host seeds them into <agentDir>/skills.
 cpSync(join(here, "skills"), join(out, "skills"), { recursive: true });
 cpSync(join(stage, "node_modules"), join(out, "node_modules"), { recursive: true });
+// The files bootstrap.sh installs outside the host's folder (box launcher, its Containerfile, the attach program). The
+// app's update copies only this folder, so they travel in it and the host puts them in place at start (launcher.ts).
+mkdirSync(join(out, "launcher"), { recursive: true });
+for (const [from, to] of [["box/box", "box"], ["box/Containerfile", "Containerfile"], ["rynex-attach", "rynex-attach"]]) {
+	cpSync(join(SERVER_DIR, from), join(out, "launcher", to));
+}
 
 // 4. Ship as one archive: copying thousands of small files through
 // AssetManager is slow, a single zip streams in one pass. The stamp lets the
 // app re-extract only when the bundle changes.
 const stamp = `${piVersion} ${Date.now()}`;
+// The server/ folder as one script, so the app alone can set up a server (Settings > Server agent).
+mkdirSync(join(out, "server"), { recursive: true });
+writeFileSync(join(out, "server", "rynex-setup.sh"), serverInstaller(SERVER_DIR, stamp), { mode: 0o755 });
 rmSync(join(assets, "agent"), { recursive: true, force: true });
 mkdirSync(assets, { recursive: true });
 execSync(
-	`python -c "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', sys.argv[2])" "${join(assets, "agent")}" "${out}"`,
+	`python3 -c "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', sys.argv[2])" "${join(assets, "agent")}" "${out}"`,
 	{ stdio: "inherit" },
 );
 writeFileSync(join(assets, "agent.stamp"), stamp);

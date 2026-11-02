@@ -40,4 +40,4 @@ PAKAI MODEL PILIHAN KAMU
 Mendukung Anthropic Claude, OpenAI, Google Gemini, OpenRouter, dan provider lain yang didukung agen pi. Login dengan akun atau API key kamu sendiri.
 
 OPEN SOURCE
-Rynex open source (BSD 3-Clause): https://github.com/seseegy/rynex
+Rynex berlisensi MIT: https://github.com/seseegy/rynex

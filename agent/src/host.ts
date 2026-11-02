@@ -1,8 +1,9 @@
 /**
- * Rynex agent host.
+ * Rynex AI Agent agent host.
  *
  * Runs inside the bundled Node runtime on the device and exposes the pi SDK to
- * the Flutter app over JSONL on stdin/stdout:
+ * the Flutter app over JSONL on stdin/stdout. On a server (--listen, see
+ * server_agent.md) the same records go over a unix socket instead (transport.ts):
  *
  *   app  -> host   {"id": 1, "type": "prompt", "text": "..."}
  *   host -> app    {"type": "response", "id": 1, "ok": true, "data": ...}
@@ -12,32 +13,57 @@
  * stdout is reserved for protocol records; logs go to stderr.
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
 	createAgentSession,
 	DefaultResourceLoader,
+	estimateTokens,
 	getAgentDir,
 	ModelRuntime,
 	SessionManager,
 	SettingsManager,
+	sessionEntryToContextMessages,
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
+import { agentsFileText, isManaged } from "./agents-file.js";
+import { AutoBackup, decryptBackup, restoreBackup } from "./autobackup.js";
 import { Checkpoints } from "./checkpoints.js";
 import { Container, type Distro } from "./container.js";
-import { CUSTOM_APIS, CustomModels } from "./custom_models.js";
 import { installDohLookup } from "./dns.js";
 import * as gitops from "./gitops.js";
+import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
-import { Integrations, type Log } from "./integrations.js";
+import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
+import { compactLimit, gitRun, Integrations, type Log, run } from "./integrations.js";
+import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
+import { limitsExtension } from "./limits.js";
 import { Mcp } from "./mcp.js";
+import { Notifier } from "./notify.js";
+import { syncLauncher } from "./launcher.js";
+import { PodmanBox } from "./podmanbox.js";
+import { Preview } from "./preview.js";
+import { CustomProviders, fetchModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
+import { onStoreProblem, storeProblemMessage } from "./state.js";
+import { serialQueue, swapSession } from "./sessionswap.js";
+import { startWatchdog } from "./watchdog.js";
 import { Skills } from "./skills.js";
-import { webTools } from "./web.js";
+import {
+	FULL_TOOLS,
+	READ_TOOLS,
+	SubagentManager,
+	subagentTool,
+	type SubagentParent,
+	type SubagentSessionFactoryOptions,
+} from "./subagent.js";
+import { GitHubSync } from "./sync.js";
+import { todoTool } from "./todo.js";
+import { s1Usage, webTools } from "./web.js";
 import {
 	collectFiles,
 	dbQuery,
@@ -45,20 +71,32 @@ import {
 	detectTests,
 	readZip,
 	search,
+	findFiles,
 	Templates,
 	Tunnels,
 	usageSummary,
+	wibDay,
 	writeZip,
 } from "./workbench.js";
+
+import { PromptQueue } from "./promptqueue.js";
+
+import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
 
 /** Built-in and app tools; MCP tools are added per session. This is the *active* set. */
-const TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search", "web_fetch"];
+const TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search", "web_fetch", "web_screenshot", "todo_write"];
 
 const agentDir = getAgentDir();
 const workspace = process.env.RYNEX_WORKSPACE ?? process.cwd();
 const stateDir = join(agentDir, "rynex");
+// One-time rename from the pre-rebrand state folder, so an upgraded install
+// keeps its providers, settings and keys instead of starting empty.
+try {
+	const legacyState = join(agentDir, "griphub");
+	if (!existsSync(stateDir) && existsSync(legacyState)) renameSync(legacyState, stateDir);
+} catch { /* a failed rename must not stop the host; it starts empty instead */ }
 
 let modelRuntime: ModelRuntime;
 let settingsManager: SettingsManager;
@@ -70,7 +108,14 @@ let templates: Templates;
 let checkpoints: Checkpoints;
 let runner: Runner;
 let mcp: Mcp;
-const customModels = new CustomModels(agentDir);
+let customProviders: CustomProviders;
+let sync: GitHubSync;
+let subagents: SubagentManager;
+let jobs: Jobs;
+let fsService: Fs;
+let preview: Preview;
+/** Server only: hourly encrypted backups for the phone to keep (autobackup.ts). */
+let autoBackup: AutoBackup | undefined;
 const tunnels = new Tunnels();
 let unsubscribe: (() => void) | undefined;
 
@@ -80,13 +125,173 @@ const guard = new Guard({
 		await checkpoints.snapshot(cwd, label);
 	},
 	cwd: () => session?.sessionManager.getCwd() ?? workspace,
+	chat: () => session?.sessionFile ?? session?.sessionId ?? "",
 });
 
 // ---------------------------------------------------------------------------
 // Output
 
+function argValue(name: string): string | undefined {
+	const i = process.argv.indexOf(name);
+	return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+/**
+ * Set when the host runs as a daemon on a server (server mode, see server_agent.md): it listens on this unix socket
+ * and outlives its clients, which reach it over ssh. Unset on the phone, where the app spawned this process and talks
+ * to it over stdin/stdout exactly as before.
+ */
+const listenPath = argValue("--listen") ?? process.env.RYNEX_LISTEN;
+
+/** "server" on a VPS, "phone" in the app's own process. A daemon is a server unless told otherwise. */
+const mode = process.env.RYNEX_MODE ?? (listenPath ? "server" : "phone");
+
+/** A server agent: the daemon on a VPS. Everything that differs from the phone hangs off this. */
+const server = mode === "server";
+
+/** Where the host keeps its own small files on a server (`running` marker, the box). */
+const rynexDir = process.env.RYNEX_DIR ?? join(process.env.HOME ?? agentDir, ".rynex");
+// Same one-time rename for the server-side home folder (~/.griphub -> ~/.rynex).
+if (!process.env.RYNEX_DIR) {
+	try {
+		const legacyDir = join(process.env.HOME ?? agentDir, ".griphub");
+		if (!existsSync(rynexDir) && existsSync(legacyDir)) renameSync(legacyDir, rynexDir);
+	} catch { /* as above: never block startup on it */ }
+}
+/** Exists while the daemon runs and is removed by a clean shutdown; finding it at start means the last one crashed. */
+const runningMarker = join(rynexDir, "running");
+
+/** The `.stamp` next to this host (written with the agent bundle), or undefined when there is none. */
+function bundleStamp(): string | undefined {
+	try {
+		return readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), ".stamp"), "utf8").trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The folder this host runs from (its `.stamp`, `skills/` and, on a server, `launcher/` are next to it). */
+const hostDir = fileURLToPath(new URL(".", import.meta.url));
+
+/** The bundle this process started from. The `.stamp` on disk may already be a newer one that is waiting for a restart. */
+const runningStamp = bundleStamp();
+
+/**
+ * Sends the host's records to the app. On the phone that is stdout, as always (no numbering, no buffer). As a daemon
+ * the hub numbers what is worth replaying and keeps it, so an app that lost its connection gets exactly what it
+ * missed (transport.ts).
+ */
+const hub = new Hub({
+	replay: !!listenPath,
+	mode,
+	hostVersion: VERSION,
+	bundleStamp: runningStamp,
+	handle: (cmd) => handle(cmd as Command),
+	// Only tests shorten these.
+	pingIntervalMs: Number(process.env.RYNEX_PING_MS) || undefined,
+	idleTimeoutMs: Number(process.env.RYNEX_IDLE_MS) || undefined,
+});
+// The app that spawned us is connected from the first byte, so early records reach it.
+const stdio = listenPath ? undefined : hub.attach(stdioConn());
+
 function send(record: object) {
-	process.stdout.write(`${JSON.stringify(record)}\n`);
+	hub.emit(record);
+	if (server) notifyFor(record as Record<string, any>);
+}
+
+/** The launcher that runs bash inside the rootless container on a server (server/box/box). */
+const boxScript = process.env.RYNEX_BOX ?? join(rynexDir, "bin", "box");
+/** The rootless container the agent's shell runs in on a server. The phone's container is container.ts (proot). */
+const box = new PodmanBox({ script: boxScript, rynexDir });
+
+const envBytes = (name: string) => {
+	const n = Number(process.env[name]);
+	return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+/** Disk and memory. On a server a nearly full disk refuses new work; on a phone it is only reported. */
+const health = new Health({
+	path: workspace,
+	enforce: server,
+	limits: {
+		diskWarnBytes: envBytes("RYNEX_DISK_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskWarnBytes,
+		diskMinBytes: envBytes("RYNEX_DISK_MIN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskMinBytes,
+		memoryWarnBytes: envBytes("RYNEX_MEMORY_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.memoryWarnBytes,
+	},
+	// Only a server tells anyone about it: on the phone `health` answers when asked, and nothing else changes.
+	onChange: server ? reportHealth : undefined,
+});
+
+/**
+ * Pushes to the phone through ntfy when nobody is looking at the app (notify.ts). Server only: on the phone the app
+ * makes its own notifications, and it is the app that is closed. Titles are generic, with nothing of the work in them.
+ */
+const notifier = new Notifier({
+	config: () => (server ? (integrations?.notifyConfig() ?? null) : null),
+	shouldSend: () => !hub.hasClient() || hub.clientInBackground(),
+	log: (m) => log(m),
+});
+
+function reportHealth(c: HealthChange) {
+	if (c.what === "disk") {
+		if (c.to === "ok") {
+			send({ type: "notice", message: `Disk space is back to normal (${humanBytes(c.freeBytes)} free).` });
+			return;
+		}
+		const critical = c.to === "critical";
+		send({
+			type: "notice",
+			message: critical
+				? `The disk is almost full (${humanBytes(c.freeBytes)} free). New prompts and tasks are refused until space is freed.`
+				: `Disk space is getting low (${humanBytes(c.freeBytes)} free).`,
+		});
+		void notifier.send("disk", critical ? "Disk is almost full" : "Disk space is low", { priority: critical ? 5 : 4, tags: ["warning"] });
+	} else if (c.to === "high") {
+		send({ type: "notice", message: `The host is using a lot of memory (${humanBytes(c.rssBytes)}).` });
+		void notifier.send("memory", "Host memory is high", { priority: 3, tags: ["warning"] });
+	}
+}
+
+/**
+ * Pushes for what the app would have shown as a notification itself (agent, approvals, background tasks, subagents).
+ * Every record passes through here on a server; the notifier drops what comes while someone is looking at the app.
+ */
+function notifyFor(record: Record<string, any>) {
+	switch (record.type) {
+		case "approval":
+			void notifier.send("approval", "Approval needed", { priority: 4, tags: ["raised_hand"] });
+			return;
+		case "agent_done":
+			if (!record.retrying) void notifier.send("agent_done", "Agent finished", { tags: ["white_check_mark"] });
+			return;
+		case "run_finished":
+			if (record.run?.status === "done") void notifier.send("run_done", "Task finished", { tags: ["white_check_mark"] });
+			else if (record.run?.status === "error") void notifier.send("run_error", "Task failed", { priority: 4, tags: ["x"] });
+			return;
+		case "subagent_finished": {
+			// The same switches as the app's own subagent notifications (Settings → Subagents).
+			const st = integrations?.settings ?? {};
+			const rec = record.subagent ?? {};
+			const limited = rec.status === "stopped" && ["time", "credit", "limit"].includes(rec.stopCode);
+			if (rec.status === "done" && st.subagentNotifyDone !== false) {
+				void notifier.send("subagent_done", "Subagent finished", { tags: ["white_check_mark"] });
+			} else if ((rec.status === "failed" || limited) && st.subagentNotifyFailed !== false) {
+				void notifier.send("subagent_failed", limited ? "Subagent hit its limit" : "Subagent failed", { priority: 4, tags: ["x"] });
+			}
+			return;
+		}
+		case "job":
+			if (record.job?.status === "done") void notifier.send("job_done", "Background job finished", { tags: ["white_check_mark"] });
+			else if (record.job?.status === "failed" || record.job?.status === "timeout") {
+				void notifier.send("job_failed", "Background job failed", { priority: 4, tags: ["x"] });
+			}
+			return;
+		case "subagent_approval_request":
+			if (integrations?.settings.subagentNotifyApproval !== false) {
+				void notifier.send("subagent_approval", "Subagent needs approval", { priority: 4, tags: ["raised_hand"] });
+			}
+			return;
+	}
 }
 
 function log(...args: unknown[]) {
@@ -95,6 +300,17 @@ function log(...args: unknown[]) {
 
 /** Drop cumulative snapshots from streaming updates, like pi's JSON mode. */
 function wireEvent(event: AgentSessionEvent): object {
+	// A summary is a paid request too: its result carries pi's cost for it,
+	// the same figure the reopened chat shows for the summary line.
+	if (event.type === "compaction_end" && (event as any).result?.usage) {
+		const result = (event as any).result;
+		const total = result.usage?.cost?.total;
+		event = { ...event, result: { ...result, cost: typeof total === "number" ? total : null } } as AgentSessionEvent;
+	}
+	// A summary the host started for the context limit (capContext) says so, with the limit, rather than "manual".
+	if ((event.type === "compaction_start" || event.type === "compaction_end") && capping) {
+		return { ...event, reason: "limit", limit: compactAt() };
+	}
 	if (event.type === "message_update") {
 		const { message: _message, assistantMessageEvent, ...rest } = event as any;
 		const { partial, ...delta } = assistantMessageEvent ?? {};
@@ -117,6 +333,7 @@ function modelInfo(model: any) {
 		name: model.name ?? model.id,
 		reasoning: !!model.reasoning,
 		contextWindow: model.contextWindow ?? null,
+		maxTokens: model.maxTokens ?? null,
 		input: model.input ?? ["text"],
 	};
 }
@@ -135,18 +352,29 @@ function state() {
 		billingNotice: billingNotice(),
 		planMode: guard.planMode,
 		approvalMode: guard.mode,
+		// How long the running turn has taken so far, by this host's clock (the app counts on from there).
+		turnElapsedMs: turnStartedAt === null ? null : Date.now() - turnStartedAt,
 	};
 }
 
 /** Every session (chat or background run) is built the same way. */
-async function buildSession(sessionManager: SessionManager, opts: { interactive: boolean }) {
+async function buildSession(
+	sessionManager: SessionManager,
+	opts: { interactive: boolean; onLimit: (reason: string) => void; unattended?: Guard },
+) {
 	const cwd = sessionManager.getCwd();
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
 		settingsManager,
+		// Limits come first, so a call past a limit is refused before it asks for approval.
 		// Approvals and plan mode only make sense with someone watching.
-		extensionFactories: opts.interactive ? [{ name: "rynex", factory: guard.extension, hidden: true }] : [],
+		extensionFactories: [
+			{ name: "rynex-limits", factory: limitsExtension({ budgetError, stopped: opts.onLimit }), hidden: true },
+			...(opts.interactive ? [{ name: "rynex", factory: guard.extension, hidden: true }] : []),
+			// A server's background runs go on while nobody is there: what would need approval is refused instead.
+			...(opts.unattended ? [{ name: "rynex-unattended", factory: opts.unattended.extension, hidden: true }] : []),
+		],
 	});
 	await resourceLoader.reload();
 	const mcpTools = mcp.toolDefinitions();
@@ -157,41 +385,402 @@ async function buildSession(sessionManager: SessionManager, opts: { interactive:
 		settingsManager,
 		sessionManager,
 		resourceLoader,
-		tools: [...TOOLS, ...mcpTools.map((t) => t.name)],
-		customTools: [...webTools(() => integrations.searchKeys()), ...mcpTools] as any,
+		// "subagent" must be named here: the SDK drops custom tools whose
+		// name is not in this allow-list (that is why 1.0.42 never showed it).
+		tools: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...mcpTools.map((t) => t.name)],
+		customTools: [
+			...webTools(
+				() => integrations.searchKeys(),
+				() => sessionManager.getCwd(),
+			),
+			todoTool(),
+			...mcpTools,
+			// The parent's only way to create a subagent. Interactive sessions
+			// only: background runs and subagent sessions never get this tool,
+			// so a subagent can never spawn another one.
+			...(opts.interactive ? [subagentTool(subagents, () => currentParent())] : []),
+			// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
+			...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
+		] as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
 	installLenientTools(result.session.agent);
 	return result;
 }
 
-let lastUserText = "";
-let fallbackTried = false;
+/** The open chat, as a subagent's parent. Read lazily: the tool runs later. */
+function currentParent(title?: string): SubagentParent {
+	const s = session!;
+	return {
+		sessionFile: s.sessionFile ?? s.sessionId,
+		title: title ?? s.sessionName ?? "",
+		cwd: s.sessionManager.getCwd(),
+		modelId: (s.model as any)?.id ?? "",
+	};
+}
 
-async function openSession(sessionManager: SessionManager) {
-	unsubscribe?.();
-	guard.cancelAll();
-	session?.dispose();
-	const result = await buildSession(sessionManager, { interactive: true });
-	session = result.session;
-	unsubscribe = session.subscribe((event) => {
-		send({ type: "event", event: wireEvent(event) });
-		onSessionEvent(event);
+/**
+ * One subagent's session: same pi machinery as buildSession, but a restricted
+ * tool registry (no subagent tool, no todo state, no MCP), an in-memory
+ * session manager (no file that could surface as a chat), and its own guard
+ * and limit instances. The parent's model carries over so cost estimates and
+ * behaviour match the chat that spawned it.
+ */
+async function buildSubagentSession(opts: SubagentSessionFactoryOptions) {
+	const { cwd, profile, guard: subGuard, budgetExtension, onLimit, parent } = opts;
+	// Like a prompt: no new work on a server whose disk is nearly full. The subagent then fails with the reason.
+	await health.assertRoom();
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		settingsManager,
+		extensionFactories: [
+			{ name: "rynex-limits", factory: limitsExtension({ budgetError, stopped: onLimit }), hidden: true },
+			{ name: "rynex-subagent-guard", factory: subGuard.extension, hidden: true },
+			{ name: "rynex-subagent-budget", factory: budgetExtension, hidden: true },
+		],
 	});
-	if (result.modelFallbackMessage) send({ type: "notice", message: result.modelFallbackMessage });
-	return state();
+	await resourceLoader.reload();
+	const parentModel =
+		session?.model != null
+			? modelRuntime.getModel((session.model as any).provider, (session.model as any).id)
+			: undefined;
+	const result = await createAgentSession({
+		cwd,
+		agentDir,
+		modelRuntime,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+		resourceLoader,
+		tools: profile === "full" ? FULL_TOOLS : READ_TOOLS,
+		customTools: [
+			...webTools(
+				() => integrations.searchKeys(),
+				() => cwd,
+			),
+		] as any,
+		...(parentModel ? { model: parentModel } : {}),
+		...(session?.thinkingLevel ? { thinkingLevel: session.thinkingLevel } : {}),
+	});
+	installLenientTools(result.session.agent);
+	return result.session;
+}
+
+/** The last prompt sent from the app until it reaches the history, so Try again can send it once more. */
+let lastPrompt: { text: string; images?: any[]; sessionId: string } | null = null;
+let fallbackTried = false;
+/** A fallback model is about to continue the failed turn; the turn is not over for the app's purposes. */
+let fallbackPending = false;
+
+/** Said when a chat switch would drop a running turn; the app matches it to offer "Stop and switch". */
+const BUSY_SWITCH = "The agent is still working in this chat. Stop it before switching chats.";
+
+/**
+ * Switching chats disposes the open session. While it streams that silently
+ * killed the running turn (the user tapped another chat, the reply was just
+ * gone), so every switch now refuses until the turn is stopped.
+ */
+function assertIdle() {
+	if (session?.isStreaming || fallbackPending) throw new Error(BUSY_SWITCH);
+}
+
+/** Follow-ups queued while the agent works (promptqueue.ts). */
+const promptQueue = new PromptQueue(
+	(items) => send({ type: "prompt_queue", sessionId: session?.sessionId ?? null, items }),
+	(message) => send({ type: "error", message }),
+);
+
+/** One chat switch or rebuild at a time (sessionswap.ts). */
+const oneSwitch = serialQueue();
+
+function openSession(sessionManager: SessionManager) {
+	return oneSwitch(async () => {
+		// The new session is built before the old one is let go of: a build that fails leaves the open chat as it was.
+		let modelFallbackMessage: string | undefined;
+		await swapSession({
+			assertIdle,
+			build: async () => {
+				const result = await buildSession(sessionManager, {
+					interactive: true,
+					onLimit: (reason) => send({ type: "notice", message: reason }),
+				});
+				modelFallbackMessage = result.modelFallbackMessage;
+				return result.session;
+			},
+			retire: () => {
+				unsubscribe?.();
+				guard.cancelAll();
+				session?.dispose();
+				turnStartedAt = null;
+				// Queued follow-ups belong to the chat being left (pi drops them with it).
+				promptQueue.clear();
+			},
+			install: (next) => {
+				session = next;
+				unsubscribe = next.subscribe((event) => {
+					send({ type: "event", event: wireEvent(event) });
+					onSessionEvent(event);
+				});
+			},
+		});
+		if (modelFallbackMessage) send({ type: "notice", message: modelFallbackMessage });
+		// Jobs of this chat that ended while another chat was open call it back now (after this command has answered).
+		setTimeout(deliverJobs, 0);
+		return state();
+	});
 }
 
 /** Hooks on the active chat: model fallback and "done" notifications. */
 function onSessionEvent(event: AgentSessionEvent) {
+	if ((event as any).type === "queue_update") promptQueue.sync(((event as any).followUp ?? []).length);
+	// A turn that ends with nothing running drops what was still waiting (abort).
+	if ((event as any).type === "agent_settled" && !session?.isStreaming) {
+		promptQueue.sync(session?.getFollowUpMessages().length ?? 0);
+	}
+	if (event.type === "message_start" && lastPrompt) {
+		const m = (event as any).message;
+		if (m?.role === "user" && messageText(m).includes(lastPrompt.text)) lastPrompt = null;
+	}
 	if (event.type === "message_end") {
 		const m = (event as any).message;
 		if (m?.role === "assistant" && m.stopReason === "error") void tryFallback(String(m.errorMessage ?? ""));
 	}
+	if (event.type === "agent_start" && turnStartedAt === null) turnStartedAt = Date.now();
 	if (event.type === "agent_end" || (event as any).type === "agent_settled") {
 		const text = session?.getLastAssistantText?.() ?? "";
-		send({ type: "agent_done", sessionFile: session?.sessionFile ?? null, preview: text.slice(0, 200) });
+		const over = (event as any).type === "agent_settled" && !session?.isStreaming && !fallbackPending;
+		const turnMs = over && turnStartedAt !== null ? Date.now() - turnStartedAt : undefined;
+		if (over) {
+			if (turnMs !== undefined) recordTurnTime(turnMs);
+			turnStartedAt = null;
+		}
+		send({
+			type: "agent_done",
+			sessionFile: session?.sessionFile ?? null,
+			preview: text.slice(0, 200),
+			// A fallback model is taking over (or already running): not finished, and not failed.
+			retrying: fallbackPending || !!session?.isStreaming,
+			...(turnMs !== undefined && { turnMs }),
+		});
+		// Sync a little after the turn, so a quick follow-up doesn't cause two pushes.
+		sync?.schedule(90_000);
+		// Past the context limit the chat is summarized first; then a job that ended while this turn ran calls it back.
+		// Out of pi's agent_settled emission: compaction must not start inside it.
+		if (over) setTimeout(() => void capContext().finally(deliverJobs), 0);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Keeping the context in bounds
+
+/** The summary the host started itself, while it runs: prompts and job callbacks wait for it. */
+let capping: Promise<void> | null = null;
+
+/** The context limit in force: the user's, or the default share of the open chat's model window; 0 leaves it to pi. */
+function compactAt(): number {
+	return compactLimit(integrations?.settings.compactAt, session?.getContextUsage()?.contextWindow);
+}
+
+/**
+ * Summaries that left the chat over the limit (they failed, or the provider refused them): which chat, at how many
+ * tokens the last one was, and how many in a row. Each try is a paid request, and a chat whose summary keeps failing
+ * used to buy one after every turn until the daily budget was gone. Now it is tried again only once the chat has grown
+ * by a quarter since, and not at all after CAP_MAX_FAILURES in a row (pi's own summary near the model's limit still
+ * stands behind it).
+ */
+let capFailed: { chat: string; tokens: number; count: number } | null = null;
+
+/** How much a chat must grow after a failed summary before it is tried again. */
+const CAP_RETRY_GROWTH = 1.25;
+
+/** Failed summaries in a row after which the chat is left to pi's own. */
+const CAP_MAX_FAILURES = 3;
+
+/**
+ * Summarizes the open chat when its context passed the limit and the model allows more than that (pi itself only
+ * compacts near the model's limit). Between turns only, never past the daily budget (a summary is a request too); a
+ * failure is said by the compaction_end the app gets, and pi's own compaction stays as the safety net.
+ */
+async function capContext() {
+	const s = session;
+	if (!s || s.isStreaming || s.isCompacting || fallbackPending || capping) return;
+	const usage = s.getContextUsage();
+	const limit = compactLimit(integrations?.settings.compactAt, usage?.contextWindow);
+	if (!limit || !usage?.tokens || usage.contextWindow <= limit || usage.tokens <= limit) return;
+	const chat = s.sessionFile ?? s.sessionId;
+	if (capFailed?.chat === chat && (capFailed.count >= CAP_MAX_FAILURES || usage.tokens < capFailed.tokens * CAP_RETRY_GROWTH)) return;
+	// pi keeps the newest turns as they are (keepRecentTokens); with no more than that in the chat (the rest is the
+	// system prompt) there is nothing to summarize, and trying would only report a failure.
+	const keep = settingsManager.getCompactionSettings(s.model).keepRecentTokens;
+	const said = (s.messages as any[]).filter((m) => m.role !== "system").reduce((n, m) => n + estimateTokens(m), 0);
+	if (said <= keep + 4_000) return;
+	if (budgetError()) return;
+	capping = s
+		.compact()
+		.then(() => {})
+		.catch((e) => log("compact:", (e as Error).message))
+		.finally(() => {
+			// Judged by the outcome, not by whether compact() threw: a summary pi reports as failed or aborted leaves the
+			// chat as big as it was.
+			const after = s.getContextUsage()?.tokens;
+			const failedBefore = capFailed?.chat === chat ? capFailed.count : 0;
+			capFailed = after == null || after > limit ? { chat, tokens: usage.tokens!, count: failedBefore + 1 } : null;
+			capping = null;
+		});
+	await capping;
+}
+
+/** Waits while the open chat is being summarized (pi refuses a prompt meanwhile), up to five minutes. */
+async function compactionDone(s: AgentSession) {
+	if (capping) await capping;
+	for (let waited = 0; s.isCompacting && waited < 300_000; waited += 200) await new Promise((r) => setTimeout(r, 200));
+}
+
+// ---------------------------------------------------------------------------
+// How long turns take, and background jobs calling their chat back
+
+/** When the open chat's running turn began (its first agent_start), or null between turns. */
+let turnStartedAt: number | null = null;
+
+/** Session entry type that keeps a turn's duration with the chat. It is not a message: the model never sees it. */
+const TURN_TIME = "rynex_turn";
+
+/** Keeps how long the turn took next to its last reply, so the chat shows it again when reopened. */
+function recordTurnTime(ms: number) {
+	const s = session;
+	const last = (s?.messages as any[] | undefined)?.findLast((m) => m.role === "assistant");
+	if (!s || !last?.timestamp) return;
+	try {
+		s.sessionManager.appendCustomEntry(TURN_TIME, { at: last.timestamp, ms });
+	} catch (e) {
+		log("turn time:", (e as Error).message);
+	}
+}
+
+/**
+ * The open chat's turns that the latest summary replaced, oldest first. pi keeps them in the chat's file but no longer
+ * sends them to the model, and `messages` (the model's context) has only the summary in their place: without this
+ * they could not be read again, in the app or in an export. Empty for a chat never summarized.
+ */
+function summarizedMessages(s: AgentSession): any[] {
+	const branch = s.sessionManager.getBranch() as any[];
+	const last = branch.findLastIndex((e) => e.type === "compaction");
+	if (last < 0) return [];
+	const out: any[] = [];
+	for (const e of branch.slice(0, last)) {
+		if (e.id === branch[last].firstKeptEntryId) break;
+		// Earlier summaries are left out: the turns they stood for are in the list themselves.
+		if (e.type === "message" || e.type === "custom_message") out.push(...sessionEntryToContextMessages(e));
+	}
+	return out.filter((m) => m.role !== "system");
+}
+
+/** What the latest summary of the open chat cost, for the line that stands for it when the chat is opened again. */
+function latestSummaryCost(s: AgentSession) {
+	const branch = s.sessionManager.getBranch() as any[];
+	const at = branch.findLastIndex((e) => e.type === "compaction");
+	if (at < 0 || !branch[at].usage) return null;
+	// pi prices the summary request itself: its usage carries the cost.
+	return typeof branch[at].usage?.cost?.total === "number" ? branch[at].usage.cost.total : null;
+}
+
+/** Turn durations of the open chat, by the timestamp of each turn's last reply. */
+function turnTimes(s: AgentSession): Map<number, number> {
+	const out = new Map<number, number>();
+	for (const e of s.sessionManager.getBranch() as any[]) {
+		if (e.type === "custom" && e.customType === TURN_TIME && typeof e.data?.at === "number") out.set(e.data.at, e.data.ms);
+	}
+	return out;
+}
+
+/** Message type of a job's result in the chat: shown by the app as a notice, read by the model as a message. */
+const JOB_MESSAGE = "rynex_job";
+
+/** Jobs that ended and have not called their chat back yet (it was busy, or another chat was open). */
+const finishedJobs: JobRecord[] = [];
+
+/** How many turns in a row job callbacks may start with no word from the user; then the results only land in the chat. */
+const JOB_CHAIN_LIMIT = 5;
+
+/** Job-callback turns since the user last said something (host.ts "prompt" resets it). */
+let jobChain = 0;
+
+/**
+ * Whether a deliverJobs is under way. It is called from a job ending, from a turn ending and from a timer, and it
+ * awaits in the middle; a job leaves the queue only once sent, so two overlapping runs would send it twice.
+ */
+let deliveringJobs = false;
+
+/** A call came in while one was under way: the running one goes round once more. */
+let deliverAgain = false;
+
+/**
+ * Calls the open chat back with the jobs of it that ended, once it is idle: one turn for all of them, with no message
+ * from the user. Waits while it works (its turn ends first) and while another chat is open (it is called back when it
+ * is opened again). Never past the daily budget, onto a full disk, or past JOB_CHAIN_LIMIT turns with no word from the
+ * user: the results are then added without a turn, and the user is told why the agent did not go on.
+ */
+async function deliverJobs() {
+	if (deliveringJobs) {
+		// One is under way: it looks again before it ends, so a job that ended just now is not missed.
+		deliverAgain = true;
+		return;
+	}
+	deliveringJobs = true;
+	try {
+		do {
+			deliverAgain = false;
+			await deliverFinishedJobs();
+		} while (deliverAgain);
+	} finally {
+		deliveringJobs = false;
+	}
+}
+
+/** The body of [deliverJobs]; it loops until nothing of the open chat is left, so a job that ends meanwhile is sent too. */
+async function deliverFinishedJobs() {
+	const s = session;
+	// While the chat is summarized: capContext delivers when it is done.
+	if (!s || s.isStreaming || s.isCompacting || capping || fallbackPending) return;
+	const key = s.sessionFile ?? s.sessionId;
+	if (!finishedJobs.some((j) => j.sessionFile === key)) return;
+	let held = budgetError();
+	if (!held) {
+		try {
+			await health.assertRoom();
+		} catch (e) {
+			held = (e as Error).message;
+		}
+	}
+	if (!held && jobChain >= JOB_CHAIN_LIMIT) held = `it already went on ${jobChain} times since your last message`;
+	// One at a time, each taken off the queue only once it was sent: when a send fails, the rest stay queued and are
+	// delivered on the next try (they used to be dropped with it).
+	let started = false;
+	for (;;) {
+		const at = finishedJobs.findIndex((j) => j.sessionFile === key);
+		if (at < 0) break;
+		const job = finishedJobs[at];
+		const lastOne = !finishedJobs.some((j, i) => i > at && j.sessionFile === key);
+		try {
+			await s.sendCustomMessage(
+				{ customType: JOB_MESSAGE, content: jobReport(job), display: true, details: { job: jobWire(job) } },
+				{ triggerTurn: lastOne && !held },
+			);
+		} catch (e) {
+			send({ type: "error", message: `Could not continue after the background job: ${(e as Error).message}` });
+			return;
+		}
+		finishedJobs.splice(at, 1);
+		if (lastOne && !held) started = true;
+	}
+	if (started) jobChain++;
+	else if (held) send({ type: "notice", message: `The background job ended, but the agent did not continue: ${held}` });
+}
+
+function messageText(m: any): string {
+	return typeof m?.content === "string"
+		? m.content
+		: (m?.content ?? []).map((c: any) => (c.type === "text" ? c.text : "")).join("");
 }
 
 async function tryFallback(error: string) {
@@ -202,22 +791,117 @@ async function tryFallback(error: string) {
 	const next = chain.find((f) => `${f.provider}/${f.model}` !== current);
 	const model = next && modelRuntime.getModel(next.provider, next.model);
 	if (!model) return;
+	// The continuation is a new request, so it needs budget like any other.
+	const overBudget = budgetError();
+	if (overBudget) return send({ type: "notice", message: overBudget });
 	fallbackTried = true;
-	await session.setModel(model, { persist: false });
-	send({ type: "notice", message: `Switched to ${model.name ?? model.id} after an error: ${error.slice(0, 120)}` });
-	send({ type: "state", state: state() });
-	session.prompt("Continue where you left off (the previous model failed).").catch(() => {});
+	fallbackPending = true;
+	// The chat that failed. setModel awaits; if another chat opened meanwhile,
+	// the global `session` is that other chat, and the fallback used to switch
+	// ITS model and send it "Continue where you left off".
+	const failed = session;
+	try {
+		await failed.setModel(model, { persist: false });
+		if (session !== failed) return;
+		send({ type: "notice", message: `Switched to ${model.name ?? model.id} after an error: ${error.slice(0, 120)}` });
+		send({ type: "state", state: state() });
+		failed.prompt("Continue where you left off (the previous model failed).").catch(() => {});
+	} finally {
+		fallbackPending = false;
+	}
 }
 
-/** Refuses new work once today's spend reaches the configured cap. */
-function checkBudget() {
-	const cap = integrations.settings.dailyBudget ?? 0;
-	if (!cap) return;
-	const today = new Date().toISOString().slice(0, 10);
-	const spent = usageSummary(join(agentDir, "sessions"), 1)
-		.filter((r) => r.day === today)
+/**
+ * Today's spend in USD (WIB day), priced by pi's own per-request cost
+ * (usage.cost) summed from the chat files, plus subagents' running totals
+ * (their sessions live in memory, not in chat files).
+ */
+/** Only tests set this: what "spent today" says, so the budget can be reached without spending anything. */
+const TEST_SPENT = process.env.RYNEX_TEST_SPENT_USD === undefined ? null : Number(process.env.RYNEX_TEST_SPENT_USD);
+
+function spentToday(): number {
+	if (TEST_SPENT !== null && Number.isFinite(TEST_SPENT)) return TEST_SPENT;
+	const sessions = join(agentDir, "sessions");
+	const day = wibDay(Date.now());
+	const local = usageSummary(sessions, 1)
+		.filter((r) => r.day === day)
 		.reduce((sum, r) => sum + r.cost, 0);
-	if (spent >= cap) throw new Error(`Daily budget of $${cap.toFixed(2)} reached ($${spent.toFixed(2)} spent). Raise it in Settings → Usage.`);
+	const dayStart = Date.parse(`${day}T00:00:00+07:00`);
+	const subs = subagents
+		.list()
+		.filter((r) => (r.finishedAt ?? Date.now()) >= dayStart && r.cost !== null)
+		.reduce((sum, r) => sum + (r.cost ?? 0) * subagentShareSince(r, dayStart), 0);
+	return local + subs;
+}
+
+/** The part of a subagent's spend that falls after [from] (linear over its run). */
+function subagentShareSince(r: { startedAt?: number; finishedAt?: number }, from: number): number {
+	const start = r.startedAt ?? Date.now();
+	const end = r.finishedAt ?? Date.now();
+	if (start >= from) return 1;
+	if (end <= from) return 0;
+	return (end - from) / Math.max(1, end - start);
+}
+
+/** Refuses new work once today's spend reaches the configured cap (Settings → Usage). */
+function budgetError(): string | null {
+	const cap = integrations.settings.dailyBudget ?? 0;
+	if (!cap) return null;
+	const spent = spentToday();
+	return spent >= cap
+		? `Daily budget of $${cap} reached ($${spent.toFixed(2)} spent today). Raise it in Settings → Usage.`
+		: null;
+}
+
+/** What the user asked for lately in this chat, newest last, for a commit message to say why. */
+function recentAsks(s: AgentSession, n = 3): string[] {
+	const out: string[] = [];
+	for (const m of s.messages as any[]) {
+		if (m.role !== "user") continue;
+		const text = typeof m.content === "string" ? m.content : (m.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+		if (text.trim()) out.push(text.trim().slice(0, 600));
+	}
+	return out.slice(-n);
+}
+
+/**
+ * A commit message for the project's uncommitted changes, written by the chat's model in one short request (no tools,
+ * not part of the chat): a subject in the imperative under 72 characters, then a few lines on what and why, from the
+ * diff and what the user asked for. Counts against the daily budget like anything else the model does.
+ */
+async function commitMessage(s: AgentSession, cwd: string): Promise<string> {
+	checkBudget();
+	const model = s.model;
+	if (!model) throw new Error("Choose a model first.");
+	const change = await gitops.changeSummary(cwd);
+	if (!change) throw new Error("This folder is not a git repository.");
+	if (change.files === 0) throw new Error("There is nothing to commit.");
+	const asks = recentAsks(s);
+	const prompt = [
+		"Write a git commit message for the change below.",
+		"First line: what the change does, in the imperative mood, under 72 characters, no trailing period.",
+		"Then, only if it helps, a blank line and up to four short lines on what changed and why.",
+		"Match the language of the user's requests. Reply with the message only: no quotes, no code fence, no preamble.",
+		asks.length ? `\nWhat the user asked for:\n${asks.map((a) => `- ${a.replace(/\s+/g, " ")}`).join("\n")}` : "",
+		`\nFiles changed:\n${change.stat || "(none tracked yet)"}`,
+		change.untracked.length ? `\nNew files:\n${change.untracked.slice(0, 50).join("\n")}` : "",
+		`\nDiff:\n${change.patch}`,
+	].join("\n");
+	const reply = await (s as any).modelRuntime.completeSimple(
+		model,
+		{ messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }] },
+		{ maxTokens: 400, cacheRetention: "none" },
+	);
+	if (reply?.stopReason === "error") throw new Error(reply.errorMessage || "The model could not write a message.");
+	const text = (reply?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("").trim();
+	const message = text.replace(/^```[a-z]*\n?|\n?```$/g, "").replace(/^["']|["']$/g, "").trim();
+	if (!message) throw new Error("The model did not write a message.");
+	return message;
+}
+
+function checkBudget() {
+	const error = budgetError();
+	if (error) throw new Error(error);
 }
 
 /** Mirrors pi's interactive warning: subscription OAuth outside Claude's own apps bills extra usage. */
@@ -227,18 +911,44 @@ function billingNotice(): string | null {
 	return "Claude subscription sign-in bills third-party apps like this one per token from extra usage, not your plan limits. Manage it at claude.ai/settings/usage, or use an API key.";
 }
 
-/** Rebuilds the active session so tool settings (shell, MCP tools) take effect. */
+/**
+ * Rebuilds the active session so tool settings (shell, MCP tools) take effect, in the folder the chat is in. pi writes
+ * a chat's file only once it has a message, and opening a file that isn't there yet takes the process's own folder:
+ * a new chat reopened that way (MCP coming up after start, a shell change) moved to wherever the host was started, a
+ * server daemon's `/` or home, and the agent's files went there.
+ */
 async function reopenSession() {
 	const s = session!;
 	if (s.isStreaming) throw new Error("Wait for the agent to finish first");
 	const file = s.sessionFile;
-	await openSession(file ? SessionManager.open(file) : SessionManager.create(s.sessionManager.getCwd()));
+	const cwd = s.sessionManager.getCwd();
+	await openSession(file ? SessionManager.open(file, undefined, cwd) : SessionManager.create(cwd));
+}
+
+/**
+ * The guard for a server's background runs, which nobody is watching: risky commands and writes outside the project
+ * are refused rather than asked about (guard.ts `deny_risky`). On the phone background runs have no guard, as before.
+ */
+function unattendedGuard(cwd: string): Guard {
+	const g = new Guard({
+		send: () => {},
+		checkpoint: async (dir, label) => {
+			await checkpoints.snapshot(dir, label);
+		},
+		cwd: () => cwd,
+	});
+	g.mode = "deny_risky";
+	return g;
 }
 
 /** A headless session for the background runner. */
 async function backgroundSession(cwd: string): Promise<RunSession> {
-	const { session: bg } = await buildSession(SessionManager.create(cwd || workspace), { interactive: false });
 	let error: string | undefined;
+	const { session: bg } = await buildSession(SessionManager.create(cwd || workspace), {
+		interactive: false,
+		onLimit: (reason) => (error = reason),
+		unattended: server ? unattendedGuard(cwd || workspace) : undefined,
+	});
 	bg.subscribe((e) => {
 		const m = (e as any).message;
 		if (e.type === "message_end" && m?.role === "assistant" && m.stopReason === "error") error = m.errorMessage;
@@ -247,6 +957,7 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 		sessionFile: bg.sessionFile,
 		prompt: async (text) => {
 			checkBudget();
+			await health.assertRoom();
 			await bg.prompt(text);
 		},
 		lastText: () => bg.getLastAssistantText(),
@@ -256,53 +967,22 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 	};
 }
 
-const AGENTS_MARKER = "<!-- rynex:managed (delete this line to keep your own edits) -->";
+/** The agent's shell is the server's box (server only). */
+/** The box, briefly, for the health card: is there one, is its image built, do the agent's commands go to it. */
+async function boxHealth(): Promise<{ available: boolean; installed: boolean; enabled: boolean }> {
+	const s = await box.status(settingsManager.getShellPath());
+	return { available: s.available, installed: s.installed, enabled: s.enabled };
+}
 
-/** Keeps the environment notes current, unless the user has taken the file over. */
+function boxIsShell(): boolean {
+	return server && box.available && integrations?.settings.containerShell !== false;
+}
+
+/** Keeps the environment notes current (agents-file.ts), unless the user has taken the file over. */
 function ensureAgentsFile() {
 	const path = join(agentDir, "AGENTS.md");
-	if (existsSync(path)) {
-		const current = readFileSync(path, "utf8");
-		const ours = current.includes(AGENTS_MARKER) || current.startsWith("# Environment\n\nYou are running inside Rynex");
-		if (!ours) return;
-	}
-	writeFileSync(
-		path,
-		`${AGENTS_MARKER}
-# Environment
-
-You are running inside Rynex, an Android app, on the user's phone.
-
-- The shell is Android's /system/bin/sh (mksh) with toybox utilities, not bash.
-  Prefer POSIX sh syntax. There is no sudo, apt or pkg.
-- On PATH: \`node\`, \`git\`, \`ssh\`, \`ssh-keygen\`, \`scp\`, \`rsync\`, \`curl\`, \`rg\`, \`fd\`.
-  With scp, pass \`-S ssh\`.
-- The workspace directory is ${workspace}. Projects live in subfolders of it.
-  Keep files inside it unless asked otherwise.
-- When the user has connected accounts in the app:
-  - GitHub: \`$GITHUB_TOKEN\` is set and git is already authenticated for
-    https://github.com (clone, pull, push work directly). Use the REST API
-    with curl for everything else (issues, PRs, repos).
-  - Vercel: \`$VERCEL_TOKEN\` is set for the Vercel REST API.
-  - SSH: saved servers are aliases in ~/.ssh/config, so \`ssh <name>\` works.
-    The device key is ~/.ssh/id_ed25519.
-- Linux container: when the user has installed one (Debian or Alpine, via
-  proot), \`box -c '<command>'\` runs a command inside it, and \`box\` alone opens
-  a shell. When it is enabled as your shell, every command already runs inside:
-  use \`apt-get install -y\` (Debian) or \`apk add\` (Alpine) to get Python,
-  Node.js, compilers and anything else. The home folder and workspace are the
-  same paths inside and out.
-- You have \`web_search\` and \`web_fetch\` tools. Use them before guessing how
-  to install or use something, and to look up unfamiliar errors.
-- Dev servers: run them in the background (\`nohup npm run dev > dev.log 2>&1 &\`)
-  and print the URL (e.g. http://localhost:5173); the app offers a live
-  preview and a public link for any localhost port it sees.
-- Some actions need the user's approval in the app; if one is declined, ask
-  what they want instead rather than retrying.
-- There is no display server; do not try to open GUIs or browsers. The app can
-  preview HTML files you write.
-`,
-	);
+	if (existsSync(path) && !isManaged(readFileSync(path, "utf8"))) return;
+	writeFileSync(path, agentsFileText({ mode, workspace, box: boxIsShell() }));
 }
 
 // ---------------------------------------------------------------------------
@@ -332,8 +1012,6 @@ async function login(providerId: string, method: "api_key" | "oauth") {
 }
 
 async function providers() {
-	// Entries pi only knows from models.json are ours to edit and delete.
-	const custom = new Set(customModels.list().map((c) => c.id));
 	const out = [];
 	for (const p of modelRuntime.getProviders()) {
 		const auth = p.auth as any;
@@ -344,48 +1022,158 @@ async function providers() {
 			oauth: modelRuntime.isUsingOAuth(p.id),
 			methods: [auth.apiKey?.login ? "api_key" : null, auth.oauth ? "oauth" : null].filter(Boolean),
 			models: modelRuntime.getModels(p.id).length,
-			custom: custom.has(p.id),
+			custom: customProviders.ids().has(p.id),
 		});
 	}
 	return out;
 }
 
-/** pi reloads models.json itself; rebuild the idle chat so it sees the providers. */
-async function reloadCustomProviders() {
-	await modelRuntime.refresh({ allowNetwork: false });
-	if (session && !session.isStreaming) await reopenSession().catch(() => {});
+// ---------------------------------------------------------------------------
+// Deleting chats and projects
+
+const sessionsDir = () => resolve(agentDir, "sessions");
+const within = (path: string, dir: string) => path === dir || path.startsWith(dir + sep);
+
+/** Deletes chat files. The open chat is swapped for a fresh one first, in [cwd] or its own folder. */
+async function deleteSessions(paths: string[], cwd?: string) {
+	const s = session!;
+	const files = paths.map((p) => resolve(p)).filter((p) => within(p, sessionsDir()) && p.endsWith(".jsonl"));
+	const current = s.sessionFile ? resolve(s.sessionFile) : undefined;
+	if (current && files.includes(current)) {
+		if (s.isStreaming) throw new Error("Stop the agent before deleting the open chat");
+		await openSession(SessionManager.create(cwd ?? s.sessionManager.getCwd()));
+	}
+	let deleted = 0;
+	for (const f of files) {
+		try {
+			unlinkSync(f);
+			deleted++;
+		} catch {
+			// Already gone.
+		}
+	}
+	// A deleted chat's jobs die with it: nothing to call back, no records that outlive their chat. Job records carry
+	// the session file as the chat gave it, so both sides are resolved before they are compared.
+	const gone = new Set(files);
+	for (const file of new Set(jobs.list().map((j) => j.sessionFile))) if (gone.has(resolve(file))) jobs.forgetSession(file);
+	for (let i = finishedJobs.length - 1; i >= 0; i--) if (gone.has(resolve(finishedJobs[i].sessionFile))) finishedJobs.splice(i, 1);
+	// And its subagents stop: their report would reach no one, and one still at work would go on changing files.
+	subagents.stopForChats(gone, resolve);
+	return { deleted, ...state() };
+}
+
+/** A project is a folder directly inside the workspace; nothing else may be deleted. */
+function projectDir(path: string) {
+	const dir = resolve(path);
+	if (dirname(dir) !== resolve(workspace)) throw new Error("Only projects inside the workspace can be deleted");
+	if (!existsSync(dir)) throw new Error("The project folder no longer exists");
+	return dir;
+}
+
+/** What deleting a project would lose, and what stops it right now. */
+async function projectDeleteCheck(path: string) {
+	const dir = projectDir(path);
+	const chats = (await SessionManager.listAll()).filter((i) => i.cwd && within(resolve(i.cwd), dir));
+	const git = existsSync(join(dir, ".git"));
+	const lines = async (args: string[]) =>
+		(await gitRun(args, { cwd: dir }).catch(() => "")).split("\n").filter((l) => l.trim()).length;
+	const blockers: string[] = [];
+	const s = session!;
+	if (s.isStreaming && within(resolve(s.sessionManager.getCwd()), dir)) blockers.push("The agent is working in this project");
+	const { runs, schedules } = runner.summary();
+	const busyRuns = runs.filter((r) => (r.status === "queued" || r.status === "running") && r.cwd && within(resolve(r.cwd), dir));
+	if (busyRuns.length) blockers.push(`${busyRuns.length} background task(s) use this project`);
+	const busySchedules = schedules.filter((x) => x.enabled && x.cwd && within(resolve(x.cwd), dir));
+	if (busySchedules.length) blockers.push(`${busySchedules.length} schedule(s) use this project`);
+	return {
+		path: dir,
+		chats: chats.length,
+		git,
+		// Uncommitted files, and commits on local branches that no remote has.
+		changes: git ? await lines(["status", "--porcelain"]) : 0,
+		unpushed: git ? await lines(["log", "--branches", "--not", "--remotes", "--format=%h"]) : 0,
+		blockers,
+	};
+}
+
+async function deleteProject(path: string, deleteChats: boolean) {
+	const check = await projectDeleteCheck(path);
+	if (check.blockers.length) throw new Error(check.blockers.join("; "));
+	const dir = check.path;
+	const s = session!;
+	// Leave the project first so nothing keeps working in a folder that is about to vanish.
+	if (within(resolve(s.sessionManager.getCwd()), dir)) {
+		if (s.isStreaming) throw new Error("Stop the agent before deleting the project it is working in");
+		await openSession(SessionManager.create(workspace));
+	}
+	let deletedChats = 0;
+	if (deleteChats) {
+		const files = (await SessionManager.listAll()).filter((i) => i.cwd && within(resolve(i.cwd), dir)).map((i) => i.path);
+		deletedChats = (await deleteSessions(files, workspace)).deleted;
+	}
+	try {
+		rmSync(dir, { recursive: true, force: true });
+	} catch {
+		// Tools in the container leave read-only folders (Go and npm caches); make them writable and retry.
+		await run("chmod", ["-R", "u+rwX", dir], { cwd: workspace }).catch(() => "");
+		rmSync(dir, { recursive: true, force: true });
+	}
+	checkpoints.forget(dir);
+	return { deletedChats, ...state() };
 }
 
 // ---------------------------------------------------------------------------
 // Backups
 
-function backupTarget() {
-	const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+/**
+ * Where a phone writes a backup that must survive the app: the shared Download folder (synced or copied off the
+ * phone, it survives the phone too), or the workspace when Download cannot be written (no "all files" permission).
+ */
+function sharedBackupDir(): string {
 	const shared = "/storage/emulated/0/Download";
 	const dir = existsSync(shared) ? join(shared, "Rynex") : join(workspace, "backups");
 	try {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, ".probe"), "");
 		unlinkSync(join(dir, ".probe"));
-		return join(dir, `rynex-backup-${stamp}.zip`);
+		return dir;
 	} catch {
 		mkdirSync(join(workspace, "backups"), { recursive: true });
-		return join(workspace, "backups", `rynex-backup-${stamp}.zip`);
+		return join(workspace, "backups");
 	}
 }
 
+/** The phone's automatic backups go next to the manual ones, in a folder of their own (pruning only ever deletes there). */
+function phoneBackupDir(): string {
+	return process.env.RYNEX_PHONE_BACKUP_DIR ?? join(sharedBackupDir(), "auto");
+}
+
+function backupTarget() {
+	const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+	return join(sharedBackupDir(), `rynex-backup-${stamp}.zip`);
+}
+
 function createBackup(includeWorkspace: boolean) {
-	// Secrets (provider keys, tokens) are left out on purpose.
+	// Secrets (provider keys, tokens) are left out on purpose: the agent side
+	// only ever lists sessions/skills/prompts/settings/runs, and key material
+	// lives in the encrypted rynex/ store, which is not listed here.
 	const entries = [
 		...collectFiles(join(agentDir, "sessions"), agentDir),
 		...collectFiles(join(agentDir, "skills"), agentDir),
 		...collectFiles(join(agentDir, "prompts"), agentDir),
-		...["settings.json", "AGENTS.md", "rynex/runs.json"]
+		// pi's settings.json is NOT backed up: restore refuses it (a crafted file
+		// could reconfigure the agent on another phone), so including it only
+		// promised something a restore silently dropped.
+		...["AGENTS.md", "rynex/runs.json"]
 			.filter((f) => existsSync(join(agentDir, f)))
 			.map((f) => ({ name: f, data: readFileSync(join(agentDir, f)) })),
 	].map((e) => ({ name: `agent/${e.name}`, data: e.data }));
 	if (includeWorkspace) {
 		for (const e of collectFiles(workspace, workspace, new Set(["node_modules", ".git", "backups", ".venv", "venv"]))) {
+			// Dotfiles and dot-dirs never enter a backup: a project .env (or
+			// .npmrc, .aws/, ...) would otherwise leak secrets into the zip
+			// and break the "keys are not included" promise above.
+			if (e.name.split("/").some((s) => s.startsWith("."))) continue;
 			entries.push({ name: `workspace/${e.name}`, data: e.data });
 		}
 	}
@@ -394,50 +1182,144 @@ function createBackup(includeWorkspace: boolean) {
 	return { path, files: entries.length };
 }
 
-function restoreBackup(path: string) {
+/**
+ * Agent-side paths a backup may restore. Everything else under agent/ is
+ * refused: extensions are code, settings.json can redirect the agent, and
+ * state files (mcp.json, custom-providers.json, models.json) would hand an
+ * attacker servers, providers or models. The workspace side keeps its old
+ * rule (any path without .. segments); project extensions there no longer
+ * execute since project trust is off.
+ */
+const RESTORE_AGENT_ALLOW = [
+	(rel: string) => rel === "AGENTS.md",
+	(rel: string) => rel === "rynex/runs.json",
+	(rel: string) => rel.startsWith("sessions/"),
+	(rel: string) => rel.startsWith("skills/"),
+	(rel: string) => rel.startsWith("prompts/"),
+];
+
+// Named apart from autobackup's restoreBackup (a server backup onto this phone), which host.ts also calls:
+// the import used to be shadowed by this declaration, and backup_restore_server restored with the wrong one.
+function restoreLocalBackup(path: string) {
 	const entries = readZip(readFileSync(path));
 	let restored = 0;
+	let skipped = 0;
 	for (const e of entries) {
 		const [root, ...rest] = e.name.split("/");
 		const rel = rest.join("/");
-		if (!rel || rel.split("/").includes("..")) continue;
+		if (!rel || rel.split("/").includes("..")) {
+			skipped++;
+			continue;
+		}
 		const base = root === "agent" ? agentDir : root === "workspace" ? workspace : null;
-		if (!base) continue;
+		if (!base) {
+			skipped++;
+			continue;
+		}
+		if (root === "agent" && !RESTORE_AGENT_ALLOW.some((f) => f(rel))) {
+			skipped++;
+			continue;
+		}
 		const target = join(base, rel);
 		mkdirSync(dirname(target), { recursive: true });
 		writeFileSync(target, e.data);
 		restored++;
 	}
-	return { restored };
+	return { restored, skipped };
 }
 
 // ---------------------------------------------------------------------------
 // Commands
 
+/**
+ * Commands that run git against github.com with the token in git's config. A
+ * GitHub App sign-in expires every 8 hours, so it is refreshed first if due
+ * (a no-op otherwise). API calls refresh on their own (Integrations.github).
+ */
+const GITHUB_GIT_COMMANDS = new Set(["git_clone", "git_fetch", "git_pull", "git_push", "deploy", "sync_now", "ci_watch", "run_enqueue", "schedule_run"]);
+
 async function handle(cmd: Command): Promise<unknown> {
+	// Files and previews need no session, and the app may ask for them while one is being opened.
+	if (isFsCommand(cmd.type)) return runFsCommand(fsService, cmd);
+	if (cmd.type === "preview_serve") return preview.serve(cmd.dir);
+	if (cmd.type === "preview_stop") return { stopped: preview.stop(Number(cmd.port)) };
 	const s = session!;
 	const cwd = (cmd.dir as string | undefined) ?? s.sessionManager.getCwd();
+	if (GITHUB_GIT_COMMANDS.has(cmd.type)) await integrations.githubFresh();
 	switch (cmd.type) {
 		case "hello":
-			return { version: VERSION, node: process.version, agentDir, workspace, tools: s.getActiveToolNames(), ...state() };
+			return {
+				version: VERSION,
+				node: process.version,
+				agentDir,
+				workspace,
+				tools: s.getActiveToolNames(),
+				mode,
+				transport: listenPath ? "daemon" : "stdio",
+				protocol: PROTOCOL,
+				...state(),
+			};
 		case "state":
 			return state();
 
 		case "prompt": {
+			// Remembered before anything can refuse it, so Try again knows what was asked.
+			lastPrompt = { text: cmd.text, images: cmd.images, sessionId: s.sessionId };
+			// The user spoke: job callbacks may start turns again (deliverJobs).
+			jobChain = 0;
 			checkBudget();
-			lastUserText = cmd.text;
+			// A server with a nearly full disk takes no new work (health.ts); on the phone this never refuses.
+			await health.assertRoom();
 			fallbackTried = false;
 			// Plan mode: ask for a plan first; tools that change things are blocked (guard.ts).
 			const text = guard.planMode
 				? `${cmd.text}\n\n[Plan mode] Investigate as needed, then reply with a numbered plan only. Do not change files or run commands that modify anything until I approve.`
 				: cmd.text;
+			// The agent may git push from its shell; don't hold the prompt for it.
+			void integrations.githubFresh();
+			// The chat is being summarized: pi refuses prompts until it is done, so this one waits for it.
+			if (!s.isStreaming) await compactionDone(s);
+			// While the agent works, a follow-up waits for the turn's boundary; the
+			// app shows it as a waiting bubble and can cancel it (prompt_queue_remove).
+			const behavior = s.isStreaming ? (cmd.behavior ?? "followUp") : undefined;
+			if (behavior === "followUp") {
+				const id = await promptQueue.add(s, text, cmd.text, cmd.images);
+				return id ? { queued: id } : null;
+			}
 			// Don't await the run; progress arrives as events.
-			s.prompt(text, {
-				images: cmd.images,
-				streamingBehavior: s.isStreaming ? (cmd.behavior ?? "followUp") : undefined,
-			}).catch((e) => send({ type: "error", message: String(e?.message ?? e) }));
+			s.prompt(text, { images: cmd.images, streamingBehavior: behavior }).catch((e) =>
+				send({ type: "error", message: String(e?.message ?? e) }),
+			);
 			return null;
 		}
+		case "retry": {
+			// After a failed turn: continue it if the request made it into the history, else send the prompt again.
+			if (s.isStreaming) throw new Error("The agent is still working");
+			checkBudget();
+			await health.assertRoom();
+			const last = (s.messages as any[]).at(-1);
+			const failedTurn = last && (last.role === "user" || (last.role === "assistant" && last.stopReason === "error"));
+			// The last prompt from this chat that never made it into the history (refused, or failed to start).
+			const unsent = lastPrompt && lastPrompt.sessionId === s.sessionId ? lastPrompt : null;
+			fallbackTried = false;
+			if (unsent) {
+				s.prompt(unsent.text, { images: unsent.images }).catch((e) =>
+					send({ type: "error", message: String(e?.message ?? e) }),
+				);
+			} else if (failedTurn) {
+				s.prompt("Continue where you left off (the previous request failed).").catch((e) =>
+					send({ type: "error", message: String(e?.message ?? e) }),
+				);
+			} else {
+				throw new Error("Nothing to retry");
+			}
+			return null;
+		}
+		case "prompt_queue":
+			return promptQueue.list();
+		case "prompt_queue_remove":
+			// "queueId", not "id": every command's id is its request id.
+			return promptQueue.remove(s, String(cmd.queueId ?? ""));
 		case "steer":
 			await s.steer(cmd.text);
 			return null;
@@ -452,10 +1334,43 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "approval_reply":
 			guard.reply(cmd.approvalId, !!cmd.allow, !!cmd.always, cmd.key);
 			return null;
+		// What is still waiting for an answer, chat and subagents alike: an app that reconnects shows these again.
+		case "approvals_pending":
+			return [...guard.pendingApprovals(), ...subagents.pendingApprovals()];
+
+		// Background jobs (jobs.ts): the agent starts them with its `background_job` tool; the app lists and stops them.
+		case "job_list":
+			return jobs.list(cmd.sessionFile).map((j) => jobWire(j));
+		case "job_stop":
+			return jobWire(jobs.stop(String(cmd.jobId)));
+		case "host_restart":
+			if (!listenPath) throw new Error("Restarting is only available when the host runs as a daemon on a server");
+			return restartGate.request(cmd.whenIdle !== false);
+
+		// Subagents (subagent.ts). Creation is the parent model's job via the
+		// `subagent` tool; these commands are the app's controls for a live
+		// one (card, modal, queue, stop). They never create a chat.
+		case "subagent_list":
+			return subagents.list();
+		case "subagent_start":
+			return subagents.start(currentParent(cmd.parentTitle), cmd.task ?? cmd.brief ?? "", cmd.profile === "full" ? "full" : "read");
+		case "subagent_stop":
+			return subagents.stop(cmd.subagentId, !!cmd.force);
+		case "subagent_queue":
+			return subagents.queueMessage(cmd.subagentId, cmd.text ?? "");
+		case "subagent_queue_remove":
+			return subagents.removeQueued(cmd.subagentId, cmd.queueId);
+		case "subagent_queue_move":
+			return subagents.moveQueued(cmd.subagentId, cmd.queueId, cmd.direction === "down" ? "down" : "up");
+		case "subagent_approval_reply":
+			return subagents.approvalReply(cmd.subagentId, cmd.approvalId, !!cmd.allow, !!cmd.always, cmd.key);
 		case "plan_mode":
 			guard.planMode = !!cmd.on;
 			return state();
 		case "plan_approve":
+			// Carrying out the plan is a request like any other: it asks for the budget and the disk too.
+			checkBudget();
+			await health.assertRoom();
 			guard.planMode = false;
 			s.prompt(cmd.text || "The plan is approved. Carry it out now, step by step.").catch((e) =>
 				send({ type: "error", message: String(e?.message ?? e) }),
@@ -473,6 +1388,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "fork_session": {
 			const source = s.sessionFile;
 			if (!source) throw new Error("Nothing to fork yet");
+			assertIdle();
 			await openSession(SessionManager.forkFrom(source, s.sessionManager.getCwd()));
 			const r = cmd.entryId ? await session!.navigateTree(cmd.entryId, {}) : { editorText: "" };
 			return { ...state(), text: r.editorText ?? "" };
@@ -506,26 +1422,54 @@ async function handle(cmd: Command): Promise<unknown> {
 			await modelRuntime.logout(cmd.provider);
 			return providers();
 
-		// Custom endpoints (custom_models.ts): OpenAI-compatible servers pi has no
-		// built-in entry for. The app writes them into models.json and pi takes over.
-		case "custom_apis":
-			return CUSTOM_APIS;
+		// GitHub sync (sync.ts).
+		case "sync_status":
+			return sync.status();
+		case "sync_enable":
+			return sync.setEnabled(!!cmd.on);
+		case "sync_now":
+			// "soon": the app is going to the background; give a running turn a moment to settle.
+			if (cmd.soon) {
+				sync.schedule(2000);
+				return sync.status();
+			}
+			return sync.syncNow({ confirmDelete: !!cmd.confirmDelete });
+
+		// Custom endpoints (providers.ts).
 		case "custom_providers":
-			return customModels.list();
+			return customProviders.list();
 		case "custom_provider_save": {
-			const saved = await customModels.save(cmd.provider ?? {});
-			await reloadCustomProviders();
-			return { provider: saved, providers: customModels.list(), list: await providers() };
+			const custom = customProviders.ids();
+			const builtin = new Set(modelRuntime.getProviders().map((p) => p.id).filter((id) => !custom.has(id)));
+			const saved = customProviders.save(cmd.provider ?? {}, builtin);
+			await modelRuntime.refresh({ allowNetwork: false });
+			// The open chat holds its own copy of the model: swap in the new definition (reasoning, limits) now
+			// rather than on the next restart, keeping the chosen thinking level where the model still allows it.
+			const current = s.model;
+			if (current?.provider === saved.id) {
+				const fresh = modelRuntime.getModel(saved.id, current.id);
+				if (fresh) {
+					const level = s.thinkingLevel;
+					await s.setModel(fresh);
+					s.setThinkingLevel(level);
+				}
+			}
+			return customProviders.list();
 		}
-		case "custom_provider_delete": {
-			if (!customModels.remove(String(cmd.providerId ?? ""))) throw new Error("No such custom endpoint");
-			await reloadCustomProviders();
-			return { providers: customModels.list(), list: await providers() };
+		case "custom_provider_delete":
+			customProviders.remove(cmd.providerId);
+			await modelRuntime.refresh({ allowNetwork: false });
+			return customProviders.list();
+		case "custom_provider_fetch_models": {
+			const api = (["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const).includes(cmd.api)
+				? cmd.api
+				: "openai-completions";
+			const key = cmd.apiKey || (cmd.providerId ? customProviders.key(cmd.providerId) : "");
+			return fetchModels(api, String(cmd.baseUrl ?? ""), key);
 		}
-		case "custom_provider_models":
-			return customModels.discover(String(cmd.baseUrl ?? ""), String(cmd.apiKey ?? ""));
 
 		case "new_session":
+			assertIdle();
 			return openSession(SessionManager.create(cmd.cwd ?? workspace));
 		case "sessions":
 			return (await SessionManager.listAll()).map((info) => ({
@@ -538,7 +1482,13 @@ async function handle(cmd: Command): Promise<unknown> {
 				firstMessage: info.firstMessage,
 			}));
 		case "open_session":
-			return openSession(SessionManager.open(cmd.path));
+			if (s.sessionFile && resolve(cmd.path) === resolve(s.sessionFile)) return state();
+			assertIdle();
+			// A chat with no message has no file yet, and opening a file that isn't there takes the process's own folder:
+			// the app says which folder the chat was in (cmd.cwd), and a file that exists keeps the one in its header.
+			return openSession(
+				SessionManager.open(cmd.path, undefined, existsSync(cmd.path) ? undefined : (cmd.cwd as string | undefined) ?? workspace),
+			);
 		case "rename_session": {
 			const name = String(cmd.name ?? "").trim();
 			if (!name) throw new Error("Name is empty");
@@ -547,11 +1497,25 @@ async function handle(cmd: Command): Promise<unknown> {
 			return null;
 		}
 		case "delete_session":
-			if (cmd.path === s.sessionFile) throw new Error("Switch to another session before deleting this one");
-			unlinkSync(cmd.path);
-			return null;
-		case "messages":
-			return s.messages;
+			return deleteSessions([cmd.path]);
+		case "delete_sessions":
+			return deleteSessions(cmd.paths ?? []);
+		case "project_delete_check":
+			return projectDeleteCheck(cmd.path);
+		case "delete_project":
+			return deleteProject(cmd.path, !!cmd.deleteChats);
+		case "messages": {
+			// Each turn's last reply carries how long the turn took, when the chat kept it.
+			const times = turnTimes(s);
+			return s.messages.map((m: any) => {
+				const out = m;
+				if (m.role === "compactionSummary") return { ...out, cost: latestSummaryCost(s) };
+				const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
+				return ms === undefined ? out : { ...out, rynexTurnMs: ms };
+			});
+		}
+		case "summarized_messages":
+			return summarizedMessages(s);
 
 		// Accounts, repositories, SSH and deploys (integrations.ts).
 		case "integrations":
@@ -562,6 +1526,10 @@ async function handle(cmd: Command): Promise<unknown> {
 			return integrations.githubDeviceStart();
 		case "github_device_poll":
 			return integrations.githubDevicePoll(cmd.deviceCode);
+		case "github_device_status":
+			return integrations.githubDeviceStatus();
+		case "github_device_cancel":
+			return integrations.githubDeviceCancel();
 		case "github_logout":
 			return integrations.githubLogout();
 		case "github_repos":
@@ -582,16 +1550,28 @@ async function handle(cmd: Command): Promise<unknown> {
 			return integrations.vercelLogin(cmd.token);
 		case "vercel_logout":
 			return integrations.vercelLogout();
+		case "cloudflare_login":
+			return integrations.cloudflareLogin(cmd.token);
+		case "cloudflare_account":
+			return integrations.cloudflareSelectAccount(cmd.accountId);
+		case "cloudflare_logout":
+			return integrations.cloudflareLogout();
 		case "ci_watch":
 			return integrations.watchProject(cwd, taskLog(cmd));
 		case "deploy":
 			return integrations.deploy(cmd.target, cwd, cmd.options ?? {}, taskLog(cmd));
+		case "deploy_plan":
+			return integrations.deployPlan(cmd.target, cwd, cmd.options ?? {});
 
 		// Git for the project folder (gitops.ts).
 		case "git_status":
 			return gitops.status(cwd);
 		case "git_diff":
 			return gitops.diff(cwd, cmd.file, !!cmd.staged);
+		case "git_review":
+			return gitops.review(cwd);
+		case "git_commit_message":
+			return { message: await commitMessage(s, cwd) };
 		case "git_stage":
 			await gitops.stage(cwd, cmd.paths ?? "all");
 			return gitops.status(cwd);
@@ -602,13 +1582,23 @@ async function handle(cmd: Command): Promise<unknown> {
 			await gitops.discard(cwd, cmd.paths ?? []);
 			return gitops.status(cwd);
 		case "git_commit":
-			return { commit: await gitops.commit(cwd, String(cmd.message ?? "").trim() || "Update", !!cmd.all) };
+			return {
+				commit: await gitops.commit(
+					cwd,
+					String(cmd.message ?? "").trim() || "Update",
+					!!cmd.all,
+					Array.isArray(cmd.paths) ? cmd.paths.map(String).filter((p) => p && !p.includes("\0")) : undefined,
+				),
+			};
 		case "git_log":
 			return gitops.log(cwd, cmd.limit ?? 40);
 		case "git_branches":
 			return gitops.branches(cwd);
 		case "git_checkout":
 			await gitops.checkout(cwd, cmd.branch, !!cmd.create);
+			return gitops.status(cwd);
+		case "git_fetch":
+			await gitops.fetch(cwd);
 			return gitops.status(cwd);
 		case "git_pull":
 			await gitops.pull(cwd, taskLog(cmd));
@@ -656,13 +1646,21 @@ async function handle(cmd: Command): Promise<unknown> {
 			return checkpoints.snapshot(cwd, cmd.label || "Manual checkpoint");
 		case "checkpoint_diff":
 			return checkpoints.diff(cwd, cmd.checkpoint, cmd.file);
+		case "checkpoint_restore_plan":
+			return checkpoints.restorePlan(cwd, cmd.checkpoint);
 		case "checkpoint_restore":
 			if (s.isStreaming) throw new Error("Stop the agent before restoring");
-			return checkpoints.restore(cwd, cmd.checkpoint);
+			return checkpoints.restore(
+				cwd,
+				cmd.checkpoint,
+				Array.isArray(cmd.keep) ? cmd.keep.filter((k: unknown): k is string => typeof k === "string") : [],
+			);
 
 		// Project tools (workbench.ts).
 		case "search":
 			return search(cwd, String(cmd.query ?? ""), { regex: !!cmd.regex, caseSensitive: !!cmd.caseSensitive, glob: cmd.glob });
+		case "files_find":
+			return findFiles(cwd, String(cmd.query ?? ""), Number(cmd.limit ?? 30));
 		case "db_tables":
 			return dbTables(cmd.path);
 		case "db_query":
@@ -711,6 +1709,13 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "runs_clear":
 			runner.clearFinished();
 			return runner.summary();
+		case "run_delete": {
+			const removed = runner.delete(cmd.runId);
+			return { ...runner.summary(), removed };
+		}
+		case "run_restore":
+			runner.restore(cmd.run, cmd.index);
+			return runner.summary();
 		case "runs_concurrency":
 			runner.setConcurrency(cmd.n);
 			return runner.summary();
@@ -739,15 +1744,50 @@ async function handle(cmd: Command): Promise<unknown> {
 		}
 
 		// Backups.
+		// Automatic backups (autobackup.ts): the app turns them on with a key it makes, on a server or on the phone.
+		case "auto_backup_status":
+			return autoBackup?.status() ?? { enabled: false, available: false, backups: [] };
+		case "auto_backup_configure":
+			if (!autoBackup) throw new Error("The host is still starting; try again");
+			return autoBackup.configure(cmd.key ?? null);
+		case "auto_backup_now": {
+			if (!autoBackup) throw new Error("The host is still starting; try again");
+			const made = await autoBackup.tick(cmd.force !== false);
+			return { made, ...autoBackup.status() };
+		}
+		// The phone's own backups are restored with the same door the server's are: decrypt with the key, put in place.
+		// The key comes back as a recovery code only on the phone's own host (see recoveryKey), for the app to show once.
+		case "auto_backup_key":
+			if (server) throw new Error("A server never tells its backup key; the phone that made it has it");
+			return { key: autoBackup?.recoveryKey() ?? null };
+		// A server's backup, on this phone: decrypted with the phone's key, then put in place. The app restarts the host
+		// afterwards, so every part reads what was restored.
+		case "backup_restore_server": {
+			if (session?.isStreaming) throw new Error("Stop the agent before restoring");
+			const tmp = join(stateDir, `restore-${Date.now()}.zip`);
+			try {
+				decryptBackup(String(cmd.path), String(cmd.key ?? ""), tmp);
+				return restoreBackup(tmp, { agentDir, workspace, home: process.env.HOME ?? agentDir });
+			} finally {
+				rmSync(tmp, { force: true });
+			}
+		}
 		case "backup_create":
 			return createBackup(!!cmd.includeWorkspace);
 		case "backup_restore":
-			return restoreBackup(cmd.path);
+			return restoreLocalBackup(cmd.path);
 
-		// Linux container (container.ts).
+		// Linux container. On the phone: container.ts (proot). On a server: the rootless Podman box (podmanbox.ts), which
+		// the setup script builds; the same commands serve both, so the screens do not need to know which one they talk to.
 		case "container_status":
-			return container.status(settingsManager.getShellPath());
+			return server ? box.status(settingsManager.getShellPath()) : container.status(settingsManager.getShellPath());
 		case "container_install": {
+			if (server) {
+				// "Install" on a server means building the image again.
+				guardBoxWork(cmd);
+				await box.rebuildImage(taskLog(cmd));
+				return box.status(settingsManager.getShellPath());
+			}
 			await container.install(cmd.distro as Distro, taskLog(cmd), integrations.settings.dns);
 			// On by default once installed, unless the user turned it off before.
 			if (integrations.settings.containerShell !== false) {
@@ -758,27 +1798,101 @@ async function handle(cmd: Command): Promise<unknown> {
 			return container.status(settingsManager.getShellPath());
 		}
 		case "container_remove":
+			if (server) {
+				// "Remove" on a server throws the container away; the image and the box's home stay, and the next command
+				// makes a new one.
+				guardBoxWork(cmd);
+				await box.reset();
+				return box.status(settingsManager.getShellPath());
+			}
 			if (settingsManager.getShellPath() === container.shellPath) settingsManager.setShellPath(undefined);
 			container.remove();
 			await reopenSession();
 			return container.status(settingsManager.getShellPath());
 		case "container_enable":
+			if (server) {
+				if (cmd.on && !box.available) throw new Error("There is no box on this server");
+				settingsManager.setShellPath(cmd.on ? boxScript : undefined);
+				integrations.updateSettings({ containerShell: !!cmd.on });
+				ensureAgentsFile(); // the notes tell the agent where its commands run
+				await settingsManager.flush();
+				await reopenSession();
+				return box.status(settingsManager.getShellPath());
+			}
 			if (cmd.on && !container.status(undefined).installed) throw new Error("Install the container first");
 			settingsManager.setShellPath(cmd.on ? container.shellPath : undefined);
 			integrations.updateSettings({ containerShell: !!cmd.on });
 			await settingsManager.flush();
 			await reopenSession();
 			return container.status(settingsManager.getShellPath());
+		// Server only: the box.
+		case "box_check":
+			if (!server) throw new Error("Only a server has a box");
+			return box.check();
+		case "box_stop":
+			guardBoxWork(cmd);
+			await box.stop();
+			return box.status(settingsManager.getShellPath());
+		case "box_wipe_home":
+			guardBoxWork(cmd);
+			return { ...(await box.wipeHome()), status: await box.status(settingsManager.getShellPath()) };
+
+		// Disk, memory, and what is running: for the app's server screen.
+		// Server only: the phone's UTC offset, for schedules. Whole hours map to Etc/GMT zones (Indonesia's are); other
+		// offsets leave the server's own zone.
+		case "timezone_set": {
+			if (!server) return { timeZone: null };
+			const minutes = Number(cmd.offsetMinutes);
+			if (!Number.isInteger(minutes) || Math.abs(minutes) > 14 * 60) throw new Error("offsetMinutes must be a whole number of minutes");
+			const zone = minutes === 0 ? "UTC" : minutes % 60 === 0 ? `Etc/GMT${minutes > 0 ? "-" : "+"}${Math.abs(minutes) / 60}` : null;
+			if (zone && zone !== integrations.settings.timeZone) {
+				integrations.updateSettings({ timeZone: zone });
+				process.env.TZ = zone;
+			}
+			return { timeZone: integrations.settings.timeZone ?? null };
+		}
+		case "health": {
+			const snap = await health.check();
+			const runs = runner.summary();
+			return {
+				...snap,
+				mode,
+				transport: listenPath ? "daemon" : "stdio",
+				epoch: hub.epoch,
+				uptimeSec: Math.round(process.uptime()),
+				node: process.version,
+				runs: { running: runs.running, queued: runs.runs.filter((r) => r.status === "queued").length },
+				subagents: subagents.busy(),
+				clientInBackground: hub.clientInBackground(),
+				// An update is copied and the host is waiting for the work in flight to end before it restarts.
+				restartPending: restartGate.pending,
+				bundleStamp: runningStamp ?? null,
+				// Where the agent's commands run: the app shows a box that is not built (commands then fail) as a problem.
+				...(server ? { box: await boxHealth() } : {}),
+				// The zone schedules run in (timezone_set), as an offset the app can compare with the phone's.
+				clock: { timeZone: process.env.TZ ?? null, offsetMinutes: -new Date().getTimezoneOffset() },
+			};
+		}
 
 		// App settings: DNS, search keys, approvals, fallbacks, budget.
+		// Settings > Server agent > Send a test notification: goes out even with the app open.
+		case "notify_test":
+			if (!server) throw new Error("Notifications through ntfy are for a server agent.");
+			return notifier.test();
 		case "settings_get":
 			return integrations.publicSettings();
 		case "settings_set": {
 			const out = integrations.updateSettings(cmd.settings ?? {});
-			container.setNameservers(integrations.settings.dns);
+			if (!server) container.setNameservers(integrations.settings.dns);
 			guard.mode = integrations.settings.approvalMode ?? "ask_risky";
 			return out;
 		}
+		case "search_keys_add":
+			return integrations.addSearchKeys(cmd.service, String(cmd.text ?? ""));
+		case "search_key_remove":
+			return integrations.removeSearchKey(cmd.service, Number(cmd.index));
+		case "s1_usage":
+			return s1Usage(integrations.searchKeys().s1);
 
 		// Agent skills (skills.ts). pi rescans them on reload.
 		case "skills_list":
@@ -810,34 +1924,106 @@ function taskLog(cmd: Command): Log {
 	return log;
 }
 
-async function dispatch(line: string) {
-	let cmd: Command;
-	try {
-		cmd = JSON.parse(line);
-	} catch (e) {
-		send({ type: "response", ok: false, error: `Bad JSON: ${(e as Error).message}` });
-		return;
-	}
-	try {
-		const data = await handle(cmd);
-		send({ type: "response", id: cmd.id, ok: true, data });
-	} catch (e) {
-		send({ type: "response", id: cmd.id, ok: false, error: String((e as Error)?.message ?? e) });
-	}
+/**
+ * Nothing is in flight: no reply being written, no background run queued or running, no subagent waiting, working or
+ * stopping, and no approval waiting (chat or subagent). Rynex's subagents outlive the turn that started them, so the
+ * chat alone is not enough: restarting then would kill them (server_agent.md 4.9).
+ */
+function isIdle(): boolean {
+	const runs = runner?.summary();
+	return (
+		!session?.isStreaming &&
+		guard.pendingApprovals().length === 0 &&
+		!subagents?.busy() &&
+		!jobs?.busy() &&
+		!runs?.running &&
+		!runs?.runs.some((r) => r.status === "queued")
+	);
 }
+
+/** Changing the box kills whatever is running in it. Refuse while the agent is, unless the app says it is meant. */
+function guardBoxWork(cmd: Command) {
+	if (!server) throw new Error("Only a server has a box");
+	if (cmd.force === true) return;
+	const working = session?.isStreaming
+		? "The agent is working in the box right now."
+		: runner?.summary().running
+			? "A background task is running in the box."
+			: subagents?.busy()
+				? "A subagent is working in the box."
+				: null;
+	if (working) throw Object.assign(new Error(`${working} Stop it first, or do it anyway.`), { code: "busy" });
+}
+
+let shuttingDown = false;
+/** Ends the host. Subagents are stopped first, so each keeps a partial report instead of vanishing. */
+async function shutdown(code = 0) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	tunnels.stopAll();
+	jobs?.stopAll();
+	autoBackup?.stop();
+	health.stop();
+	preview?.stopAll();
+	// The phone's app force-kills the host 1.5 s after closing stdin (AgentRuntime.stop), so it only waits long enough for
+	// the subagents' "stopped" records to leave; a daemon has time for their partial reports.
+	await subagents?.stopAll(listenPath ? 5000 : 500).catch(() => {});
+	runner?.dispose();
+	void mcp?.dispose();
+	session?.dispose();
+	hub.close();
+	if (listenPath) {
+		rmSync(listenPath, { force: true });
+		rmSync(runningMarker, { force: true });
+	}
+	process.exit(code);
+}
+
+// Only tests shorten the poll.
+const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0), pollMs: Number(process.env.RYNEX_RESTART_POLL_MS) || undefined });
 
 // ---------------------------------------------------------------------------
 // Startup
 
 async function main() {
+	// A rejected promise must never kill the host (and, with it, the chat):
+	// log it and keep running. Features still handle their own errors.
+	process.on("unhandledRejection", (reason) => {
+		console.error("[host] unhandled rejection (kept alive):", reason);
+	});
+	// A state file that could not be read is set aside and reported (state.ts), never taken for an empty one: the person
+	// is told here, in the chat, as soon as an app connects.
+	onStoreProblem((p) => {
+		log("store problem:", storeProblemMessage(p));
+		send({ type: "notice", message: storeProblemMessage(p) });
+	});
+	// A server host stuck in one loop never answers and never exits, so the service manager has nothing to restart:
+	// a watchdog thread kills it after two minutes without a sign of life (watchdog.ts).
+	if (server) startWatchdog({ staleMs: Number(process.env.RYNEX_WATCHDOG_MS) || 120_000 });
+	// A public tunnel (ssh -R) outlives its parent process: stop tunnels on
+	// every shutdown path, not just stdin end. (A SIGKILL orphan cannot be
+	// reaped by the app — the OS or user must kill that ssh.)
+	for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown(0));
+	process.on("exit", () => tunnels.stopAll());
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(workspace, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
-	ensureAgentsFile();
+	// A decrypted server backup (backup_restore_server) is a plain-text zip for a moment; a host that died mid-restore
+	// would leave it behind, so it is swept here.
+	for (const f of readdirSync(stateDir)) {
+		if (/^restore-\d+\.zip$/.test(f)) rmSync(join(stateDir, f), { force: true });
+	}
 
-	// Route every lookup through DNS-over-HTTPS (configurable in settings).
+	// Route every lookup through DNS-over-HTTPS (configurable in settings; a server defaults to its own resolver).
 	installDohLookup();
-	integrations = new Integrations(agentDir, workspace);
+	integrations = new Integrations(agentDir, workspace, { server, boxScript: () => (box.available ? boxScript : null) });
+	// After the settings: on a server they say whether bash runs in the box, which the notes describe.
+	ensureAgentsFile();
+	integrations.onChange = () => send({ type: "integrations", summary: integrations.summary() });
+	// Keeps a GitHub App sign-in (8-hour tokens) fresh for git and the agent's shell, which read
+	// the token from git's config and $GITHUB_TOKEN rather than asking for it.
+	setInterval(() => void integrations.githubFresh(), 10 * 60_000).unref();
+	void integrations.githubFresh();
 	guard.mode = integrations.settings.approvalMode ?? "ask_risky";
 	skills = new Skills(agentDir, join(fileURLToPath(new URL(".", import.meta.url)), "skills"), () => process.env.GITHUB_TOKEN);
 	skills.seed();
@@ -845,11 +2031,97 @@ async function main() {
 	templates.seed(join(stateDir, "seeded-templates.json"));
 	checkpoints = new Checkpoints(join(stateDir, "checkpoints"));
 	container = new Container(process.env.RYNEX_FILES ?? join(agentDir, "..", "..", ".."));
-	mcp = new Mcp(join(stateDir, "mcp.json"), () => send({ type: "mcp", servers: mcp.summary() }));
+	mcp = new Mcp(
+		join(stateDir, "mcp.json"),
+		() => send({ type: "mcp", servers: mcp.summary() }),
+		server ? { shell: "/bin/sh", box: () => (box.available ? boxScript : "/bin/sh") } : undefined,
+	);
+	// Automatic backups on both sides, differently placed (autobackup.ts): a server keeps its own in ~/.rynex and
+	// the app fetches the newest to the phone; the phone writes its own straight into the shared Download folder, the
+	// one place that survives the app (and, synced or copied off the phone, the phone itself). Secrets stay out there,
+	// and the key is shown once as a recovery code: a backup must not need the phone it was made on.
+	autoBackup = new AutoBackup({
+		dir: server ? join(rynexDir, "backups") : phoneBackupDir(),
+		configFile: join(stateDir, "auto-backup.json"),
+		agentDir,
+		workspace,
+		home: process.env.HOME ?? agentDir,
+		intervalMs: Number(process.env.RYNEX_BACKUP_MS) || undefined,
+		noSecrets: !server,
+		log: (m) => log(m),
+	});
+	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
+	// read its disk any other way; on the phone the same commands work too, inside the same folders.
+	// On a server the app also fetches the automatic backups from here (read-only).
+	fsService = new Fs([
+		{ path: workspace },
+		{ path: join(agentDir, "skills"), readOnly: true },
+		...(server ? [{ path: join(rynexDir, "backups"), readOnly: true }] : []),
+	]);
+	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.RYNEX_PREVIEW_IDLE_MS) || undefined });
+	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
+	customProviders.applyEnv();
 	modelRuntime = await ModelRuntime.create();
-	settingsManager = SettingsManager.create(workspace, agentDir);
+	// Never auto-trust project code: a cloned repo's .pi/extensions/*.ts
+	// would otherwise run inside the host with the user's tokens on merely
+	// opening the project. Project settings are not loaded while untrusted
+	// either (see SettingsManager); the app's own inline extension is
+	// unaffected, it is not a project extension.
+	settingsManager = SettingsManager.create(workspace, agentDir, { projectTrusted: false });
+	// pi keeps the prompt cache warm with extra 1-token requests. Each one
+	// re-reads the whole cached prompt at the full rate, so on a paid provider
+	// they cost more than the cache saves. Off unless the user turned it on
+	// themselves.
+	if ((settingsManager as any).globalSettings?.cacheWarming === undefined) {
+		settingsManager.setCacheWarmingMode("off");
+		await settingsManager.flush();
+	}
+	// Subagents are created after boot, but the manager must exist before the
+	// first interactive session is built (buildSession registers its tool).
+	subagents = new SubagentManager({
+		send: (r) => send(r),
+		wireEvent: (e) => wireEvent(e),
+		createSession: (opts) => buildSubagentSession(opts),
+		limits: () => {
+			const st = integrations.settings;
+			return {
+				costLimit: st.subagentCostLimit ?? 5,
+				minutesLimit: st.subagentMinutesLimit ?? 30,
+				approvalMode: st.subagentApprovalMode ?? st.approvalMode ?? "ask_risky",
+			};
+		},
+		checkBudget: () => checkBudget(),
+	});
+	jobs = new Jobs({
+		send: (r) => send(r),
+		shellPath: () => settingsManager.getShellPath(),
+		finished: (job) => {
+			finishedJobs.push(job);
+			void deliverJobs();
+		},
+	});
+	// On a server, bash runs inside the rootless container once it has been set up (server/box/box), unless the user
+	// turned that off. If the launcher went away, stop pointing at it.
+	// A server runs on UTC as a rule; the app tells it the phone's time zone (timezone_set), so "every day at 09:00"
+	// means the user's 09:00.
+	if (server && integrations.settings.timeZone) process.env.TZ = integrations.settings.timeZone;
+	// The app's update copies this host's folder only; the box launcher and its files come in it and are put in place here.
+	if (server) {
+		const replaced = syncLauncher({ hostDir, rynexDir, warn: (m) => log("launcher:", m) });
+		if (replaced.length) log("launcher updated:", replaced.join(", "));
+	}
+	if (server) {
+		const shell = settingsManager.getShellPath();
+		if (box.available && integrations.settings.containerShell !== false && shell !== boxScript) {
+			settingsManager.setShellPath(boxScript);
+			await settingsManager.flush();
+		} else if (shell === boxScript && !box.available) {
+			settingsManager.setShellPath(undefined);
+			await settingsManager.flush();
+		}
+	}
 	// Linux container is the agent's shell by default once installed.
-	if (
+	else if (
 		container.status(undefined).installed &&
 		integrations.settings.containerShell !== false &&
 		settingsManager.getShellPath() !== container.shellPath
@@ -858,7 +2130,27 @@ async function main() {
 		await settingsManager.flush();
 	}
 	await openSession(SessionManager.continueRecent(workspace));
-	runner = new Runner(join(stateDir, "runs.json"), backgroundSession, send, (p) => integrations.githubApi(p));
+	sync = new GitHubSync({
+		agentDir,
+		workspace,
+		stateDir,
+		integrations,
+		providers: customProviders,
+		activeSession: () => session?.sessionFile,
+		busy: () => !!session?.isStreaming || (runner?.summary().running ?? 0) > 0,
+		providersChanged: async () => {
+			await modelRuntime.refresh({ allowNetwork: false });
+		},
+		notify: (status) => send({ type: "sync", status }),
+		unavailable: server
+			? "GitHub sync is off on a server agent: the server keeps the one copy of the chats and projects. Move data between the phone and the server with a backup."
+			: undefined,
+	});
+	// Pick up what other phones synced while this one was off.
+	sync.schedule(20_000);
+	runner = new Runner(join(stateDir, "runs.json"), backgroundSession, send, (p) => integrations.githubApi(p), (summary, reason) =>
+		guard.askApproval("issue_run", summary, reason),
+	);
 
 	// Starter skills and MCP connections come up in the background; the chat
 	// session is rebuilt afterwards (when idle) so it sees them.
@@ -866,27 +2158,35 @@ async function main() {
 		if (session && !session.isStreaming) return reopenSession().catch(() => {});
 	});
 
-	// Split on LF only; readline would also split on U+2028/U+2029.
-	let buffer = "";
-	process.stdin.setEncoding("utf8");
-	process.stdin.on("data", (chunk: string) => {
-		buffer += chunk;
-		let nl: number;
-		while ((nl = buffer.indexOf("\n")) >= 0) {
-			const line = buffer.slice(0, nl).replace(/\r$/, "");
-			buffer = buffer.slice(nl + 1);
-			if (line.trim()) void dispatch(line);
+	const readyRecord = { type: "ready", version: VERSION };
+	if (listenPath) {
+		// A daemon that was killed leaves its marker behind; finding it means the last run did not end cleanly.
+		mkdirSync(rynexDir, { recursive: true, mode: 0o700 });
+		if (existsSync(runningMarker)) {
+			send({ type: "notice", message: "The host was restarted unexpectedly (it was stopped without shutting down)." });
+			void notifier.send("restarted", "Host restarted unexpectedly", { priority: 4, tags: ["warning"] });
 		}
-	});
-	process.stdin.on("end", () => {
-		tunnels.stopAll();
-		runner.dispose();
-		void mcp.dispose();
-		session?.dispose();
-		process.exit(0);
-	});
-
-	send({ type: "ready", version: VERSION });
+		writeFileSync(runningMarker, `${process.pid} ${new Date().toISOString()}\n`, { mode: 0o600 });
+		// Listen last: a client that connects now finds everything above in place. stdin is not read at all (systemd
+		// gives the daemon /dev/null, whose end must not stop it).
+		hub.setReady(readyRecord);
+		await listenOnSocket(hub, listenPath);
+		log(`listening on ${listenPath}`);
+	} else {
+		// Split on LF only; readline would also split on U+2028/U+2029.
+		const lines = new LineBuffer();
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk: string) => {
+			for (const line of lines.push(chunk)) stdio?.receive(line);
+		});
+		// The app closed our stdin: it is done with us.
+		process.stdin.on("end", () => void shutdown(0));
+		hub.setReady(readyRecord);
+	}
+	// A server is watched for a filling disk; a phone's storage is the user's business (the `health` command still
+	// answers there).
+	if (server) health.start();
+	autoBackup?.start();
 }
 
 main().catch((e) => {

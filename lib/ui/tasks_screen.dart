@@ -4,23 +4,18 @@ import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import '../agent/jobs.dart';
 import 'chat_screen.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
+import 'i18n.dart';
+import 'message_views.dart' show JobClock;
 import 'theme.dart';
 
 String _basename(String path) {
   final parts = path.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).toList();
   return parts.isEmpty ? path : parts.last;
-}
-
-String _ago(DateTime t) {
-  final d = DateTime.now().difference(t);
-  if (d.inSeconds < 60) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours < 24) return '${d.inHours}h ago';
-  if (d.inDays < 7) return '${d.inDays}d ago';
-  return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
 }
 
 String _describeSchedule(ScheduleInfo s) {
@@ -46,9 +41,12 @@ class TasksScreen extends StatefulWidget {
   State<TasksScreen> createState() => _TasksScreenState();
 }
 
-class _TasksScreenState extends State<TasksScreen> {
+class _TasksScreenState extends State<TasksScreen> with BusyActions {
   final _prompt = TextEditingController();
   bool _queueing = false;
+
+  /// Runs swiped away and not back from the host yet: a dismissed card must leave the list at once.
+  final _hidden = <String>{};
 
   AgentController get agent => widget.agent;
   Features get f => agent.features;
@@ -57,7 +55,12 @@ class _TasksScreenState extends State<TasksScreen> {
   void initState() {
     super.initState();
     f.refreshRuns().catchError((Object e) => _error(e));
+    _refreshJobs();
   }
+
+  /// Re-reads every chat's background jobs. Quietly: the jobs the app already knows stay on screen if it fails, and
+  /// the runs (this screen's own) say when the host cannot be reached.
+  Future<void> _refreshJobs() => agent.refreshJobs().catchError((Object _) {});
 
   @override
   void dispose() {
@@ -67,7 +70,7 @@ class _TasksScreenState extends State<TasksScreen> {
 
   void _error(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 
   Future<void> _guard(Future<void> Function() task) async {
@@ -94,10 +97,44 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
+  /// Swiped away: removed from the list (its chat stays), with Undo.
+  Future<void> _removeRun(RunInfo run) async {
+    setState(() => _hidden.add(run.id));
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final removed = await f.deleteRun(run.id);
+      if (removed == null) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(tr('Run removed')),
+          action: SnackBarAction(
+            label: tr('Undo'),
+            onPressed: () => _guard(() async {
+              await f.restoreRun(removed.run, removed.index);
+              if (mounted) setState(() => _hidden.remove(run.id));
+            }),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _hidden.remove(run.id));
+      _error(e);
+    }
+  }
+
   Future<void> _openRun(RunInfo run) async {
     try {
-      await agent.openSession(run.sessionFile!);
-      if (!mounted) return;
+      if (!await agent.openSession(run.sessionFile!) || !mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
+    } catch (e) {
+      _error(e);
+    }
+  }
+
+  Future<void> _openJob(JobState job) async {
+    try {
+      if (job.sessionFile != agent.sessionFile && (!await agent.openSession(job.sessionFile) || !mounted)) return;
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
     } catch (e) {
       _error(e);
@@ -105,35 +142,60 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   Future<void> _editSchedule([ScheduleInfo? existing]) async {
-    final result = await showModalBottomSheet<Map<String, dynamic>>(
+    // The sheet saves itself and only closes on success: the old flow
+    // popped with the edits first and saved afterwards, so a failed save
+    // lost the user's work behind a snackbar.
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _ScheduleSheet(existing: existing, defaultCwd: agent.cwd),
+      builder: (_) => _ScheduleSheet(
+        existing: existing,
+        defaultCwd: agent.cwd,
+        onSave: (m) => f.saveSchedule(m),
+      ),
     );
-    if (result == null) return;
-    await _guard(() => f.saveSchedule(result));
   }
 
   Future<void> _deleteSchedule(ScheduleInfo s) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete schedule?'),
-        content: Text('"${s.name}" will stop running.'),
+        title: Text(tr('Delete schedule?')),
+        content: Text('"${s.name}" ${tr('will stop running.')}'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Delete')),
+          ),
         ],
       ),
     );
-    if (ok == true) await _guard(() => f.deleteSchedule(s.id));
+    if (ok == true) await _onSchedule(s, () => f.deleteSchedule(s.id));
+  }
+
+  /// One change to a schedule at a time (run, switch, delete), with a spinner on its row meanwhile.
+  Future<bool> _onSchedule(ScheduleInfo s, Future<void> Function() task) async {
+    if (busy(s.id)) return false;
+    try {
+      return await runBusy(s.id, () async {
+            await task();
+            return true;
+          }) ??
+          false;
+    } catch (e) {
+      _error(e);
+      return false;
+    }
   }
 
   Future<void> _runNow(ScheduleInfo s) async {
-    await _guard(() => f.runScheduleNow(s.id));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Queued "${s.name}"')));
-    }
+    // "Queued" only when it was: a refusal (budget, a full disk, no GitHub sign-in) says so instead.
+    if (!await _onSchedule(s, () => f.runScheduleNow(s.id)) || !mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('${tr('Queued')}: "${s.name}"')));
   }
 
   @override
@@ -141,18 +203,24 @@ class _TasksScreenState extends State<TasksScreen> {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
-      listenable: f,
+      listenable: Listenable.merge([f, agent]),
       builder: (context, _) {
-        final runs = f.runs;
+        final runs = f.runs.where((r) => !_hidden.contains(r.id)).toList();
         final finished = runs.where((r) => !r.active).length;
+        // Every chat's background jobs: one started in another chat goes on after the user moved on, and its card is
+        // only in that chat. Running first, then the newest.
+        final jobs = agent.jobStore.all.toList()
+          ..sort((a, b) => a.running != b.running ? (a.running ? -1 : 1) : b.startedAt.compareTo(a.startedAt));
         return Scaffold(
-          appBar: AppBar(title: const Text('Tasks')),
+          appBar: AppBar(title: Text(tr('Tasks'))),
           body: RefreshIndicator(
-            onRefresh: () => _guard(f.refreshRuns),
+            onRefresh: () => _guard(() async {
+              await Future.wait([f.refreshRuns(), _refreshJobs()]);
+            }),
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
               children: [
-                const SectionLabel('Run in background', padding: EdgeInsets.fromLTRB(4, 8, 4, 10)),
+                SectionLabel(tr('Run in background'), padding: EdgeInsets.fromLTRB(4, 8, 4, 10)),
                 SurfaceCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -162,7 +230,7 @@ class _TasksScreenState extends State<TasksScreen> {
                         minLines: 2,
                         maxLines: 6,
                         textInputAction: TextInputAction.newline,
-                        decoration: const InputDecoration(hintText: 'What should pi do while you are away?'),
+                        decoration: InputDecoration(hintText: tr('What should the agent do while you are away?')),
                       ),
                       const SizedBox(height: 10),
                       Row(
@@ -179,7 +247,29 @@ class _TasksScreenState extends State<TasksScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      PrimaryButton(label: 'Queue', icon: LucideIcons.listTodo, busy: _queueing, onPressed: _queue),
+                      PrimaryButton(label: tr('Queue'), icon: LucideIcons.listTodo, busy: _queueing, onPressed: _queue),
+                      const SizedBox(height: 10),
+                      // Nobody is there to answer: what a run may do without asking depends on where the agent runs.
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            agent.client.isRemote ? LucideIcons.shieldCheck : LucideIcons.shieldAlert,
+                            size: 14,
+                            color: agent.client.isRemote ? p.faint : p.warning,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              agent.client.isRemote
+                                  ? tr('Background runs do not ask: risky actions (deleting files, force push, writing outside the project) are refused.')
+                                  : tr('Background runs do not ask before acting: commands, edits and pushes run on their own, whatever the Approvals setting is.'),
+                              key: const ValueKey('background-approvals-note'),
+                              style: text.bodySmall?.copyWith(color: agent.client.isRemote ? p.muted : p.warning),
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 18),
                       Row(
                         children: [
@@ -187,8 +277,8 @@ class _TasksScreenState extends State<TasksScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Parallel agents', style: text.titleSmall),
-                                Text('How many run at once', style: text.bodySmall),
+                                Text(tr('Parallel agents'), style: text.titleSmall),
+                                Text(tr('How many run at once'), style: text.bodySmall),
                               ],
                             ),
                           ),
@@ -208,12 +298,12 @@ class _TasksScreenState extends State<TasksScreen> {
                   ),
                 ),
                 SectionLabel(
-                  'Runs',
+                  tr('Runs'),
                   trailing: finished > 0
                       ? TextButton.icon(
                           onPressed: () => _guard(f.clearRuns),
                           icon: const Icon(LucideIcons.x, size: 14),
-                          label: const Text('Clear finished'),
+                          label: Text(tr('Clear finished')),
                         )
                       : null,
                 ),
@@ -223,25 +313,54 @@ class _TasksScreenState extends State<TasksScreen> {
                       children: [
                         const Illustration('automate', height: 140),
                         const SizedBox(height: 8),
-                        Text('No runs yet. Queue a prompt above.', style: text.bodySmall),
+                        Text(tr('No runs yet. Queue a prompt above.'), style: text.bodySmall),
                       ],
                     ),
                   )
                 else
-                  for (final r in runs) ...[
-                    _RunCard(
-                      run: r,
-                      onCancel: () => _guard(() => f.cancelRun(r.id)),
-                      onOpen: r.sessionFile != null ? () => _openRun(r) : null,
+                  for (final r in runs)
+                    // Finished runs swipe away either way; queued and running ones are cancelled from the card.
+                    Padding(
+                      key: ValueKey(r.id),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: r.active
+                          ? _RunCard(
+                              run: r,
+                              onCancel: () => _guard(() => f.cancelRun(r.id)),
+                              onOpen: r.sessionFile != null ? () => _openRun(r) : null,
+                            )
+                          : Dismissible(
+                              key: ValueKey('dismiss-${r.id}'),
+                              background: const _RemoveBackground(alignment: Alignment.centerLeft),
+                              secondaryBackground: const _RemoveBackground(alignment: Alignment.centerRight),
+                              onDismissed: (_) => _removeRun(r),
+                              child: _RunCard(
+                                run: r,
+                                onCancel: () => _guard(() => f.cancelRun(r.id)),
+                                onOpen: r.sessionFile != null ? () => _openRun(r) : null,
+                              ),
+                            ),
                     ),
-                    const SizedBox(height: 10),
-                  ],
+                if (jobs.isNotEmpty) ...[
+                  SectionLabel(tr('Background jobs')),
+                  for (final j in jobs)
+                    Padding(
+                      key: ValueKey('job-${j.id}'),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _JobCard(
+                        job: j,
+                        here: j.sessionFile == agent.sessionFile,
+                        onStop: j.running ? () => _guard(() => agent.stopJob(j.id)) : null,
+                        onOpen: j.sessionFile.isEmpty ? null : () => _openJob(j),
+                      ),
+                    ),
+                ],
                 SectionLabel(
-                  'Schedules',
+                  tr('Schedules'),
                   trailing: TextButton.icon(
                     onPressed: () => _editSchedule(),
                     icon: const Icon(LucideIcons.plus, size: 14),
-                    label: const Text('New schedule'),
+                    label: Text(tr('New schedule')),
                   ),
                 ),
                 if (f.schedules.isEmpty)
@@ -253,7 +372,7 @@ class _TasksScreenState extends State<TasksScreen> {
                         const SizedBox(width: 14),
                         Expanded(
                           child: Text(
-                            'Run a prompt every few hours, daily, or when a labelled GitHub issue appears.',
+                            tr('Run a prompt every few hours, daily, or when a labelled GitHub issue appears.'),
                             style: text.bodySmall,
                           ),
                         ),
@@ -266,8 +385,9 @@ class _TasksScreenState extends State<TasksScreen> {
                       for (final s in f.schedules)
                         _ScheduleRow(
                           schedule: s,
+                          busy: busy(s.id),
                           onTap: () => _editSchedule(s),
-                          onToggle: (v) => _guard(() => f.saveSchedule({...s.json, 'enabled': v})),
+                          onToggle: (v) => _onSchedule(s, () => f.saveSchedule({...s.json, 'enabled': v})),
                           onRunNow: () => _runNow(s),
                           onDelete: () => _deleteSchedule(s),
                         ),
@@ -281,7 +401,7 @@ class _TasksScreenState extends State<TasksScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Schedules run while Rynex is alive; a persistent notification keeps it running.',
+                        tr('Schedules run while Rynex AI Agent is alive; a persistent notification keeps it running.'),
                         style: text.bodySmall?.copyWith(color: p.muted),
                       ),
                     ),
@@ -292,6 +412,86 @@ class _TasksScreenState extends State<TasksScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// A background job of any chat: its clock (with Stop while it runs), its command and where it runs. A tap opens its
+/// chat.
+class _JobCard extends StatelessWidget {
+  const _JobCard({required this.job, required this.here, this.onStop, this.onOpen});
+  final JobState job;
+
+  /// Its chat is the one open.
+  final bool here;
+  final VoidCallback? onStop;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 12),
+      onTap: onOpen,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // As tall with Stop as without, so a running card and an ended one line up.
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 40),
+            child: Align(alignment: Alignment.centerLeft, child: JobClock(job: job, onStop: onStop)),
+          ),
+          if (job.command != job.label)
+            Text(
+              job.command,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: text.bodySmall?.copyWith(fontFamily: mono),
+            ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(LucideIcons.folder, size: 14, color: p.muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${job.cwd.isEmpty ? 'workspace' : _basename(job.cwd)} · ${here ? tr('this chat') : tr('another chat')}',
+                  overflow: TextOverflow.ellipsis,
+                  style: text.bodySmall?.copyWith(color: p.muted),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Behind a run card being swiped away.
+class _RemoveBackground extends StatelessWidget {
+  const _RemoveBackground({required this.alignment});
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      decoration: BoxDecoration(
+        color: p.danger.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(Radii.xl),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(LucideIcons.trash2, size: 18, color: p.danger),
+          const SizedBox(width: 8),
+          Text(tr('Remove'), style: TextStyle(color: p.danger, fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 }
@@ -307,22 +507,33 @@ class _RunCard extends StatelessWidget {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final Widget status = switch (run.status) {
-      'running' => SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent)),
+      'running' => BusySpinner(size: 18, color: p.accent),
       'queued' => Icon(LucideIcons.clock, size: 18, color: p.muted),
       'done' => Icon(LucideIcons.circleCheck, size: 18, color: p.success),
       'error' => Icon(LucideIcons.circleX, size: 18, color: p.danger),
       'cancelled' => Icon(LucideIcons.ban, size: 18, color: p.faint),
       _ => Icon(LucideIcons.circleDashed, size: 18, color: p.muted),
     };
-    final sourceColor = switch (run.source) {
-      'schedule' => p.accentAlt,
-      'trigger' => p.warning,
-      _ => p.muted,
+    // Only runs that didn't come from the queue say where they came from.
+    final source = switch (run.source) {
+      'schedule' => tr('Scheduled'),
+      'trigger' => tr('From GitHub issue'),
+      _ => null,
+    };
+    final (label, color) = switch (run.status) {
+      'running' => (tr('In progress'), p.accent),
+      'queued' => (tr('Waiting'), p.muted),
+      'done' => (tr('Done'), p.success),
+      'error' => (tr('Failed'), p.danger),
+      'cancelled' => (tr('Cancelled'), p.faint),
+      _ => (run.status, p.muted),
     };
     final when = run.finishedAt ?? run.createdAt;
     final summary = run.summary;
+    final open = run.active ? null : onOpen;
     return SurfaceCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
+      onTap: open,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -334,39 +545,36 @@ class _RunCard extends StatelessWidget {
                 child: Text(run.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
               ),
               const SizedBox(width: 8),
-              Pill(run.source, color: sourceColor),
+              Pill(label, color: color),
+              if (run.active)
+                IconButton(
+                  tooltip: tr('Cancel'),
+                  onPressed: onCancel,
+                  icon: Icon(LucideIcons.x, size: 18, color: p.muted),
+                )
+              else if (open != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 0, 8, 0),
+                  child: Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+                )
+              else
+                const SizedBox(width: 8),
             ],
           ),
-          const SizedBox(height: 4),
           Padding(
-            padding: const EdgeInsets.only(left: 30),
+            padding: const EdgeInsets.only(left: 30, right: 8),
             child: Text(
-              [run.status, _ago(when), if (run.cwd.isNotEmpty) _basename(run.cwd)].join(' · '),
+              [?source, formatAgo(when), if (run.cwd.isNotEmpty) _basename(run.cwd)].join(' · '),
               style: text.bodySmall?.copyWith(color: p.muted),
             ),
           ),
           if (summary != null && summary.isNotEmpty) ...[
             const SizedBox(height: 6),
             Padding(
-              padding: const EdgeInsets.only(left: 30),
+              padding: const EdgeInsets.only(left: 30, right: 8),
               child: Text(summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodyMedium),
             ),
           ],
-          if (run.active || (onOpen != null && (run.status == 'done' || run.status == 'error')))
-            Align(
-              alignment: Alignment.centerRight,
-              child: run.active
-                  ? TextButton.icon(
-                      onPressed: onCancel,
-                      icon: const Icon(LucideIcons.x, size: 14),
-                      label: const Text('Cancel'),
-                    )
-                  : TextButton.icon(
-                      onPressed: onOpen,
-                      icon: const Icon(LucideIcons.messageSquare, size: 14),
-                      label: const Text('Open chat'),
-                    ),
-            ),
         ],
       ),
     );
@@ -380,8 +588,12 @@ class _ScheduleRow extends StatelessWidget {
     required this.onToggle,
     required this.onRunNow,
     required this.onDelete,
+    this.busy = false,
   });
   final ScheduleInfo schedule;
+
+  /// A change to it is on its way: a spinner, and its switch and menu wait.
+  final bool busy;
   final VoidCallback onTap;
   final ValueChanged<bool> onToggle;
   final VoidCallback onRunNow;
@@ -398,23 +610,25 @@ class _ScheduleRow extends StatelessWidget {
           ? IconTile(icon: SimpleIcons.github, color: p.text)
           : IconTile(icon: LucideIcons.calendarClock, color: s.enabled ? p.accentAlt : p.faint),
       title: s.name,
-      subtitle: '${_describeSchedule(s)}${last != null ? ' · last run ${_ago(last)}' : ''}',
-      onTap: onTap,
+      subtitle: '${_describeSchedule(s)}${last != null ? ' · ${tr('last run')} ${formatAgo(last)}' : ''}',
+      onTap: busy ? null : onTap,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Switch(value: s.enabled, onChanged: onToggle),
+          if (busy) ...[const BusySpinner(), const SizedBox(width: 4)],
+          LabeledSwitch(label: s.name, value: s.enabled, onChanged: busy ? null : onToggle),
           PopupMenuButton<String>(
+            enabled: !busy,
             icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
             onSelected: (v) => switch (v) {
               'run' => onRunNow(),
               'edit' => onTap(),
               _ => onDelete(),
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'run', child: Text('Run now')),
-              PopupMenuItem(value: 'edit', child: Text('Edit')),
-              PopupMenuItem(value: 'delete', child: Text('Delete')),
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'run', child: Text(tr('Run now'))),
+              PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
+              PopupMenuItem(value: 'delete', child: Text(tr('Delete'), style: TextStyle(color: p.danger))),
             ],
           ),
         ],
@@ -427,9 +641,12 @@ enum _Kind { interval, daily, github }
 
 /// Create/edit form for a schedule; pops the json map to save.
 class _ScheduleSheet extends StatefulWidget {
-  const _ScheduleSheet({this.existing, required this.defaultCwd});
+  const _ScheduleSheet({this.existing, required this.defaultCwd, required this.onSave});
   final ScheduleInfo? existing;
   final String defaultCwd;
+
+  /// Saves the schedule; the sheet stays open with the error when it throws.
+  final Future<void> Function(Map<String, dynamic> schedule) onSave;
 
   @override
   State<_ScheduleSheet> createState() => _ScheduleSheetState();
@@ -446,6 +663,7 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
   late _Kind _kind;
   late TimeOfDay _time;
   String? _problem;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -475,7 +693,8 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
 
   String _presetLabel(int m) => m < 60 ? '${m}m' : (m < 1440 ? '${m ~/ 60}h' : '${m ~/ 1440}d');
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving) return;
     final name = _name.text.trim();
     final prompt = _prompt.text.trim();
     if (name.isEmpty || prompt.isEmpty) {
@@ -512,7 +731,22 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
         }
         out['trigger'] = {'type': 'github_issues', 'repo': repo, 'label': label};
     }
-    Navigator.pop(context, out);
+    setState(() {
+      _saving = true;
+      _problem = null;
+    });
+    try {
+      await widget.onSave(out);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _problem = friendlyError(e);
+        });
+      }
+      return;
+    }
+    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -533,22 +767,22 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
             TextField(
               controller: _name,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: 'Name'),
+              decoration: InputDecoration(labelText: tr('Name')),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _prompt,
               minLines: 3,
               maxLines: 8,
-              decoration: const InputDecoration(labelText: 'Prompt', alignLabelWithHint: true),
+              decoration: InputDecoration(labelText: tr('Prompt'), alignLabelWithHint: true),
             ),
             const SizedBox(height: 16),
             SegmentedButton<_Kind>(
               showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: _Kind.interval, label: Text('Interval')),
-                ButtonSegment(value: _Kind.daily, label: Text('Daily')),
-                ButtonSegment(value: _Kind.github, label: Text('GitHub trigger')),
+              segments: [
+                ButtonSegment(value: _Kind.interval, label: Text(tr('Interval'))),
+                ButtonSegment(value: _Kind.daily, label: Text(tr('Daily'))),
+                ButtonSegment(value: _Kind.github, label: Text(tr('GitHub trigger'))),
               ],
               selected: {_kind},
               onSelectionChanged: (s) => setState(() {
@@ -563,7 +797,7 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
                   controller: _minutes,
                   keyboardType: TextInputType.number,
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(labelText: 'Every (minutes)', helperText: 'At least 15'),
+                  decoration: InputDecoration(labelText: tr('Every (minutes)'), helperText: tr('At least 15')),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -590,7 +824,7 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
                     children: [
                       Icon(LucideIcons.clock, size: 18, color: p.muted),
                       const SizedBox(width: 12),
-                      Expanded(child: Text('Every day at', style: text.bodyMedium)),
+                      Expanded(child: Text(tr('Every day at'), style: text.bodyMedium)),
                       Text(_hhmm(_time), style: text.titleMedium?.copyWith(fontFamily: mono)),
                     ],
                   ),
@@ -601,17 +835,17 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
                   controller: _repo,
                   autocorrect: false,
                   style: const TextStyle(fontFamily: mono),
-                  decoration: const InputDecoration(labelText: 'Repository', hintText: 'owner/repo'),
+                  decoration: InputDecoration(labelText: tr('Repository'), hintText: 'owner/repo'),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: _label,
                   autocorrect: false,
-                  decoration: const InputDecoration(labelText: 'Label', hintText: 'pi'),
+                  decoration: InputDecoration(labelText: tr('Label'), hintText: 'agent'),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'pi picks up new issues with this label. The issue is added to your prompt.',
+                  tr('The agent picks up new issues with this label. The issue is added to your prompt.'),
                   style: text.bodySmall,
                 ),
               ],
@@ -635,7 +869,7 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
               Text(_problem!, style: text.bodySmall?.copyWith(color: p.danger)),
             ],
             const SizedBox(height: 18),
-            PrimaryButton(label: 'Save', icon: LucideIcons.check, onPressed: _save),
+            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, busy: _saving, onPressed: _save),
           ],
         ),
       ),

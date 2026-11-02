@@ -3,8 +3,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// A starting point for a common MCP server.
@@ -26,7 +28,7 @@ class McpScreen extends StatefulWidget {
   State<McpScreen> createState() => _McpScreenState();
 }
 
-class _McpScreenState extends State<McpScreen> {
+class _McpScreenState extends State<McpScreen> with BusyActions {
   final _expanded = <String>{};
 
   AgentController get agent => widget.agent;
@@ -50,18 +52,23 @@ class _McpScreenState extends State<McpScreen> {
 
   void _error(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 
   Future<void> _edit({McpServer? existing, _Preset? preset}) async {
-    final result = await showModalBottomSheet<Map<String, dynamic>>(
+    if (existing != null && busy(existing.id)) return;
+    // The sheet saves itself and closes only once that worked, so a refused server keeps what the user typed.
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _McpSheet(existing: existing, preset: preset),
+      builder: (_) => _McpSheet(existing: existing, preset: preset, onSave: f.saveMcp),
     );
-    if (result == null) return;
+  }
+
+  /// One change to a server at a time (switch, remove), with a spinner on its card meanwhile.
+  Future<void> _change(McpServer s, Future<void> Function() task) async {
     try {
-      await f.saveMcp(result);
+      await runBusy(s.id, task);
     } catch (e) {
       _error(e);
     }
@@ -71,20 +78,20 @@ class _McpScreenState extends State<McpScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Remove server?'),
-        content: Text('"${s.name}" and its tools will be removed from pi.'),
+        title: Text(tr('Remove server?')),
+        content: Text('"${s.name}" ${tr('and its tools will be removed from the agent.')}'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Remove')),
+          ),
         ],
       ),
     );
     if (ok != true) return;
-    try {
-      await f.deleteMcp(s.id);
-    } catch (e) {
-      _error(e);
-    }
+    await _change(s, () => f.deleteMcp(s.id));
   }
 
   @override
@@ -97,8 +104,10 @@ class _McpScreenState extends State<McpScreen> {
         final servers = f.mcpServers;
         return Scaffold(
           appBar: AppBar(
-            title: const Text('MCP servers'),
-            actions: [IconButton(tooltip: 'Add server', onPressed: () => _edit(), icon: const Icon(LucideIcons.plus))],
+            title: Text(tr('MCP servers')),
+            actions: [
+              IconButton(tooltip: tr('Add server'), onPressed: () => _edit(), icon: const Icon(LucideIcons.plus)),
+            ],
           ),
           body: RefreshIndicator(
             onRefresh: () => f.refreshMcp().catchError((Object e) => _error(e)),
@@ -113,13 +122,15 @@ class _McpScreenState extends State<McpScreen> {
                         children: [
                           IconTile(icon: LucideIcons.plug, color: p.accent),
                           const SizedBox(width: 12),
-                          Expanded(child: Text('Model Context Protocol', style: text.titleMedium)),
+                          Expanded(child: Text(tr('Model Context Protocol'), style: text.titleMedium)),
                         ],
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Connect pi to databases, docs, browsers and more through Model Context Protocol servers; '
-                        'their tools show up as mcp_<server>_<tool>.',
+                        tr(
+                          'Connect the agent to databases, docs, browsers and more through Model Context Protocol servers; '
+                          'their tools show up as mcp_<server>_<tool>.',
+                        ),
                         style: text.bodyMedium?.copyWith(color: p.muted),
                       ),
                       const SizedBox(height: 14),
@@ -139,11 +150,11 @@ class _McpScreenState extends State<McpScreen> {
                   ),
                 ),
                 SectionLabel(
-                  'Servers',
+                  tr('Servers'),
                   trailing: TextButton.icon(
                     onPressed: () => _edit(),
                     icon: const Icon(LucideIcons.plus, size: 14),
-                    label: const Text('Add server'),
+                    label: Text(tr('Add server')),
                   ),
                 ),
                 if (servers.isEmpty)
@@ -152,7 +163,7 @@ class _McpScreenState extends State<McpScreen> {
                       children: [
                         const Illustration('connect', height: 140),
                         const SizedBox(height: 8),
-                        Text('No servers yet. Pick a preset above to start.', style: text.bodySmall),
+                        Text(tr('No servers yet. Pick a preset above to start.'), style: text.bodySmall),
                       ],
                     ),
                   )
@@ -160,13 +171,14 @@ class _McpScreenState extends State<McpScreen> {
                   for (final s in servers) ...[
                     _ServerCard(
                       server: s,
+                      busy: busy(s.id),
                       expanded: _expanded.contains(s.id),
                       onToggleTools: () => setState(() {
                         if (!_expanded.remove(s.id)) _expanded.add(s.id);
                       }),
                       onEdit: () => _edit(existing: s),
                       onDelete: () => _delete(s),
-                      onEnabled: (v) => f.saveMcp({...s.json, 'enabled': v}).catchError((Object e) => _error(e)),
+                      onEnabled: (v) => _change(s, () => f.saveMcp({...s.json, 'enabled': v})),
                     ),
                     const SizedBox(height: 10),
                   ],
@@ -187,8 +199,12 @@ class _ServerCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onEnabled,
+    this.busy = false,
   });
   final McpServer server;
+
+  /// A change to it is on its way: a spinner, and its switch and menu wait.
+  final bool busy;
   final bool expanded;
   final VoidCallback onToggleTools;
   final VoidCallback onEdit;
@@ -204,17 +220,14 @@ class _ServerCard extends StatelessWidget {
     final status = s.enabled ? s.status : 'disabled';
     final Widget indicator = switch (status) {
       'connected' => _Dot(color: p.success),
-      'connecting' => SizedBox.square(
-        dimension: 12,
-        child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent),
-      ),
+      'connecting' => BusySpinner(size: 12, color: p.accent),
       'error' => _Dot(color: p.danger),
       _ => _Dot(color: p.faint),
     };
     final detail = s.type == 'http' ? (s.url ?? '') : (s.command ?? '');
     return SurfaceCard(
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
-      onTap: onEdit,
+      onTap: busy ? null : onEdit,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -245,13 +258,15 @@ class _ServerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Switch(value: s.enabled, onChanged: onEnabled),
+              if (busy) const BusySpinner(),
+              LabeledSwitch(label: s.name, value: s.enabled, onChanged: busy ? null : onEnabled),
               PopupMenuButton<String>(
+                enabled: !busy,
                 icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
                 onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Edit')),
-                  PopupMenuItem(value: 'delete', child: Text('Remove')),
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
+                  PopupMenuItem(value: 'delete', child: Text(tr('Remove'), style: TextStyle(color: p.danger))),
                 ],
               ),
             ],
@@ -280,7 +295,7 @@ class _ServerCard extends StatelessWidget {
               style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
               onPressed: onToggleTools,
               icon: Icon(expanded ? LucideIcons.chevronUp : LucideIcons.chevronDown, size: 14),
-              label: Text(expanded ? 'Hide tools' : 'Show ${tools.length} tools'),
+              label: Text(expanded ? tr('Hide tools') : tr('Show {n} tools').replaceAll('{n}', '${tools.length}')),
             ),
             if (expanded)
               Padding(
@@ -344,9 +359,12 @@ class _Pair {
 
 /// Add/edit form for a server; pops the json map to save.
 class _McpSheet extends StatefulWidget {
-  const _McpSheet({this.existing, this.preset});
+  const _McpSheet({this.existing, this.preset, required this.onSave});
   final McpServer? existing;
   final _Preset? preset;
+
+  /// Saves the server; the sheet stays open with the error when it throws.
+  final Future<void> Function(Map<String, dynamic> server) onSave;
 
   @override
   State<_McpSheet> createState() => _McpSheetState();
@@ -362,6 +380,7 @@ class _McpSheetState extends State<_McpSheet> {
   final _env = <_Pair>[];
   final _headers = <_Pair>[];
   String? _problem;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -399,7 +418,8 @@ class _McpSheetState extends State<_McpSheet> {
       if (pair.key.text.trim().isNotEmpty) pair.key.text.trim(): pair.value.text,
   };
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving) return;
     final name = _name.text.trim();
     if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(name)) {
       setState(() => _problem = 'Name: letters, digits, - and _ only.');
@@ -414,14 +434,25 @@ class _McpSheetState extends State<_McpSheet> {
       setState(() => _problem = 'Enter the command to start the server.');
       return;
     }
-    Navigator.pop(context, <String, dynamic>{
-      'id': ?widget.existing?.id,
-      'name': name,
-      'type': _type,
-      'enabled': _enabled,
-      if (http) ...{'url': _url.text.trim(), 'headers': _collect(_headers)},
-      if (!http) ...{'command': _command.text.trim(), 'inContainer': _inContainer, 'env': _collect(_env)},
+    setState(() {
+      _saving = true;
+      _problem = null;
     });
+    try {
+      await widget.onSave(<String, dynamic>{
+        'id': ?widget.existing?.id,
+        'name': name,
+        'type': _type,
+        'enabled': _enabled,
+        if (http) ...{'url': _url.text.trim(), 'headers': _collect(_headers)},
+        if (!http) ...{'command': _command.text.trim(), 'inContainer': _inContainer, 'env': _collect(_env)},
+      });
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _problem = friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Widget _pairsEditor(List<_Pair> pairs, {required String title, required String keyHint, required String valueHint}) {
@@ -436,7 +467,7 @@ class _McpSheetState extends State<_McpSheet> {
             TextButton.icon(
               onPressed: () => setState(() => pairs.add(_Pair('', ''))),
               icon: const Icon(LucideIcons.plus, size: 14),
-              label: const Text('Add'),
+              label: Text(tr('Add')),
             ),
           ],
         ),
@@ -465,6 +496,7 @@ class _McpSheetState extends State<_McpSheet> {
                   ),
                 ),
                 IconButton(
+                  tooltip: tr('Remove'),
                   onPressed: () => setState(() {
                     pairs.remove(pair);
                     pair.dispose();
@@ -475,7 +507,7 @@ class _McpSheetState extends State<_McpSheet> {
             ),
           ),
         if (pairs.any((x) => x.value.text == '•••'))
-          Text('••• keeps the saved value unchanged.', style: text.bodySmall?.copyWith(color: p.muted)),
+          Text(tr('••• keeps the saved value unchanged.'), style: text.bodySmall?.copyWith(color: p.muted)),
       ],
     );
   }
@@ -492,19 +524,24 @@ class _McpSheetState extends State<_McpSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.existing == null ? 'Add MCP server' : 'Edit ${widget.existing!.name}', style: text.titleLarge),
+            Text(
+              widget.existing == null
+                  ? tr('Add MCP server')
+                  : tr('Edit {name}').replaceAll('{name}', widget.existing!.name),
+              style: text.titleLarge,
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: _name,
               autocorrect: false,
-              decoration: const InputDecoration(labelText: 'Name', hintText: 'memory'),
+              decoration: InputDecoration(labelText: tr('Name'), hintText: 'memory'),
             ),
             const SizedBox(height: 14),
             SegmentedButton<String>(
               showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: 'stdio', label: Text('Command'), icon: Icon(LucideIcons.squareTerminal, size: 16)),
-                ButtonSegment(value: 'http', label: Text('HTTP'), icon: Icon(LucideIcons.globe, size: 16)),
+              segments: [
+                ButtonSegment(value: 'stdio', label: Text(tr('Command')), icon: const Icon(LucideIcons.squareTerminal, size: 16)),
+                ButtonSegment(value: 'http', label: Text(tr('HTTP')), icon: const Icon(LucideIcons.globe, size: 16)),
               ],
               selected: {_type},
               onSelectionChanged: (s) => setState(() {
@@ -520,8 +557,8 @@ class _McpSheetState extends State<_McpSheet> {
                 minLines: 1,
                 maxLines: 3,
                 style: const TextStyle(fontFamily: mono, fontSize: 13),
-                decoration: const InputDecoration(
-                  labelText: 'Command line',
+                decoration: InputDecoration(
+                  labelText: tr('Command line'),
                   hintText: 'npx -y @modelcontextprotocol/server-memory',
                 ),
               ),
@@ -530,10 +567,10 @@ class _McpSheetState extends State<_McpSheet> {
                 contentPadding: EdgeInsets.zero,
                 value: _inContainer,
                 onChanged: (v) => setState(() => _inContainer = v),
-                title: Text('Run inside the Linux container (needed for npx/uvx)', style: text.bodyMedium),
+                title: Text(tr('Run inside the Linux container (needed for npx/uvx)'), style: text.bodyMedium),
               ),
               const SizedBox(height: 6),
-              _pairsEditor(_env, title: 'Environment variables', keyHint: 'API_KEY', valueHint: 'value'),
+              _pairsEditor(_env, title: tr('Environment variables'), keyHint: 'API_KEY', valueHint: 'value'),
             ] else ...[
               TextField(
                 controller: _url,
@@ -543,21 +580,21 @@ class _McpSheetState extends State<_McpSheet> {
                 decoration: const InputDecoration(labelText: 'URL', hintText: 'https://example.com/mcp'),
               ),
               const SizedBox(height: 14),
-              _pairsEditor(_headers, title: 'Headers', keyHint: 'Authorization', valueHint: 'Bearer …'),
+              _pairsEditor(_headers, title: tr('Headers'), keyHint: 'Authorization', valueHint: 'Bearer …'),
             ],
             const SizedBox(height: 6),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: _enabled,
               onChanged: (v) => setState(() => _enabled = v),
-              title: Text('Enabled', style: text.bodyMedium),
+              title: Text(tr('Enabled'), style: text.bodyMedium),
             ),
             if (_problem != null) ...[
               const SizedBox(height: 6),
               Text(_problem!, style: text.bodySmall?.copyWith(color: p.danger)),
             ],
             const SizedBox(height: 16),
-            PrimaryButton(label: 'Save', icon: LucideIcons.check, onPressed: _save),
+            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, busy: _saving, onPressed: _save),
           ],
         ),
       ),

@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'errors.dart';
+import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// Runs pi's login for [provider] and renders each step of its interaction
@@ -69,7 +72,8 @@ class _LoginSheetState extends State<_LoginSheet> {
         Navigator.of(context).pop(false);
       } else {
         setState(() {
-          error = message;
+          // A rejected key must not show the provider's raw HTTP reply (UX-03).
+          error = keyProblem(e);
           prompt = null;
         });
       }
@@ -105,7 +109,7 @@ class _LoginSheetState extends State<_LoginSheet> {
     setState(() {
       prompt = null;
       authId = null;
-      progress = value == null ? null : 'Checking…';
+      progress = value == null ? null : tr('Checking…');
     });
   }
 
@@ -132,12 +136,12 @@ class _LoginSheetState extends State<_LoginSheet> {
           children: [
             Text(widget.provider.name, style: text.titleLarge),
             const SizedBox(height: 4),
-            Text(isKey ? 'Connect with an API key' : 'Sign in with your account', style: text.bodySmall),
+            Text(isKey ? tr('Connect with an API key') : tr('Sign in with your account'), style: text.bodySmall),
             const SizedBox(height: 20),
             if (error != null) ...[
               Text(error!, style: text.bodyMedium?.copyWith(color: p.danger)),
               const SizedBox(height: 16),
-              FilledButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Close')),
+              FilledButton(onPressed: () => Navigator.of(context).pop(false), child: Text(tr('Close'))),
             ] else ...[
               if (link != null) ...[_linkPanel(context), const SizedBox(height: 16)],
               if (prompt != null)
@@ -145,10 +149,10 @@ class _LoginSheetState extends State<_LoginSheet> {
               else
                 Row(
                   children: [
-                    const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 1.8)),
+                    const BusySpinner(size: 14),
                     const SizedBox(width: 12),
-                    Expanded(child: Text(progress ?? 'Waiting for provider…', style: text.bodyMedium)),
-                    TextButton(onPressed: _cancel, child: const Text('Cancel')),
+                    Expanded(child: Text(progress ?? tr('Waiting for provider…'), style: text.bodyMedium)),
+                    TextButton(onPressed: _cancel, child: Text(tr('Cancel'))),
                   ],
                 ),
             ],
@@ -175,8 +179,8 @@ class _LoginSheetState extends State<_LoginSheet> {
         children: [
           Text(
             isDevice
-                ? 'Open the link and enter this code.'
-                : (e['instructions'] as String? ?? 'Open the link to continue in your browser.'),
+                ? tr('Open the link and enter this code.')
+                : (e['instructions'] as String? ?? tr('Open the link to continue in your browser.')),
             style: text.bodyMedium,
           ),
           if (isDevice) ...[
@@ -199,16 +203,16 @@ class _LoginSheetState extends State<_LoginSheet> {
               Expanded(
                 child: FilledButton(
                   onPressed: () => widget.agent.client.openUrl(url),
-                  child: const Text('Open browser'),
+                  child: Text(tr('Open browser')),
                 ),
               ),
               const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: isDevice ? e['userCode'] as String : url));
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Copied'))));
                 },
-                child: Text(isDevice ? 'Copy code' : 'Copy link'),
+                child: Text(isDevice ? tr('Copy code') : tr('Copy link')),
               ),
             ],
           ),
@@ -228,7 +232,7 @@ class _LoginSheetState extends State<_LoginSheet> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(pr['message'] as String? ?? 'Choose an option', style: text.bodyMedium),
+          Text(pr['message'] as String? ?? tr('Choose an option'), style: text.bodyMedium),
           const SizedBox(height: 8),
           for (final o in options)
             ListTile(
@@ -239,7 +243,7 @@ class _LoginSheetState extends State<_LoginSheet> {
               onTap: () => _answer(o['id'] as String),
             ),
           const SizedBox(height: 8),
-          TextButton(onPressed: _cancel, child: const Text('Cancel')),
+          TextButton(onPressed: _cancel, child: Text(tr('Cancel'))),
         ],
       );
     }
@@ -266,7 +270,7 @@ class _LoginSheetState extends State<_LoginSheet> {
                     onPressed: () => setState(() => obscure = !obscure),
                   )
                 : IconButton(
-                    tooltip: 'Paste',
+                    tooltip: tr('Paste'),
                     icon: const Icon(LucideIcons.clipboardPaste, size: 18),
                     onPressed: () async {
                       final data = await Clipboard.getData('text/plain');
@@ -279,12 +283,12 @@ class _LoginSheetState extends State<_LoginSheet> {
         Row(
           children: [
             Expanded(
-              child: OutlinedButton(onPressed: _cancel, child: const Text('Cancel')),
+              child: OutlinedButton(onPressed: _cancel, child: Text(tr('Cancel'))),
             ),
             const SizedBox(width: 8),
             Expanded(
               // Empty answers are valid for optional fields such as a local server's API key.
-              child: FilledButton(onPressed: () => _answer(field.text.trim()), child: const Text('Continue')),
+              child: FilledButton(onPressed: () => _answer(field.text.trim()), child: Text(tr('Continue'))),
             ),
           ],
         ),

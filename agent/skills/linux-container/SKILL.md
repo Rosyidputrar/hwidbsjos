@@ -1,11 +1,11 @@
 ---
 name: linux-container
-description: Install and run Linux software (Python, Node.js, compilers, databases, CLIs) on this Android phone through Rynex's Debian/Alpine container. Use whenever a task needs a package, runtime or tool that is not already on PATH, or when a command fails with "not found".
+description: Install and run Linux software (Python, Node.js, compilers, databases, CLIs) on this Android phone through Rynex AI Agent's Debian/Alpine container. Use whenever a task needs a package, runtime or tool that is not already on PATH, or when a command fails with "not found".
 ---
 
 # Linux container
 
-Rynex can run a real Linux userland (Debian or Alpine) through proot. The
+Rynex AI Agent can run a real Linux userland (Debian or Alpine) through proot. The
 home folder and workspace are mounted at the same paths inside, so files you
 create in either place are the same files.
 
@@ -21,7 +21,7 @@ command -v box && box -c 'cat /etc/os-release | head -1'   # container exists, y
   container. Install with `apt-get install -y <pkg>` or `apk add <pkg>`.
 - If only `box` works, run Linux commands as `box -c '<command>'`.
 - If `box` prints "not installed", tell the user to install it in
-  Rynex under Settings → Linux container. Do not try to install it yourself.
+  Rynex AI Agent under Settings → Linux container. Do not try to install it yourself.
 
 ## Installing things
 

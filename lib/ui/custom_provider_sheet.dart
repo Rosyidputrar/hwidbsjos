@@ -3,12 +3,29 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'errors.dart';
+import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
-/// Adds or edits one endpoint from models.json: any server speaking an API pi
+/// The API shapes the host can speak to a custom endpoint (agent/src/providers.ts APIS).
+const _apis = <(String, String)>[
+  ('openai-completions', 'OpenAI-compatible (Chat Completions)'),
+  ('openai-responses', 'OpenAI Responses'),
+  ('anthropic-messages', 'Anthropic Messages'),
+  ('google-generative-ai', 'Google Generative AI'),
+];
+
+String _slug(String name) => name
+    .trim()
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9-_]+'), '-')
+    .replaceAll(RegExp(r'^-+|-+$'), '');
+
+/// Adds or edits one custom endpoint: any server speaking an API the agent
 /// already implements, e.g. an OpenAI-compatible one on the local network.
 /// Resolves true once the endpoint was saved or removed.
-Future<bool?> showCustomProviderSheet(BuildContext context, AgentController agent, {CustomProviderInfo? provider}) {
+Future<bool?> showCustomProviderSheet(BuildContext context, AgentController agent, {CustomProvider? provider}) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -23,7 +40,7 @@ Future<bool?> showCustomProviderSheet(BuildContext context, AgentController agen
 class _CustomProviderSheet extends StatefulWidget {
   const _CustomProviderSheet({required this.agent, required this.provider});
   final AgentController agent;
-  final CustomProviderInfo? provider;
+  final CustomProvider? provider;
 
   @override
   State<_CustomProviderSheet> createState() => _CustomProviderSheetState();
@@ -36,41 +53,73 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
   final models = TextEditingController();
   final contextWindow = TextEditingController();
   final maxTokens = TextEditingController();
+  final priceIn = TextEditingController();
+  final priceOut = TextEditingController();
+
+  /// The prices the sheet opened with, to tell "cleared" from "never set".
+  String _priceInStart = '';
+  String _priceOutStart = '';
 
   String api = 'openai-completions';
-  List<CustomApiInfo> apis = const [];
   bool images = false;
   bool obscure = true;
   bool busy = false;
   bool fetching = false;
   String? error;
 
+  /// Full model entries by id, from the saved provider or the last fetch, so
+  /// saving keeps what the endpoint reported (context, reasoning, prices)
+  /// instead of flattening every model to a bare id.
+  final _known = <String, Map<String, dynamic>>{};
+
   @override
   void initState() {
     super.initState();
     final provider = widget.provider;
-    api = provider?.api ?? 'openai-completions';
-    images = provider?.images ?? false;
     if (provider != null) {
+      api = provider.api;
       name.text = provider.name;
       baseUrl.text = provider.baseUrl;
-      models.text = provider.modelIds.join('\n');
+      for (final m in provider.models) {
+        _known[m.id] = m.json;
+      }
+      models.text = [
+        for (final m in provider.models) (m.name == null || m.name == m.id) ? m.id : '${m.id} | ${m.name}',
+      ].join('\n');
+      images = provider.models.any((m) => m.vision);
+      // One price for the whole endpoint: the first model that has one shows it.
+      for (final m in provider.models) {
+        final cost = m.json['cost'];
+        if (cost is Map) {
+          priceIn.text = _plain(cost['input']);
+          priceOut.text = _plain(cost['output']);
+          break;
+        }
+      }
+      _priceInStart = priceIn.text;
+      _priceOutStart = priceOut.text;
     }
-    widget.agent.loadCustomApis().then((list) {
-      if (mounted) setState(() => apis = list);
-    }, onError: (_) {});
   }
+
+  /// 3 -> "3", 0.15 -> "0.15"; empty for nothing or zero.
+  static String _plain(Object? v) {
+    final n = v is num ? v.toDouble() : 0.0;
+    if (n <= 0) return '';
+    return n == n.roundToDouble() ? n.round().toString() : n.toString();
+  }
+
+  static double _price(String text) => double.tryParse(text.trim().replaceAll(',', '.')) ?? 0;
 
   @override
   void dispose() {
-    for (final c in [name, baseUrl, apiKey, models, contextWindow, maxTokens]) {
+    for (final c in [name, baseUrl, apiKey, models, contextWindow, maxTokens, priceIn, priceOut]) {
       c.dispose();
     }
     super.dispose();
   }
 
-  List<Map<String, String>> _parsedModels() {
-    final out = <Map<String, String>>[];
+  List<({String id, String? label})> _parsedModels() {
+    final out = <({String id, String? label})>[];
     final seen = <String>{};
     for (final line in models.text.split(RegExp(r'[\n,]+'))) {
       final trimmed = line.trim();
@@ -79,7 +128,7 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
       final id = parts.first.trim();
       if (id.isEmpty || !seen.add(id)) continue;
       final label = parts.length > 1 ? parts.sublist(1).join('|').trim() : '';
-      out.add({if (label.isNotEmpty) 'name': label, 'id': id});
+      out.add((id: id, label: label.isEmpty ? null : label));
     }
     return out;
   }
@@ -87,31 +136,52 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
   Future<void> _save() async {
     final parsed = _parsedModels();
     if (name.text.trim().isEmpty || baseUrl.text.trim().isEmpty || parsed.isEmpty) {
-      setState(() => error = 'Name, base URL and at least one model are required.');
+      setState(() => error = tr('Name, base URL and at least one model are required.'));
+      return;
+    }
+    final editing = widget.provider;
+    final id = editing?.id ?? _slug(name.text);
+    if (id.isEmpty) {
+      setState(() => error = tr('Give the provider a name with letters or numbers.'));
       return;
     }
     final window = int.tryParse(contextWindow.text.trim());
     final output = int.tryParse(maxTokens.text.trim());
+    // Prices apply to every model of the endpoint. Filled in: they replace what the models carried. Emptied after
+    // having been set: the prices go. Untouched and empty: a fetched catalog's own prices stay.
+    final pIn = _price(priceIn.text), pOut = _price(priceOut.text);
+    final hasPrice = pIn > 0 || pOut > 0;
+    final clearPrice = !hasPrice && (_priceInStart.isNotEmpty || _priceOutStart.isNotEmpty);
     setState(() {
       busy = true;
       error = null;
     });
     try {
       await widget.agent.saveCustomProvider({
-        // Round-tripping the id keeps an edit in place of the original entry.
-        if (widget.provider != null) 'id': widget.provider!.id,
+        'id': id,
+        if (editing != null) 'previousId': editing.id,
         'name': name.text.trim(),
         'baseUrl': baseUrl.text.trim(),
         'api': api,
         'apiKey': apiKey.text.trim(),
-        'images': images,
-        if (window != null && window > 0) 'contextWindow': window,
-        if (output != null && output > 0) 'maxTokens': output,
-        'models': parsed,
+        'models': [
+          for (final m in parsed)
+            {
+              ...?_known[m.id],
+              'id': m.id,
+              if (m.label != null) 'name': m.label,
+              // The two numbers are defaults for models that do not carry their own.
+              if (_known[m.id]?['contextWindow'] == null && window != null && window > 0) 'contextWindow': window,
+              if (_known[m.id]?['maxTokens'] == null && output != null && output > 0) 'maxTokens': output,
+              'input': images ? ['text', 'image'] : ['text'],
+              if (hasPrice) 'cost': {'input': pIn, 'output': pOut, 'cacheRead': 0, 'cacheWrite': 0},
+              if (clearPrice) 'cost': null,
+            },
+        ],
       });
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) setState(() => error = keyProblem(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -127,17 +197,20 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Remove ${widget.provider!.name}?', style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                tr('Remove {name}?').replaceAll('{name}', widget.provider!.name),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const SizedBox(height: 8),
               Text(
-                'Only this endpoint is deleted; its models disappear from the model list. Nothing else on the device changes.',
+                tr('Only this endpoint is deleted; its models disappear from the model list. Nothing else on the device changes.'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 20),
               FilledButton(
                 style: FilledButton.styleFrom(backgroundColor: context.palette.danger),
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Remove endpoint'),
+                child: Text(tr('Remove endpoint')),
               ),
             ],
           ),
@@ -150,7 +223,7 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
       await widget.agent.deleteCustomProvider(widget.provider!.id);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) setState(() => error = keyProblem(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -159,7 +232,7 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
   Future<void> _fetch() async {
     final url = baseUrl.text.trim();
     if (url.isEmpty) {
-      setState(() => error = 'Enter the base URL first.');
+      setState(() => error = tr('Enter the base URL first.'));
       return;
     }
     setState(() {
@@ -167,16 +240,26 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
       error = null;
     });
     try {
-      final found = await widget.agent.discoverModels(baseUrl: url, apiKey: apiKey.text.trim());
-      final lines = [
-        for (final m in found)
-          (m['name'] as String? ?? '').isEmpty || m['name'] == m['id'] ? '${m['id']}' : '${m['id']} | ${m['name']}',
-      ];
+      final found = await widget.agent.fetchProviderModels(
+        api: api,
+        baseUrl: url,
+        apiKey: apiKey.text.trim(),
+        providerId: widget.provider?.id,
+      );
+      for (final m in found) {
+        _known[m.id] = m.json;
+      }
       if (!mounted) return;
-      setState(() => models.text = lines.join('\n'));
-      if (lines.isEmpty) setState(() => error = 'The server listed no models.');
+      setState(() {
+        models.text = [
+          for (final m in found) (m.name == null || m.name == m.id) ? m.id : '${m.id} | ${m.name}',
+        ].join('\n');
+        // A fetched catalog that says which models see images sets the switch.
+        if (found.any((m) => m.vision)) images = true;
+      });
+      if (found.isEmpty) setState(() => error = tr('The server listed no models.'));
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) setState(() => error = keyProblem(e));
     } finally {
       if (mounted) setState(() => fetching = false);
     }
@@ -227,47 +310,41 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(editing ? 'Edit endpoint' : 'Add endpoint', style: text.titleLarge),
+              Text(editing ? tr('Edit endpoint') : tr('Add endpoint'), style: text.titleLarge),
               const SizedBox(height: 4),
               Text(
-                'Any OpenAI-compatible server: Ollama, LM Studio, vLLM, a proxy or a company gateway.',
+                tr('Any server speaking one of these APIs: Ollama, LM Studio, vLLM, a proxy or your own gateway.'),
                 style: text.bodySmall,
               ),
               const SizedBox(height: 16),
-              field(name, 'Name', hint: 'Home Ollama'),
-              field(baseUrl, 'Base URL', hint: 'http://192.168.1.20:11434/v1', simple: true, type: TextInputType.url),
+              field(name, tr('Name'), hint: tr('Home Ollama')),
+              field(baseUrl, tr('Base URL'), hint: 'http://192.168.1.20:11434/v1', simple: true, type: TextInputType.url),
               DropdownButtonFormField<String>(
-                initialValue: apis.any((a) => a.id == api) || apis.isEmpty ? api : null,
-                decoration: const InputDecoration(labelText: 'Protocol'),
+                initialValue: api,
+                isExpanded: true,
+                decoration: InputDecoration(labelText: tr('Protocol')),
                 items: [
-                  for (final a
-                      in apis.isEmpty
-                          ? [
-                              CustomApiInfo({'id': api, 'label': api}),
-                            ]
-                          : apis)
-                    DropdownMenuItem(
-                      value: a.id,
-                      child: Text(a.label, maxLines: 2, overflow: TextOverflow.ellipsis),
-                    ),
+                  for (final a in _apis)
+                    DropdownMenuItem(value: a.$1, child: Text(a.$2, maxLines: 2, overflow: TextOverflow.ellipsis)),
                 ],
-                onChanged: apis.isEmpty ? null : (v) => setState(() => api = v ?? api),
+                onChanged: (v) => setState(() => api = v ?? api),
               ),
               const SizedBox(height: 12),
               field(
                 apiKey,
-                'API key',
+                tr('API key'),
                 hint: editing && widget.provider?.hasKey == true
-                    ? 'Key saved earlier — leave empty to keep it'
-                    : 'Leave empty for a server that needs none',
+                    ? tr('Key saved earlier — leave empty to keep it')
+                    : tr('Leave empty for a server that needs none'),
                 secret: true,
+                simple: true,
               ),
               const SizedBox(height: 6),
-              Text('Stored on this device in models.json and never included in backups.', style: text.bodySmall),
+              Text(tr('Stored on this device only, and never included in backups.'), style: text.bodySmall),
               const SizedBox(height: 16),
               field(
                 models,
-                'Models (one per line: id or id | name)',
+                tr('Models (one per line: id or id | name)'),
                 hint: 'qwen2.5-coder:7b | Qwen Coder\nllama3.1:8b',
                 lines: 4,
                 simple: true,
@@ -277,34 +354,35 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: fetching ? null : _fetch,
-                  icon: fetching
-                      ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 1.8))
-                      : const Icon(LucideIcons.download, size: 16),
-                  label: Text(fetching ? 'Asking the server...' : 'Fetch models from the server'),
+                  icon: fetching ? const BusySpinner(size: 14) : const Icon(LucideIcons.download, size: 16),
+                  label: Text(fetching ? tr('Asking the server…') : tr('Fetch models from the server')),
                 ),
               ),
               const SizedBox(height: 6),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: field(
-                      contextWindow,
-                      'Context window',
-                      hint: '128000',
-                      simple: true,
-                      type: TextInputType.number,
-                    ),
-                  ),
+                  Expanded(child: field(contextWindow, tr('Context window'), hint: '128000', simple: true, type: TextInputType.number)),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: field(maxTokens, 'Max output', hint: '16384', simple: true, type: TextInputType.number),
-                  ),
+                  Expanded(child: field(maxTokens, tr('Max output'), hint: '16384', simple: true, type: TextInputType.number)),
                 ],
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: field(priceIn, tr('Input price (\$ / 1M tokens)'), hint: '0.15', simple: true, type: const TextInputType.numberWithOptions(decimal: true))),
+                  const SizedBox(width: 10),
+                  Expanded(child: field(priceOut, tr('Output price (\$ / 1M tokens)'), hint: '0.60', simple: true, type: const TextInputType.numberWithOptions(decimal: true))),
+                ],
+              ),
+              Text(
+                tr('Optional. With prices, chats show what they cost and the daily limit can stop spending. Without them the cost is unknown.'),
+                style: text.bodySmall,
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text('Image input', style: text.titleSmall),
-                subtitle: Text('Let attachments and screenshots reach this endpoint', style: text.bodySmall),
+                title: Text(tr('Image input'), style: text.titleSmall),
+                subtitle: Text(tr('Let attachments and screenshots reach this endpoint'), style: text.bodySmall),
                 value: images,
                 onChanged: (v) => setState(() => images = v),
               ),
@@ -315,14 +393,14 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
               const SizedBox(height: 14),
               FilledButton(
                 onPressed: busy ? null : _save,
-                child: busy ? const _Busy() : Text(editing ? 'Save' : 'Add endpoint'),
+                child: busy ? const _Busy() : Text(editing ? tr('Save') : tr('Add endpoint')),
               ),
               if (editing) ...[
                 const SizedBox(height: 8),
                 TextButton(
                   style: TextButton.styleFrom(foregroundColor: p.danger),
                   onPressed: busy ? null : _remove,
-                  child: const Text('Remove endpoint'),
+                  child: Text(tr('Remove endpoint')),
                 ),
               ],
             ],
@@ -337,6 +415,5 @@ class _Busy extends StatelessWidget {
   const _Busy();
 
   @override
-  Widget build(BuildContext context) =>
-      const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2));
+  Widget build(BuildContext context) => const BusySpinner(size: 16);
 }

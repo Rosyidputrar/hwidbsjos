@@ -4,31 +4,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Spacing scale. Every padding and gap in the UI is one of these.
-abstract final class Space {
-  static const double xs = 4;
-  static const double sm = 8;
-  static const double md = 12;
-  static const double lg = 16;
-  static const double xl = 20;
-  static const double xxl = 28;
+import 'predictive_back.dart';
 
-  /// Horizontal padding of every page.
-  static const double page = 20;
-}
-
-/// Corner radii. Small for chips and inner boxes, medium for cards and
-/// fields, large for sheets and hero panels.
-abstract final class Radii {
-  static const double sm = 10;
-  static const double md = 14;
-  static const double lg = 20;
-  static const double xl = 28;
-  static const double pill = 99;
-}
-
-/// Colour tokens. A neutral zinc canvas with hairline borders; the accent is
-/// the only strong colour and marks primary actions and the current state.
+/// Design tokens. Clean and light by default: white canvas, soft grey
+/// surfaces, near-black for primary actions, and colour only in accents and
+/// the mesh artwork on cards.
 @immutable
 class Palette extends ThemeExtension<Palette> {
   const Palette({
@@ -69,6 +49,45 @@ class Palette extends ThemeExtension<Palette> {
   /// The floating bottom navigation bar.
   final Color nav;
 
+  /// Text and icons on an accent fill: white or near-black, whichever reads better on the chosen
+  /// accent. White only works on the darker light-mode purple and blue; on the others it is 1.9-3:1.
+  Color get onAccent {
+    final l = accent.computeLuminance();
+    const ink = Color(0xFF111113);
+    return 1.05 / (l + 0.05) >= (l + 0.05) / (ink.computeLuminance() + 0.05) ? Colors.white : ink;
+  }
+
+  /// The accent as a colour for text (a link, "See all", a section's action): the accent itself where it reads at 4.5:1
+  /// on both the page and a card, and otherwise made darker (lighter in the dark theme) until it does. In the light theme
+  /// green, orange, pink and teal were 2.7 to 4.1:1 as text; their fills stay as chosen.
+  Color get accentText {
+    double worst(Color c) {
+      double ratio(Color b) {
+        final a = c.computeLuminance(), l = b.computeLuminance();
+        return (a > l ? a + 0.05 : l + 0.05) / (a > l ? l + 0.05 : a + 0.05);
+      }
+
+      final x = ratio(bg), y = ratio(surface);
+      return x < y ? x : y;
+    }
+
+    final darken = bg.computeLuminance() > 0.5;
+    var hsl = HSLColor.fromColor(accent);
+    var c = accent;
+    for (var i = 0; i < 60 && worst(c) < 4.5; i++) {
+      hsl = hsl.withLightness((hsl.lightness + (darken ? -0.01 : 0.01)).clamp(0.0, 1.0));
+      c = hsl.toColor();
+    }
+    return c;
+  }
+
+  /// Text and icons on a danger fill, chosen the same way: white was 2.9:1 on the dark theme's light red.
+  Color get onDanger {
+    final l = danger.computeLuminance();
+    const ink = Color(0xFF111113);
+    return 1.05 / (l + 0.05) >= (l + 0.05) / (ink.computeLuminance() + 0.05) ? Colors.white : ink;
+  }
+
   static const light = Palette(
     bg: Color(0xFFF6F6F8),
     surface: Color(0xFFFFFFFF),
@@ -78,12 +97,14 @@ class Palette extends ThemeExtension<Palette> {
     muted: Color(0xFF64646E),
     faint: Color(0xFFA1A1AA),
     inverse: Color(0xFFFFFFFF),
-    danger: Color(0xFFE5484D),
-    success: Color(0xFF2F9E6B),
-    warning: Color(0xFFE5700F),
+    // Rynex's light red/green/orange, darkened one step: as shipped they read
+    // 2.9-3.6:1 on the page, under the 4.5:1 small-text bar the app holds.
+    danger: Color(0xFFC03C41),
+    success: Color(0xFF247A52),
+    warning: Color(0xFFA9530B),
     accent: Color(0xFF3F8F1C),
     accentAlt: Color(0xFF3E63DD),
-    glass: Color(0xF2FFFFFF),
+    glass: Color(0xEBFFFFFF),
     nav: Color(0xFFFFFFFF),
   );
 
@@ -101,13 +122,9 @@ class Palette extends ThemeExtension<Palette> {
     warning: Color(0xFFFF8B3E),
     accent: Color(0xFFA3E635),
     accentAlt: Color(0xFF7B93FF),
-    glass: Color(0xF2131316),
+    glass: Color(0xE6131316),
     nav: Color(0xFF131316),
   );
-
-  /// Text/icon colour that reads on a filled [accent] background: white on the
-  /// deeper light-theme accents, near-black on the brighter dark-theme ones.
-  Color get onAccent => accent.computeLuminance() > 0.22 ? const Color(0xFF0B0B10) : Colors.white;
 
   @override
   Palette copyWith({Color? accent}) => accent == null
@@ -141,6 +158,9 @@ extension PaletteX on BuildContext {
 const mono = 'GeistMono';
 
 /// Accent colours the user can pick, as (light, dark) pairs. The first is the default Rynex lime.
+/// What each accent is called, in [accentChoices]' order (read out by a screen reader).
+const accentNames = ['Lime', 'Blue', 'Green', 'Orange', 'Pink', 'Teal', 'Violet', 'Indigo'];
+
 const accentChoices = <(Color, Color)>[
   (Color(0xFF3F8F1C), Color(0xFFA3E635)),
   (Color(0xFF3E63DD), Color(0xFF7B93FF)),
@@ -149,7 +169,7 @@ const accentChoices = <(Color, Color)>[
   (Color(0xFFD6409F), Color(0xFFF07CC0)),
   (Color(0xFF12A594), Color(0xFF3BD3C0)),
   // Appended, so saved indexes keep pointing at the same colours.
-  (Color(0xFF7C5CFC), Color(0xFFA48CFF)),
+  (Color(0xFF7656F2), Color(0xFFA48CFF)),
   (Color(0xFF5B5BD6), Color(0xFF8B8DFF)),
 ];
 
@@ -166,11 +186,25 @@ class Appearance extends ValueNotifier<ThemeMode> {
       accent = ((saved['accent'] as num?)?.toInt() ?? 0).clamp(0, accentChoices.length - 1);
       language = saved['language'] as String? ?? 'en';
       appLock = saved['appLock'] == true;
+      terminalFontSize = (saved['terminalFontSize'] as num?)?.toDouble() ?? terminalFontSize;
+      // A modifiable copy: older ui.json files have no entry, and a const map can't be written to.
+      deployTargets = {
+        for (final e in (saved['deployTargets'] as Map? ?? {}).entries)
+          if (e.key is String && e.value is String) e.key as String: e.value as String,
+      };
+      favoriteModels = [
+        for (final e in (saved['favoriteModels'] as List? ?? []))
+          if (e is String) e,
+      ];
+      trustedDomains = [
+        for (final e in (saved['trustedDomains'] as List? ?? []))
+          if (e is String && e.isNotEmpty) e,
+      ];
     } catch (_) {}
   }
 
   static final instance = Appearance._();
-  static final _file = File('/data/data/com.rynex.agent/files/ui.json');
+  static final _file = File('/data/data/com.airynex.agent/files/ui.json');
 
   bool onboarded = false;
   double textScale = 1;
@@ -179,12 +213,23 @@ class Appearance extends ValueNotifier<ThemeMode> {
   String language = 'en';
   bool appLock = false;
 
+  /// Pinch or A−/A+ in the terminal.
+  double terminalFontSize = 12.5;
+
   void set(ThemeMode mode) {
     value = mode;
     _save();
   }
 
-  void update({double? textScale, bool? compact, int? accent, String? language, bool? appLock}) {
+  void update({
+    double? textScale,
+    bool? compact,
+    int? accent,
+    String? language,
+    bool? appLock,
+    double? terminalFontSize,
+  }) {
+    this.terminalFontSize = terminalFontSize ?? this.terminalFontSize;
     this.textScale = textScale ?? this.textScale;
     this.compact = compact ?? this.compact;
     this.accent = accent ?? this.accent;
@@ -192,6 +237,58 @@ class Appearance extends ValueNotifier<ThemeMode> {
     this.appLock = appLock ?? this.appLock;
     _save();
     notifyListeners();
+  }
+
+  /// Saved without notifying: only the terminal reads it, so the rest of the app needn't rebuild.
+  void setTerminalFontSize(double size) {
+    terminalFontSize = size;
+    _save();
+  }
+
+  /// Model keys ('provider/id') starred in the model picker, in starring order.
+  /// Keys whose model left the catalog stay stored, so they reappear if it returns.
+  List<String> favoriteModels = [];
+
+  bool isFavorite(String key) => favoriteModels.contains(key);
+
+  /// Hosts whose links open without asking first ("Always trust this domain").
+  List<String> trustedDomains = [];
+
+  bool isTrusted(String host) => trustedDomains.contains(host.toLowerCase());
+
+  void trustDomain(String host) {
+    final h = host.toLowerCase();
+    if (h.isEmpty || trustedDomains.contains(h)) return;
+    trustedDomains = [...trustedDomains, h]..sort();
+    _save();
+    notifyListeners();
+  }
+
+  void untrustDomain(String host) {
+    trustedDomains = trustedDomains.where((d) => d != host.toLowerCase()).toList();
+    _save();
+    notifyListeners();
+  }
+
+  void toggleFavorite(String key) {
+    favoriteModels = List.of(favoriteModels);
+    if (!favoriteModels.remove(key)) favoriteModels.add(key);
+    _save();
+    notifyListeners();
+  }
+
+  /// The deploy target last used per project folder, so the deploy sheet opens on it.
+  Map<String, String> deployTargets = {};
+
+  void setDeployTarget(String project, String target) {
+    deployTargets = Map.of(deployTargets);
+    deployTargets
+      ..remove(project)
+      ..[project] = target;
+    while (deployTargets.length > 50) {
+      deployTargets.remove(deployTargets.keys.first);
+    }
+    _save();
   }
 
   void finishOnboarding() {
@@ -211,10 +308,63 @@ class Appearance extends ValueNotifier<ThemeMode> {
           'accent': accent,
           'language': language,
           'appLock': appLock,
+          'terminalFontSize': terminalFontSize,
+          'deployTargets': deployTargets,
+          'favoriteModels': favoriteModels,
+          'trustedDomains': trustedDomains,
         }),
       );
     } catch (_) {}
   }
+}
+
+/// Corner-radius scale. Pick by what the shape is, not by a pixel value:
+/// [xs] hairline bars and code chips, [sm] small controls and tags, [md]
+/// tiles, bubbles and list highlights, [lg] buttons and fields, [xl] cards,
+/// [sheet] bottom sheets and dialogs, [pill] anything fully rounded.
+class Radii {
+  const Radii._();
+
+  static const double xs = 6;
+  static const double sm = 10;
+  static const double md = 14;
+  static const double lg = 20;
+  static const double xl = 28;
+  static const double sheet = 28;
+  static const double pill = 99;
+}
+
+/// Spacing scale. Every padding and gap in the UI is one of these.
+abstract final class Space {
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
+  static const double lg = 16;
+  static const double xl = 20;
+  static const double xxl = 28;
+
+  /// Horizontal padding of every page.
+  static const double page = 20;
+}
+
+/// Motion shared by the app's animations, so they feel like one family: short, easing out.
+/// [of] honours Android's "Remove animations" setting.
+class Motion {
+  const Motion._();
+
+  /// State changes on one control (a chevron turning, a pill changing colour).
+  static const fast = Duration(milliseconds: 150);
+
+  /// Things appearing, resizing or swapping (a card sliding in, a section opening).
+  static const normal = Duration(milliseconds: 240);
+
+  static const curve = Curves.easeOutCubic;
+
+  /// True when the user asked the system to remove animations.
+  static bool reduced(BuildContext context) => MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+  /// [d], or no time at all when animations are off.
+  static Duration of(BuildContext context, Duration d) => reduced(context) ? Duration.zero : d;
 }
 
 ThemeData buildTheme(Brightness brightness) {
@@ -273,7 +423,7 @@ ThemeData buildTheme(Brightness brightness) {
     onSecondaryContainer: p.text,
   );
 
-  final overlay = brightness == Brightness.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light;
+  final overlay = systemOverlayFor(brightness, p);
   final radius = BorderRadius.circular(Radii.md);
   final ink = light ? const Color(0xFF18181B) : p.raised;
 
@@ -299,7 +449,7 @@ ThemeData buildTheme(Brightness brightness) {
       titleTextStyle: text.titleMedium,
       iconTheme: IconThemeData(color: p.text, size: 20),
       actionsIconTheme: IconThemeData(color: p.text, size: 20),
-      systemOverlayStyle: overlay.copyWith(statusBarColor: Colors.transparent, systemNavigationBarColor: p.nav),
+      systemOverlayStyle: overlay,
     ),
     dividerTheme: DividerThemeData(color: p.border, thickness: 1, space: 1),
     iconTheme: IconThemeData(color: p.text, size: 20),
@@ -349,7 +499,7 @@ ThemeData buildTheme(Brightness brightness) {
       fillColor: p.surface,
       hintStyle: text.bodyMedium!.copyWith(color: p.faint),
       labelStyle: text.bodyMedium!.copyWith(color: p.muted),
-      floatingLabelStyle: text.bodyMedium!.copyWith(color: p.accent),
+      floatingLabelStyle: text.bodyMedium!.copyWith(color: p.accentText),
       helperStyle: text.bodySmall,
       prefixIconColor: p.faint,
       contentPadding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: 14),
@@ -385,7 +535,7 @@ ThemeData buildTheme(Brightness brightness) {
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: p.accent,
+        foregroundColor: p.accentText,
         textStyle: text.labelLarge,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.sm)),
       ),
@@ -396,7 +546,7 @@ ThemeData buildTheme(Brightness brightness) {
       side: BorderSide(color: p.border),
       shape: const StadiumBorder(),
       labelStyle: text.labelMedium!.copyWith(color: p.text),
-      secondaryLabelStyle: text.labelMedium!.copyWith(color: p.accent),
+      secondaryLabelStyle: text.labelMedium!.copyWith(color: p.accentText),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       showCheckmark: false,
     ),
@@ -468,36 +618,37 @@ ThemeData buildTheme(Brightness brightness) {
   );
 }
 
-/// Pages glide in: a short slide from the right with a fade, while the page
-/// underneath eases back and dims a little.
-class SmoothPageTransitions extends PageTransitionsBuilder {
-  const SmoothPageTransitions();
-
-  @override
-  Duration get transitionDuration => const Duration(milliseconds: 380);
-
-  @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 300);
-
-  @override
-  Widget buildTransitions<T>(
-    PageRoute<T> route,
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    final enter = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-    final under = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic);
-    return SlideTransition(
-      position: Tween(begin: Offset.zero, end: const Offset(-0.08, 0)).animate(under),
-      child: FadeTransition(
-        opacity: Tween(begin: 1.0, end: 0.6).animate(under),
-        child: SlideTransition(
-          position: Tween(begin: const Offset(0.18, 0), end: Offset.zero).animate(enter),
-          child: FadeTransition(opacity: enter, child: child),
-        ),
-      ),
+/// The status and navigation bars for a theme: dark icons on the light theme, light ones on the dark, over the app's own
+/// background. Set for every screen (main.dart), not only those with an AppBar: Home, onboarding and the boot screens
+/// have none, so a phone in dark mode could show white icons on the light Home.
+SystemUiOverlayStyle systemOverlayFor(Brightness brightness, Palette p) =>
+    (brightness == Brightness.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light).copyWith(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: p.bg,
     );
+
+/// The contrast ratio of two colours (WCAG): 1 to 21.
+double contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance(), lb = b.computeLuminance();
+  return (la > lb ? la + 0.05 : lb + 0.05) / (la > lb ? lb + 0.05 : la + 0.05);
+}
+
+/// Icons and text on a fill of [fill]: white or near-black, whichever reads better (white on amber, teal, orange or sky
+/// was 2.2 to 2.8:1).
+Color onFill(Color fill) {
+  const ink = Color(0xFF111113);
+  return contrastRatio(Colors.white, fill) >= contrastRatio(ink, fill) ? Colors.white : ink;
+}
+
+/// [fg] as a colour for text on [bg]: itself when it reads at [target]:1, otherwise darkened (or lightened on a dark
+/// background), same hue, until it does.
+Color readableOn(Color fg, Color bg, {double target = 4.5}) {
+  final darken = bg.computeLuminance() > 0.5;
+  var hsl = HSLColor.fromColor(fg);
+  var c = fg;
+  for (var i = 0; i < 60 && contrastRatio(c, bg) < target; i++) {
+    hsl = hsl.withLightness((hsl.lightness + (darken ? -0.01 : 0.01)).clamp(0.0, 1.0));
+    c = hsl.toColor();
   }
+  return c;
 }

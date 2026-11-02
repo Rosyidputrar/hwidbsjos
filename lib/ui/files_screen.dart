@@ -1,17 +1,20 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
 import 'db_screen.dart';
 import 'editor_screen.dart';
+import 'errors.dart';
 import 'illustration.dart';
-import 'preview_screen.dart';
+import 'kit.dart';
+import 'preview_open.dart';
 import 'search_screen.dart';
+import 'i18n.dart';
 import 'theme.dart';
+import 'transfer_dialog.dart';
 
 const _imageExts = {'png', 'jpg', 'jpeg', 'gif', 'webp'};
 const _htmlExts = {'html', 'htm', 'svg'};
@@ -69,16 +72,7 @@ String _formatSize(int bytes) {
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
 }
 
-String _formatTime(DateTime t) {
-  final now = DateTime.now();
-  final diff = now.difference(t);
-  if (diff.inMinutes < 1) return 'just now';
-  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-  if (diff.inDays < 1 && now.day == t.day) return '${diff.inHours}h ago';
-  if (diff.inDays < 7) return '${diff.inDays == 0 ? 1 : diff.inDays}d ago';
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${t.year}-${two(t.month)}-${two(t.day)}';
-}
+String _formatTime(DateTime t) => formatAgo(t);
 
 IconData _iconFor(String name, bool isDir) {
   if (isDir) return LucideIcons.folder;
@@ -99,12 +93,45 @@ IconData _iconFor(String name, bool isDir) {
 }
 
 /// One listed directory entry with its stat, captured once per refresh so sorting and rendering stay cheap.
-class _Entry {
-  _Entry(this.path, this.isDir, this.stat);
-  final String path;
-  final bool isDir;
-  final FileStat stat;
-  String get name => _baseName(path);
+typedef _Entry = FsEntry;
+
+/// How a folder's entries are ordered.
+enum FileSort { name, recent, largest, type }
+
+/// What kind of file an entry is, for the filter chips.
+enum FileKind { folder, code, image, document, data, archive, media, other }
+
+FileKind fileKind(FsEntry e) {
+  if (e.isDir) return FileKind.folder;
+  final ext = _extOf(e.name);
+  if (_imageExts.contains(ext) || const {'svg', 'ico', 'bmp', 'heic'}.contains(ext)) return FileKind.image;
+  if (_codeExts.contains(ext) || _configExts.contains(ext) || ext == 'json' || ext == 'jsonc') return FileKind.code;
+  if (const {'md', 'txt', 'rst', 'log', 'pdf', 'doc', 'docx', 'rtf', 'odt'}.contains(ext)) return FileKind.document;
+  if (_dbExts.contains(ext) || _sheetExts.contains(ext) || const {'parquet', 'ndjson', 'jsonl'}.contains(ext)) {
+    return FileKind.data;
+  }
+  if (_archiveExts.contains(ext)) return FileKind.archive;
+  if (_videoExts.contains(ext) || _audioExts.contains(ext)) return FileKind.media;
+  return FileKind.other;
+}
+
+/// [entries] in [sort]'s order: names A to Z, the most recently edited first, the largest first, or by type
+/// (extension) then name. [foldersFirst] keeps folders above files whatever the order; ties go by name.
+List<FsEntry> sortEntries(List<FsEntry> entries, FileSort sort, {bool foldersFirst = true}) {
+  int byName(FsEntry a, FsEntry b) => a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  final out = [...entries];
+  out.sort((a, b) {
+    if (foldersFirst && a.isDir != b.isDir) return a.isDir ? -1 : 1;
+    final c = switch (sort) {
+      FileSort.name => 0,
+      FileSort.recent => b.modified.compareTo(a.modified),
+      // A folder's own size says nothing about what is in it: folders go after files, by name.
+      FileSort.largest => a.isDir != b.isDir ? (a.isDir ? 1 : -1) : (a.isDir ? 0 : b.size.compareTo(a.size)),
+      FileSort.type => _extOf(a.name).compareTo(_extOf(b.name)),
+    };
+    return c != 0 ? c : byName(a, b);
+  });
+  return out;
 }
 
 /// Browses the project on disk so the user can look at, open and tidy files without asking the agent.
@@ -119,7 +146,7 @@ class FilesScreen extends StatefulWidget {
   State<FilesScreen> createState() => _FilesScreenState();
 }
 
-class _FilesScreenState extends State<FilesScreen> {
+class _FilesScreenState extends State<FilesScreen> with BusyActions {
   late final String _root = _normalize(widget.root ?? widget.agent.cwd);
   late String _dir = _root;
   List<_Entry> _entries = [];
@@ -127,7 +154,20 @@ class _FilesScreenState extends State<FilesScreen> {
   bool _showHidden = false;
   String? _error;
 
+  /// The order and the kind shown, kept while the app runs: the order stays as chosen from folder to folder, the kind
+  /// goes back to everything in a new folder.
+  static FileSort _sort = FileSort.name;
+  static bool _foldersFirst = true;
+  FileKind? _kind;
+
+  /// Counts listings, so one that comes back after the user moved on (a slow folder, a slow server) is dropped instead
+  /// of showing the old folder's entries under the new folder's title.
+  int _listing = 0;
+
   AgentController get agent => widget.agent;
+
+  /// This phone's files, or the server's (server_agent.md, phase 5).
+  AgentFs get fs => agent.fs;
 
   static String _normalize(String p) => p.length > 1 && p.endsWith('/') ? p.substring(0, p.length - 1) : p;
 
@@ -138,37 +178,36 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _load() async {
+    final dir = _dir;
+    final listing = ++_listing;
+    if (!_loading) setState(() => _loading = true);
     try {
-      final items = <_Entry>[];
-      await for (final e in Directory(_dir).list(followLinks: false)) {
-        FileStat stat = await e.stat();
-        if (e is Link) stat = await FileStat.stat(e.path);
-        items.add(_Entry(e.path, stat.type == FileSystemEntityType.directory, stat));
-      }
-      items.sort((a, b) {
-        if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
-      if (!mounted) return;
+      final items = await fs.list(dir);
+      if (!mounted || listing != _listing) return;
       setState(() {
         _entries = items;
         _error = null;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || listing != _listing) return;
       setState(() {
         _entries = [];
-        _error = '$e';
+        _error = friendlyError(e);
         _loading = false;
       });
     }
   }
 
+  /// Opens [dir]. The old folder's entries go at once: until the new listing arrives there is nothing to act on.
   void _go(String dir) {
+    if (busy()) return;
     setState(() {
       _dir = _normalize(dir);
+      _entries = [];
+      _error = null;
       _loading = true;
+      _kind = null;
     });
     _load();
   }
@@ -186,7 +225,11 @@ class _FilesScreenState extends State<FilesScreen> {
     final ext = _extOf(e.name);
     final nav = Navigator.of(context);
     if (_imageExts.contains(ext)) {
-      await nav.push(MaterialPageRoute(builder: (_) => _ImageViewer(path: e.path)));
+      await nav.push(
+        MaterialPageRoute(
+          builder: (_) => _ImageViewer(fs: fs, path: e.path),
+        ),
+      );
     } else if (_dbExts.contains(ext)) {
       await nav.push(
         MaterialPageRoute(
@@ -206,7 +249,7 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _openHtml(_Entry e) async {
-    final choice = await showModalBottomSheet<String>(
+    final choice = await showAppSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
@@ -214,12 +257,12 @@ class _FilesScreenState extends State<FilesScreen> {
           children: [
             ListTile(
               leading: const Icon(LucideIcons.eye),
-              title: const Text('Preview'),
+              title: Text(tr('Preview')),
               onTap: () => Navigator.pop(ctx, 'preview'),
             ),
             ListTile(
               leading: const Icon(LucideIcons.pencil),
-              title: const Text('Edit'),
+              title: Text(tr('Edit')),
               onTap: () => Navigator.pop(ctx, 'edit'),
             ),
           ],
@@ -228,12 +271,7 @@ class _FilesScreenState extends State<FilesScreen> {
     );
     if (!mounted || choice == null) return;
     if (choice == 'preview') {
-      await HtmlPreviewScreen.open(
-        context,
-        title: e.name,
-        source: () => File(e.path).readAsStringSync(),
-        baseDir: _dirName(e.path),
-      );
+      await openFilePreview(context, agent, title: e.name, path: e.path);
     } else {
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -255,11 +293,11 @@ class _FilesScreenState extends State<FilesScreen> {
           controller: controller,
           autofocus: true,
           style: const TextStyle(fontFamily: mono),
-          decoration: const InputDecoration(hintText: 'name'),
+          decoration: InputDecoration(hintText: tr('name')),
           onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
           TextButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: Text(action)),
         ],
       ),
@@ -269,59 +307,67 @@ class _FilesScreenState extends State<FilesScreen> {
   String? _validName(String? name) {
     if (name == null || name.isEmpty) return null;
     if (name == '.' || name == '..' || name.contains('\u0000')) {
-      _snack('Invalid name');
+      _snack(tr('Invalid name'));
       return null;
     }
     return name;
   }
 
   Future<void> _newFile() async {
-    final name = _validName(await _prompt(title: 'New file', action: 'Create'));
+    final name = _validName(await _prompt(title: tr('New file'), action: tr('Create')));
     if (name == null) return;
     final path = _join(_dir, name);
     try {
-      if (await FileSystemEntity.type(path) != FileSystemEntityType.notFound) return _snack('$name already exists');
-      final file = await File(path).create(recursive: true);
-      await _load();
-      if (!mounted) return;
+      final created = await runBusy(path, () async {
+        if (await fs.exists(path)) return false;
+        await fs.createFile(path);
+        await _load();
+        return true;
+      });
+      if (created == false) return _snack(tr('{name} already exists').replaceAll('{name}', name));
+      if (created == null || !mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => EditorScreen(agent: agent, path: file.path),
+          builder: (_) => EditorScreen(agent: agent, path: path),
         ),
       );
       if (mounted) _load();
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     }
   }
 
   Future<void> _newFolder() async {
-    final name = _validName(await _prompt(title: 'New folder', action: 'Create'));
+    final name = _validName(await _prompt(title: tr('New folder'), action: tr('Create')));
     if (name == null) return;
     final path = _join(_dir, name);
     try {
-      if (await FileSystemEntity.type(path) != FileSystemEntityType.notFound) return _snack('$name already exists');
-      await Directory(path).create(recursive: true);
-      await _load();
+      final created = await runBusy(path, () async {
+        if (await fs.exists(path)) return false;
+        await fs.mkdir(path);
+        await _load();
+        return true;
+      });
+      if (created == false) _snack(tr('{name} already exists').replaceAll('{name}', name));
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     }
   }
 
   Future<void> _rename(_Entry e) async {
-    final name = _validName(await _prompt(title: 'Rename', initial: e.name, action: 'Rename'));
+    final name = _validName(await _prompt(title: tr('Rename'), initial: e.name, action: tr('Rename')));
     if (name == null || name == e.name) return;
     final target = _join(_dirName(e.path), name);
     try {
-      if (await FileSystemEntity.type(target) != FileSystemEntityType.notFound) return _snack('$name already exists');
-      if (e.isDir) {
-        await Directory(e.path).rename(target);
-      } else {
-        await File(e.path).rename(target);
-      }
-      await _load();
+      final renamed = await runBusy(e.path, () async {
+        if (await fs.exists(target)) return false;
+        await fs.rename(e.path, target);
+        await _load();
+        return true;
+      });
+      if (renamed == false) _snack(tr('{name} already exists').replaceAll('{name}', name));
     } catch (err) {
-      _snack('$err');
+      _snack(friendlyError(err));
     }
   }
 
@@ -330,34 +376,17 @@ class _FilesScreenState extends State<FilesScreen> {
     final ext = e.isDir ? '' : _extOf(e.name);
     final stem = ext.isEmpty ? e.name : e.name.substring(0, e.name.length - ext.length - 1);
     String candidate(int n) => '$stem copy${n > 1 ? ' $n' : ''}${ext.isEmpty ? '' : '.$ext'}';
-    var n = 1;
-    while (await FileSystemEntity.type(_join(dir, candidate(n))) != FileSystemEntityType.notFound) {
-      n++;
-    }
-    final target = _join(dir, candidate(n));
     try {
-      if (e.isDir) {
-        await _copyDir(Directory(e.path), Directory(target));
-      } else {
-        await File(e.path).copy(target);
-      }
-      await _load();
+      await runBusy(e.path, () async {
+        var n = 1;
+        while (await fs.exists(_join(dir, candidate(n)))) {
+          n++;
+        }
+        await fs.copy(e.path, _join(dir, candidate(n)));
+        await _load();
+      });
     } catch (err) {
-      _snack('$err');
-    }
-  }
-
-  Future<void> _copyDir(Directory from, Directory to) async {
-    await to.create(recursive: true);
-    await for (final child in from.list(followLinks: false)) {
-      final dest = _join(to.path, _baseName(child.path));
-      if (child is Directory) {
-        await _copyDir(child, Directory(dest));
-      } else if (child is File) {
-        await child.copy(dest);
-      } else if (child is Link) {
-        await Link(dest).create(await child.target());
-      }
+      _snack(friendlyError(err));
     }
   }
 
@@ -365,39 +394,41 @@ class _FilesScreenState extends State<FilesScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete ${e.isDir ? 'folder' : 'file'}?'),
+        title: Text(e.isDir ? tr('Delete folder?') : tr('Delete file?')),
         content: Text(
-          e.isDir ? '"${e.name}" and everything inside it will be deleted.' : '"${e.name}" will be deleted.',
+          tr(e.isDir ? '"{name}" and everything inside it will be deleted.' : '"{name}" will be deleted.')
+              .replaceAll('{name}', e.name),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('Cancel'))),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: context.palette.danger),
-            child: const Text('Delete'),
+            child: Text(tr('Delete')),
           ),
         ],
       ),
     );
     if (ok != true) return;
     try {
-      if (e.isDir) {
-        await Directory(e.path).delete(recursive: true);
-      } else {
-        await File(e.path).delete();
-      }
-      await _load();
+      await runBusy(e.path, () async {
+        await fs.delete(e.path, recursive: e.isDir);
+        await _load();
+      });
     } catch (err) {
-      _snack('$err');
+      _snack(friendlyError(err));
     }
   }
 
   Future<void> _copyPath(_Entry e) async {
     await Clipboard.setData(ClipboardData(text: e.path));
-    if (mounted) _snack('Path copied');
+    if (mounted) _snack(tr('Path copied'));
   }
 
   Future<void> _entryAction(_Entry e, String action) async {
+    // One change at a time, and only to what this folder lists now: a menu opened on an entry of a folder the user has
+    // since left must not rename or delete it.
+    if (busy() || _dirName(e.path) != _dir) return;
     switch (action) {
       case 'open':
         await _open(e);
@@ -416,15 +447,27 @@ class _FilesScreenState extends State<FilesScreen> {
       case 'copy':
         await _copyPath(e);
       case 'share':
-        await agent.client.shareFile(e.path);
+        final local = await _fetch(e);
+        if (local != null) await agent.client.shareFile(local);
       case 'download':
+        final local = await _fetch(e);
+        if (local == null) return;
         try {
-          _snack('Saved to ${await agent.client.saveToDownloads(e.path)}');
+          _snack('${tr('Saved to')} ${await agent.client.saveToDownloads(local)}');
         } catch (err) {
-          _snack('$err');
+          _snack(friendlyError(err));
         }
     }
   }
+
+  /// The file on this phone: itself, or (with a server agent) a copy fetched with a progress dialog. Null if stopped.
+  Future<String?> _fetch(_Entry e) => runTransfer<String>(
+    context,
+    connection: widget.agent.client.connection,
+    title: '${tr('Downloading')} ${e.name}',
+    show: !fs.isLocal,
+    task: (h) => fs.toPhoneFile(e.path, onProgress: h.onProgress, cancel: h.cancel),
+  );
 
   /// Copies files picked from the phone into the folder being viewed.
   Future<void> _import() async {
@@ -433,27 +476,39 @@ class _FilesScreenState extends State<FilesScreen> {
     for (final f in picked) {
       if (f.path == null) continue;
       var target = _join(_dir, f.name);
-      if (File(target).existsSync()) {
+      if (await fs.exists(target)) {
         final dot = f.name.lastIndexOf('.');
         final stem = dot > 0 ? f.name.substring(0, dot) : f.name;
         final ext = dot > 0 ? f.name.substring(dot) : '';
         var n = 2;
-        while (File(target).existsSync()) {
+        while (await fs.exists(target)) {
           target = _join(_dir, '$stem ($n)$ext');
           n++;
         }
       }
-      await File(f.path!).copy(target);
+      if (!mounted) return;
+      final ok = await runTransfer<bool>(
+        context,
+        connection: widget.agent.client.connection,
+        title: '${tr('Uploading')} ${f.name}',
+        show: !fs.isLocal,
+        task: (h) async {
+          await fs.upload(f.path!, target, onProgress: h.onProgress, cancel: h.cancel);
+          return true;
+        },
+      );
+      if (ok != true) break; // stopped, or failed (already said so): the rest would only fail the same way
       count++;
     }
     if (count == 0) return;
-    _snack('Imported $count file${count == 1 ? '' : 's'}');
+    _snack(count == 1 ? tr('Imported 1 file') : tr('Imported {n} files').replaceAll('{n}', '$count'));
     await _load();
   }
 
   Future<void> _showEntrySheet(_Entry e) async {
+    if (busy()) return;
     final p = context.palette;
-    final action = await showModalBottomSheet<String>(
+    final action = await showAppSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
@@ -508,33 +563,34 @@ class _FilesScreenState extends State<FilesScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_atRoot ? 'Files' : _baseName(_dir)),
+          title: Text(_atRoot ? tr('Files') : _baseName(_dir)),
           actions: [
             IconButton(
-              tooltip: 'Search',
+              tooltip: tr('Search'),
               icon: const Icon(LucideIcons.search, size: 20),
               onPressed: () =>
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => SearchScreen(agent: agent))),
             ),
             IconButton(
-              tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
+              tooltip: tr(_showHidden ? 'Hide hidden files' : 'Show hidden files'),
               icon: Icon(_showHidden ? LucideIcons.eye : LucideIcons.eyeOff, size: 20),
               onPressed: () => setState(() => _showHidden = !_showHidden),
             ),
             PopupMenuButton<String>(
               icon: const Icon(LucideIcons.plus, size: 22),
-              tooltip: 'New',
+              tooltip: tr('New'),
+              enabled: !busy(),
               onSelected: (v) => switch (v) {
                 'file' => _newFile(),
                 'folder' => _newFolder(),
                 _ => _import(),
               },
-              itemBuilder: (_) => const [
+              itemBuilder: (_) => [
                 PopupMenuItem(
                   value: 'file',
                   child: ListTile(
                     leading: Icon(LucideIcons.filePlus2),
-                    title: Text('New file'),
+                    title: Text(tr('New file')),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
@@ -542,7 +598,7 @@ class _FilesScreenState extends State<FilesScreen> {
                   value: 'folder',
                   child: ListTile(
                     leading: Icon(LucideIcons.folderPlus),
-                    title: Text('New folder'),
+                    title: Text(tr('New folder')),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
@@ -550,7 +606,7 @@ class _FilesScreenState extends State<FilesScreen> {
                   value: 'import',
                   child: ListTile(
                     leading: Icon(LucideIcons.upload),
-                    title: Text('Import from phone'),
+                    title: Text(tr('Import from phone')),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
@@ -562,6 +618,9 @@ class _FilesScreenState extends State<FilesScreen> {
         body: Column(
           children: [
             _Breadcrumbs(root: _root, dir: _dir, onTap: _go),
+            if (_entries.isNotEmpty) _sortBar(context),
+            // A reload after a change, or a change on its way: the list stays, the bar says it is not final yet.
+            BusyBar(busy: busy() || (_loading && _entries.isNotEmpty)),
             Expanded(child: _list(context)),
           ],
         ),
@@ -572,9 +631,15 @@ class _FilesScreenState extends State<FilesScreen> {
   Widget _list(BuildContext context) {
     final p = context.palette;
     final t = Theme.of(context).textTheme;
-    if (_loading && _entries.isEmpty && _error == null) return const Center(child: CircularProgressIndicator());
-    final visible = _showHidden ? _entries : _entries.where((e) => !e.name.startsWith('.')).toList();
-    final hiddenCount = _entries.length - visible.length;
+    if (_loading && _entries.isEmpty && _error == null) return const Center(child: BusySpinner.page());
+    final shown = _showHidden ? _entries : _entries.where((e) => !e.name.startsWith('.')).toList();
+    final hiddenCount = _entries.length - shown.length;
+    final kind = _kinds(shown).contains(_kind) ? _kind : null;
+    final visible = sortEntries(
+      kind == null ? shown : shown.where((e) => fileKind(e) == kind).toList(),
+      _sort,
+      foldersFirst: _foldersFirst,
+    );
     Widget child;
     if (_error != null) {
       child = ListView(
@@ -584,7 +649,7 @@ class _FilesScreenState extends State<FilesScreen> {
           const SizedBox(height: 60),
           Icon(LucideIcons.folderX, size: 40, color: p.faint),
           const SizedBox(height: 12),
-          Text("Can't open this folder", textAlign: TextAlign.center, style: t.titleMedium),
+          Text(tr("Can't open this folder"), textAlign: TextAlign.center, style: t.titleMedium),
           const SizedBox(height: 4),
           Text(
             _error!,
@@ -601,12 +666,12 @@ class _FilesScreenState extends State<FilesScreen> {
           const SizedBox(height: 40),
           const Illustration('projects', height: 150),
           const SizedBox(height: 16),
-          Text('This folder is empty', textAlign: TextAlign.center, style: t.titleMedium),
+          Text(tr('This folder is empty'), textAlign: TextAlign.center, style: t.titleMedium),
           const SizedBox(height: 4),
           Text(
             hiddenCount > 0
-                ? '$hiddenCount hidden ${hiddenCount == 1 ? 'item' : 'items'} — tap the eye to show them.'
-                : 'Create a file or folder with the + button.',
+                ? tr('{n} hidden items — tap the eye to show them.').replaceAll('{n}', '$hiddenCount')
+                : tr('Create a file or folder with the + button.'),
             textAlign: TextAlign.center,
             style: t.bodySmall?.copyWith(color: p.muted),
           ),
@@ -621,6 +686,99 @@ class _FilesScreenState extends State<FilesScreen> {
       );
     }
     return RefreshIndicator(onRefresh: _load, child: child);
+  }
+
+  /// The kinds among [entries], in a fixed order: only those get a chip, so no filter ever shows an empty folder.
+  List<FileKind> _kinds(List<_Entry> entries) {
+    final present = {for (final e in entries) fileKind(e)};
+    return [for (final k in FileKind.values) if (present.contains(k)) k];
+  }
+
+  static String _sortLabel(FileSort s) => switch (s) {
+    FileSort.name => tr('Name'),
+    FileSort.recent => tr('Recently edited'),
+    FileSort.largest => tr('Largest'),
+    FileSort.type => tr('Type'),
+  };
+
+  static IconData _sortIcon(FileSort s) => switch (s) {
+    FileSort.name => LucideIcons.arrowDownAZ,
+    FileSort.recent => LucideIcons.clock,
+    FileSort.largest => LucideIcons.arrowDownWideNarrow,
+    FileSort.type => LucideIcons.shapes,
+  };
+
+  static String _kindLabel(FileKind k) => switch (k) {
+    FileKind.folder => tr('Folders'),
+    FileKind.code => tr('Code'),
+    FileKind.image => tr('Images'),
+    FileKind.document => tr('Documents'),
+    FileKind.data => tr('Data'),
+    FileKind.archive => tr('Archives'),
+    FileKind.media => tr('Media'),
+    FileKind.other => tr('Other'),
+  };
+
+  /// The order (a menu, with "Folders first") and the kinds in this folder as chips, on one row that scrolls sideways.
+  Widget _sortBar(BuildContext context) {
+    final p = context.palette;
+    final shown = _showHidden ? _entries : _entries.where((e) => !e.name.startsWith('.')).toList();
+    final kinds = _kinds(shown);
+    final kind = kinds.contains(_kind) ? _kind : null;
+    Widget chip(String label, bool on, VoidCallback onTap) => Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: on,
+        onSelected: (_) => onTap(),
+        labelStyle: TextStyle(color: on ? p.inverse : p.text, fontSize: 12.5, fontWeight: FontWeight.w500),
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          PopupMenuButton<Object>(
+            tooltip: tr('Sort by'),
+            onSelected: (v) => setState(() {
+              if (v is FileSort) _sort = v;
+              if (v == 'folders') _foldersFirst = !_foldersFirst;
+            }),
+            itemBuilder: (_) => [
+              for (final s in FileSort.values)
+                CheckedPopupMenuItem<Object>(value: s, checked: _sort == s, child: Text(_sortLabel(s))),
+              const PopupMenuDivider(),
+              CheckedPopupMenuItem<Object>(value: 'folders', checked: _foldersFirst, child: Text(tr('Folders first'))),
+            ],
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(_sortIcon(_sort), size: 15, color: p.text),
+                    const SizedBox(width: 6),
+                    Text(_sortLabel(_sort), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.text)),
+                    const SizedBox(width: 2),
+                    Icon(LucideIcons.chevronDown, size: 14, color: p.muted),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // One kind alone needs no filter.
+          if (kinds.length > 1) ...[
+            const SizedBox(width: 8),
+            chip(tr('All'), kind == null, () => setState(() => _kind = null)),
+            for (final k in kinds) chip(_kindLabel(k), kind == k, () => setState(() => _kind = kind == k ? null : k)),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _tile(BuildContext context, _Entry e) {
@@ -640,11 +798,11 @@ class _FilesScreenState extends State<FilesScreen> {
     } else {
       tint = p.muted;
     }
-    final meta = [if (!e.isDir) _formatSize(e.stat.size), _formatTime(e.stat.modified)].join(' · ');
+    final meta = [if (!e.isDir) _formatSize(e.size), _formatTime(e.modified)].join(' · ');
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => _open(e),
-      onLongPress: () => _showEntrySheet(e),
+      borderRadius: BorderRadius.circular(Radii.md),
+      onTap: busy() ? null : () => _open(e),
+      onLongPress: busy() ? null : () => _showEntrySheet(e),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
         child: Row(
@@ -652,7 +810,7 @@ class _FilesScreenState extends State<FilesScreen> {
             Container(
               width: 36,
               height: 36,
-              decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(Radii.md)),
               child: Icon(_iconFor(e.name, e.isDir), size: 18, color: tint),
             ),
             const SizedBox(width: 12),
@@ -674,17 +832,21 @@ class _FilesScreenState extends State<FilesScreen> {
                 ),
               ),
             ),
-            PopupMenuButton<String>(
-              icon: Icon(LucideIcons.ellipsisVertical, size: 18, color: p.muted),
-              onSelected: (a) => _entryAction(e, a),
-              itemBuilder: (_) => [
-                for (final m in _menuItems(e))
-                  PopupMenuItem(
-                    value: m.$1,
-                    child: Text(m.$2, style: m.$1 == 'delete' ? TextStyle(color: p.danger) : null),
-                  ),
-              ],
-            ),
+            if (busy(e.path))
+              const Padding(padding: EdgeInsets.all(16), child: BusySpinner())
+            else
+              PopupMenuButton<String>(
+                icon: Icon(LucideIcons.ellipsisVertical, size: 18, color: p.muted),
+                enabled: !busy(),
+                onSelected: (a) => _entryAction(e, a),
+                itemBuilder: (_) => [
+                  for (final m in _menuItems(e))
+                    PopupMenuItem(
+                      value: m.$1,
+                      child: Text(m.$2, style: m.$1 == 'delete' ? TextStyle(color: p.danger) : null),
+                    ),
+                ],
+              ),
           ],
         ),
       ),
@@ -737,7 +899,7 @@ class _BreadcrumbsState extends State<_Breadcrumbs> {
     return Container(
       height: 40,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.md)),
       child: ListView.separated(
         controller: _scroll,
         scrollDirection: Axis.horizontal,
@@ -747,7 +909,7 @@ class _BreadcrumbsState extends State<_Breadcrumbs> {
         itemBuilder: (context, i) {
           final last = i == crumbs.length - 1;
           return InkWell(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(Radii.sm),
             onTap: last ? null : () => widget.onTap(crumbs[i].$2),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -773,14 +935,25 @@ class _BreadcrumbsState extends State<_Breadcrumbs> {
   }
 }
 
-/// Full-screen pinch-zoom viewer for an image file.
-class _ImageViewer extends StatelessWidget {
-  const _ImageViewer({required this.path});
+/// Full-screen pinch-zoom viewer for an image file, read through [fs] (this phone's or the server's).
+class _ImageViewer extends StatefulWidget {
+  const _ImageViewer({required this.fs, required this.path});
+  final AgentFs fs;
   final String path;
+
+  @override
+  State<_ImageViewer> createState() => _ImageViewerState();
+}
+
+class _ImageViewerState extends State<_ImageViewer> {
+  late final Future<Uint8List> _bytes = widget.fs.read(widget.path);
+
+  String get path => widget.path;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final cantDisplay = Text(tr("Can't display this image"), style: TextStyle(color: p.faint));
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -792,11 +965,11 @@ class _ImageViewer extends StatelessWidget {
         ),
         actions: [
           IconButton(
-            tooltip: 'Copy path',
+            tooltip: tr('Copy path'),
             icon: const Icon(LucideIcons.copy, size: 20),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: path));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Path copied')));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Path copied'))));
             },
           ),
         ],
@@ -805,9 +978,14 @@ class _ImageViewer extends StatelessWidget {
         minScale: 0.5,
         maxScale: 8,
         child: Center(
-          child: Image.file(
-            File(path),
-            errorBuilder: (_, e, _) => Text("Can't display this image", style: TextStyle(color: p.faint)),
+          child: FutureBuilder<Uint8List>(
+            future: _bytes,
+            builder: (context, snap) {
+              if (snap.hasError) return cantDisplay;
+              final bytes = snap.data;
+              if (bytes == null) return const BusySpinner.page();
+              return Image.memory(bytes, errorBuilder: (_, e, _) => cantDisplay);
+            },
           ),
         ),
       ),

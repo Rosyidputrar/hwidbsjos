@@ -4,10 +4,15 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
 import 'custom_provider_sheet.dart';
-import 'login_flow.dart';
+import 'daily_limit_offer.dart';
+import 'i18n.dart';
 import 'kit.dart';
+import 'login_flow.dart';
 import 'theme.dart';
 
+/// Models & providers: every provider the agent knows (built into pi, plus
+/// the user's own endpoints). Nothing is locked to one service — connect with
+/// an account, an API key, or a custom base URL.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.agent});
   final AgentController agent;
@@ -18,11 +23,56 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   String query = '';
+  List<CustomProvider> _custom = const [];
+  bool _loadingCustom = false;
 
   @override
   void initState() {
     super.initState();
     widget.agent.refreshProviders();
+    _loadCustom();
+    widget.agent.addListener(_onAgentChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.agent.removeListener(_onAgentChanged);
+    super.dispose();
+  }
+
+  void _onAgentChanged() {
+    // Saving or removing an endpoint makes the host re-report providers;
+    // keep the custom list in step without a manual refresh.
+    _loadCustom();
+  }
+
+  Future<void> _loadCustom() async {
+    if (_loadingCustom) return;
+    _loadingCustom = true;
+    try {
+      final list = await widget.agent.customProviders();
+      if (mounted) setState(() => _custom = list);
+    } catch (_) {
+      // The sections below still work from the provider list alone.
+    } finally {
+      _loadingCustom = false;
+    }
+  }
+
+  bool get _anyConnected => widget.agent.providers.any((x) => x.configured) || _custom.isNotEmpty;
+
+  Future<void> _afterConnect(bool wasConnected) async {
+    if (!mounted || wasConnected) return;
+    await offerDailyLimit(context, widget.agent);
+  }
+
+  Future<void> _addEndpoint(BuildContext context) async {
+    final wasConnected = _anyConnected;
+    final saved = await showCustomProviderSheet(context, widget.agent);
+    if (saved == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Endpoint saved'))));
+      await _afterConnect(wasConnected);
+    }
   }
 
   @override
@@ -41,7 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Models & providers'),
+            title: Text(tr('Models & providers')),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(1),
               child: Divider(height: 1, color: p.border),
@@ -50,51 +100,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
           body: ListView(
             padding: const EdgeInsets.only(bottom: 32),
             children: [
-              const _Header('Connected'),
+              _Header(tr('Connected')),
               if (connected.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Text('No providers yet. Pick one below.', style: text.bodySmall),
+                  child: Text(tr('No providers yet. Pick one below.'), style: text.bodySmall),
                 ),
-              for (final pr in connected) _ProviderTile(provider: pr, agent: agent),
-              const _Header('Add provider'),
+              for (final pr in connected)
+                _ProviderTile(provider: pr, agent: agent, custom: _custom, afterConnect: _afterConnect),
+              _Header(tr('Add provider')),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                 child: TextField(
                   onChanged: (v) => setState(() => query = v),
-                  decoration: const InputDecoration(
-                    hintText: 'Search providers',
-                    prefixIcon: Icon(LucideIcons.search, size: 18),
+                  decoration: InputDecoration(
+                    hintText: tr('Search providers'),
+                    prefixIcon: const Icon(LucideIcons.search, size: 18),
                   ),
                 ),
               ),
-              for (final pr in others) _ProviderTile(provider: pr, agent: agent),
+              for (final pr in others)
+                _ProviderTile(provider: pr, agent: agent, custom: _custom, afterConnect: _afterConnect),
               _Header(
-                'Custom endpoints',
+                tr('Custom endpoints'),
                 trailing: TextButton.icon(
                   onPressed: () => _addEndpoint(context),
                   icon: const Icon(LucideIcons.plus, size: 18),
-                  label: const Text('Add'),
+                  label: Text(tr('Add')),
                 ),
               ),
-              if (agent.customProviders.isEmpty)
+              if (_custom.isEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                   child: Text(
-                    'Point the app at any server that speaks an OpenAI-compatible API: Ollama, LM Studio, '
-                    'vLLM, a proxy or your own gateway.',
+                    tr('Point the app at any server that speaks the OpenAI, Anthropic or Google API: Ollama, LM Studio, vLLM, a hosted service, a proxy or your own gateway.'),
                     style: text.bodySmall,
                   ),
                 ),
-              for (final c in agent.customProviders) _CustomTile(endpoint: c, agent: agent),
-              const _Header('Environment'),
-              _InfoRow('pi', agent.info['version']?.toString() ?? '—'),
+              for (final c in _custom) _CustomTile(endpoint: c, agent: agent, afterConnect: _afterConnect),
+              _Header(tr('Environment')),
+              _InfoRow(tr('Agent engine (pi)'), agent.info['version']?.toString() ?? '—'),
               _InfoRow('Node.js', agent.info['node']?.toString() ?? '—'),
-              _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—', mono: true),
-              _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—', mono: true),
+              _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—', monospace: true),
+              _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—', monospace: true),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                child: OutlinedButton(onPressed: agent.busy ? null : agent.restart, child: const Text('Restart agent')),
+                child: OutlinedButton(onPressed: agent.busy ? null : agent.restart, child: Text(tr('Restart agent'))),
               ),
             ],
           ),
@@ -102,20 +153,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
   }
-
-  Future<void> _addEndpoint(BuildContext context) async {
-    final saved = await showCustomProviderSheet(context, widget.agent);
-    if (saved == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Endpoint saved')));
-    }
-  }
 }
 
-/// One endpoint defined in models.json: edit it or remove it.
+/// One endpoint defined by the user: edit it or remove it.
 class _CustomTile extends StatelessWidget {
-  const _CustomTile({required this.endpoint, required this.agent});
-  final CustomProviderInfo endpoint;
+  const _CustomTile({required this.endpoint, required this.agent, required this.afterConnect});
+  final CustomProvider endpoint;
   final AgentController agent;
+  final Future<void> Function(bool wasConnected) afterConnect;
 
   @override
   Widget build(BuildContext context) {
@@ -124,12 +169,14 @@ class _CustomTile extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       leading: BrandTile(id: endpoint.id, size: 38),
       title: Text(endpoint.name, style: Theme.of(context).textTheme.titleSmall),
-      subtitle: Text('${endpoint.modelIds.length} models  ·  ${endpoint.summary}'),
+      subtitle: Text(
+        tr('{n} models · {api}').replaceAll('{n}', '${endpoint.models.length}').replaceAll('{api}', endpoint.api),
+      ),
       trailing: Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
       onTap: () async {
         final changed = await showCustomProviderSheet(context, agent, provider: endpoint);
         if (changed == true && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Endpoint updated')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Endpoint updated'))));
         }
       },
     );
@@ -154,10 +201,10 @@ class _Header extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow(this.label, this.value, {this.mono = false});
+  const _InfoRow(this.label, this.value, {this.monospace = false});
   final String label;
   final String value;
-  final bool mono;
+  final bool monospace;
 
   @override
   Widget build(BuildContext context) {
@@ -172,8 +219,8 @@ class _InfoRow extends StatelessWidget {
           const SizedBox(height: 2),
           SelectableText(
             value,
-            style: mono
-                ? TextStyle(fontFamily: 'GeistMono', fontSize: 12.5, color: p.text, height: 1.5)
+            style: monospace
+                ? TextStyle(fontFamily: mono, fontSize: 12.5, color: p.text, height: 1.5)
                 : text.bodyMedium,
           ),
         ],
@@ -183,21 +230,25 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _ProviderTile extends StatelessWidget {
-  const _ProviderTile({required this.provider, required this.agent});
+  const _ProviderTile({required this.provider, required this.agent, required this.custom, required this.afterConnect});
   final ProviderInfo provider;
   final AgentController agent;
+  final List<CustomProvider> custom;
+  final Future<void> Function(bool wasConnected) afterConnect;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final subtitle = provider.configured ? (provider.oauth ? 'Signed in' : 'API key') : '${provider.modelCount} models';
+    final subtitle = provider.configured
+        ? (provider.oauth ? tr('Signed in') : tr('API key'))
+        : tr('{n} models').replaceAll('{n}', '${provider.modelCount}');
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       leading: BrandTile(id: provider.id, size: 38),
       title: Text(provider.name, style: Theme.of(context).textTheme.titleSmall),
       subtitle: Text(subtitle),
       trailing: provider.configured
-          ? Pill('Connected', color: p.success, dot: true)
+          ? Pill(tr('Connected'), color: p.success, dot: true)
           : Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
       onTap: () => _open(context),
     );
@@ -207,17 +258,26 @@ class _ProviderTile extends StatelessWidget {
     final methods = provider.methods;
     // Our own endpoint is edited (or removed) in its own sheet, not disconnected.
     if (provider.custom) {
-      CustomProviderInfo? endpoint;
-      for (final c in agent.customProviders) {
+      CustomProvider? endpoint;
+      for (final c in custom) {
         if (c.id == provider.id) endpoint = c;
       }
-      endpoint ??= CustomProviderInfo({
+      if (endpoint == null) {
+        // Not loaded yet (or added elsewhere): fetch the list, then match.
+        try {
+          for (final c in await agent.customProviders()) {
+            if (c.id == provider.id) endpoint = c;
+          }
+        } catch (_) {}
+      }
+      endpoint ??= CustomProvider({
         'id': provider.id,
         'name': provider.name,
         'baseUrl': '',
         'api': 'openai-completions',
         'models': const [],
       });
+      if (!context.mounted) return;
       await showCustomProviderSheet(context, agent, provider: endpoint);
       return;
     }
@@ -233,12 +293,12 @@ class _ProviderTile extends StatelessWidget {
               children: [
                 Text(provider.name, style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 4),
-                Text('Remove the stored credential from this device.', style: Theme.of(context).textTheme.bodySmall),
+                Text(tr('Remove the stored credential from this device.'), style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 20),
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: context.palette.danger),
                   onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Disconnect'),
+                  child: Text(tr('Disconnect')),
                 ),
               ],
             ),
@@ -249,9 +309,9 @@ class _ProviderTile extends StatelessWidget {
       return;
     }
     if (methods.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('${provider.name} uses ambient credentials and cannot be set up here.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('{name} uses ambient credentials and cannot be set up here.').replaceAll('{name}', provider.name))),
+      );
       return;
     }
     var method = methods.first;
@@ -263,13 +323,13 @@ class _ProviderTile extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                title: const Text('Sign in with account'),
-                subtitle: const Text('Use your subscription through the browser'),
+                title: Text(tr('Sign in with account')),
+                subtitle: Text(tr('Use your subscription through the browser')),
                 onTap: () => Navigator.of(context).pop('oauth'),
               ),
               ListTile(
-                title: const Text('Use an API key'),
-                subtitle: const Text('Paste a key from the provider console'),
+                title: Text(tr('Use an API key')),
+                subtitle: Text(tr('Paste a key from the provider console')),
                 onTap: () => Navigator.of(context).pop('api_key'),
               ),
               const SizedBox(height: 8),
@@ -281,9 +341,13 @@ class _ProviderTile extends StatelessWidget {
       method = picked;
     }
     if (!context.mounted) return;
+    final wasConnected = agent.providers.any((x) => x.configured);
     final ok = await showLoginSheet(context, agent, provider, method);
     if (ok == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${provider.name} connected')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('{name} connected').replaceAll('{name}', provider.name))),
+      );
+      await afterConnect(wasConnected);
     }
   }
 }

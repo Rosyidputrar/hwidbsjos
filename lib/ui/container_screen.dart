@@ -4,9 +4,12 @@ import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
+import 'box_screen.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'task_log.dart';
 import 'terminal_screen.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 class _Distro {
@@ -55,14 +58,15 @@ class _ContainerScreenState extends State<ContainerScreen> {
   @override
   void initState() {
     super.initState();
-    it.refreshContainer().catchError((_) => it.container!);
+    // The box screen reads its own status on a server.
+    if (!widget.agent.remote.active) it.refreshContainer().catchError((_) => it.container!);
   }
 
   Future<void> _install() async {
     final d = _distros.firstWhere((x) => x.id == choice);
     final ok = await runWithLog<bool>(
       context,
-      title: 'Installing ${d.name}',
+      title: '${tr('Installing')} ${d.name}',
       task: (log, _) async {
         await it.installContainer(choice, onLine: log);
         return true;
@@ -77,7 +81,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
       await it.setContainerShell(on);
       await widget.agent.refreshState();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => switching = false);
     }
@@ -87,14 +91,14 @@ class _ContainerScreenState extends State<ContainerScreen> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Remove the container?'),
-        content: const Text('Everything installed inside it is deleted. Your workspace files are kept.'),
+        title: Text(tr('Remove the container?')),
+        content: Text(tr('Everything installed inside it is deleted. Your workspace files are kept.')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: Colors.white),
+            style: dangerButtonStyle(context),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
+            child: Text(tr('Remove')),
           ),
         ],
       ),
@@ -106,6 +110,8 @@ class _ContainerScreenState extends State<ContainerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // On a server the container is a rootless Podman box, with its own screen (server_agent.md).
+    if (widget.agent.remote.active) return BoxScreen(agent: widget.agent);
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
@@ -115,9 +121,9 @@ class _ContainerScreenState extends State<ContainerScreen> {
         final installed = c?.installed == true;
         final d = _distros.firstWhere((x) => x.id == (c?.distro ?? choice), orElse: () => _distros.first);
         return Scaffold(
-          appBar: AppBar(title: const Text('Linux container')),
+          appBar: AppBar(title: Text(tr('Linux container'))),
           body: c == null
-              ? const Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+              ? const Center(child: BusySpinner(size: 20))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
                   children: [
@@ -139,10 +145,10 @@ class _ContainerScreenState extends State<ContainerScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(installed ? d.name : 'Real Linux on your phone', style: text.titleMedium),
+                                    Text(installed ? d.name : tr('Real Linux on your phone'), style: text.titleMedium),
                                     const SizedBox(height: 3),
                                     Text(
-                                      installed ? c.image ?? '' : 'Install packages with apt or apk',
+                                      installed ? c.image ?? '' : tr('Install packages with apt or apk'),
                                       style: TextStyle(
                                         fontFamily: installed ? mono : null,
                                         fontSize: 12.5,
@@ -154,7 +160,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
                               ),
                               if (installed)
                                 Pill(
-                                  c.enabled ? 'Agent shell' : 'Installed',
+                                  tr(c.enabled ? 'Agent shell' : 'Installed'),
                                   color: c.enabled ? p.success : p.muted,
                                   dot: true,
                                 ),
@@ -162,51 +168,55 @@ class _ContainerScreenState extends State<ContainerScreen> {
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            'Runs through proot: no root or Termux needed. Your home folder and workspace are the same '
-                            'paths inside, so the agent can `apt install python3 nodejs` and work on your files directly.',
+                            tr(
+                              'Runs through proot: no root or Termux needed. Your home folder and workspace are the same '
+                              'paths inside, so the agent can `apt install python3 nodejs` and work on your files directly.',
+                            ),
                             style: text.bodySmall,
                           ),
                         ],
                       ),
                     ),
                     if (!installed) ...[
-                      const SectionLabel('Choose a distribution'),
+                      SectionLabel(tr('Choose a distribution')),
                       for (final x in _distros) ...[
                         _DistroCard(distro: x, selected: choice == x.id, onTap: () => setState(() => choice = x.id)),
                         const SizedBox(height: 10),
                       ],
                       const SizedBox(height: 8),
                       PrimaryButton(
-                        label: 'Install ${_distros.firstWhere((x) => x.id == choice).name}',
+                        label: tr('Install {name}').replaceAll('{name}', _distros.firstWhere((x) => x.id == choice).name),
                         icon: LucideIcons.download,
                         onPressed: _install,
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Downloads the official image from Docker Hub, then installs git, curl, ssh and certificates.',
+                        tr(
+                          'Downloads the official image from Docker Hub, then installs git, curl, ssh and certificates.',
+                        ),
                         textAlign: TextAlign.center,
                         style: text.bodySmall,
                       ),
                     ] else ...[
-                      const SectionLabel('Agent'),
+                      SectionLabel(tr('Agent')),
                       SettingsGroup(
                         children: [
                           SettingsRow(
                             icon: LucideIcons.squareTerminal,
                             color: p.accent,
-                            title: 'Use as the agent\'s shell',
+                            title: tr('Use as the agent\'s shell'),
                             subtitle: c.enabled
-                                ? 'Every command pi runs happens inside ${d.name}'
-                                : 'pi uses the Android shell; `box` still reaches Linux',
+                                ? '${tr('Every command the agent runs happens inside')} ${d.name}'
+                                : tr('The agent uses the Android shell; `box` still reaches Linux'),
                             trailing: switching
-                                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                : Switch(value: c.enabled, onChanged: widget.agent.busy ? null : _setShell),
+                                ? const BusySpinner(size: 18)
+                                : LabeledSwitch(label: tr('Use as the agent\'s shell'), value: c.enabled, onChanged: widget.agent.busy ? null : _setShell),
                           ),
                           SettingsRow(
                             icon: LucideIcons.terminal,
                             color: const Color(0xFF22C55E),
-                            title: 'Open a Linux shell',
-                            subtitle: 'Terminal inside the container',
+                            title: tr('Open a Linux shell'),
+                            subtitle: tr('Terminal inside the container'),
                             onTap: () => Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => TerminalScreen(agent: widget.agent, command: 'box'),
@@ -215,7 +225,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
                           ),
                         ],
                       ),
-                      const SectionLabel('Try'),
+                      SectionLabel(tr('Try')),
                       SurfaceCard(
                         padding: const EdgeInsets.all(14),
                         child: SelectableText(
@@ -225,14 +235,14 @@ class _ContainerScreenState extends State<ContainerScreen> {
                           style: TextStyle(fontFamily: mono, fontSize: 12.5, height: 1.6, color: p.text),
                         ),
                       ),
-                      const SectionLabel('Manage'),
+                      SectionLabel(tr('Manage')),
                       SettingsGroup(
                         children: [
                           SettingsRow(
                             icon: LucideIcons.trash2,
                             color: p.danger,
-                            title: 'Remove container',
-                            subtitle: 'Frees the space; workspace files stay',
+                            title: tr('Remove container'),
+                            subtitle: tr('Frees the space; workspace files stay'),
                             destructive: true,
                             onTap: widget.agent.busy ? null : _remove,
                           ),
@@ -285,7 +295,7 @@ class _DistroCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
+            duration: Motion.of(context, const Duration(milliseconds: 150)),
             width: 22,
             height: 22,
             decoration: BoxDecoration(
@@ -293,7 +303,7 @@ class _DistroCard extends StatelessWidget {
               color: selected ? p.accent : null,
               border: selected ? null : Border.all(color: p.border, width: 2),
             ),
-            child: selected ? const Icon(LucideIcons.check, size: 13, color: Colors.white) : null,
+            child: selected ? Icon(LucideIcons.check, size: 13, color: p.onAccent) : null,
           ),
         ],
       ),

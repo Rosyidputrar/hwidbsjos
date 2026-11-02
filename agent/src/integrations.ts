@@ -1,5 +1,5 @@
 /**
- * Accounts, repositories, SSH and deploy targets for the Rynex app.
+ * Accounts, repositories, SSH and deploy targets for the Rynex AI Agent app.
  *
  * Credentials live in <agentDir>/rynex/integrations.json (app-private
  * storage) and are exported into the host's environment, so the agent's own
@@ -8,10 +8,16 @@
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, join, relative } from "node:path";
-import { configureDns, type DnsMode } from "./dns.js";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, relative } from "node:path";
+import { Cloudflare, type CloudflareAccount } from "./cloudflare.js";
+import { assertRepoConfigSafe, gitEnv, SAFE_GIT_FLAGS } from "./gitsafe.js";
+import { configureDns, validateCustomDohUrl, type DnsMode } from "./dns.js";
+import { maskKey, parseKeys } from "./keyring.js";
+import { checkConfig, type NotifyConfig } from "./notify.js";
 import { readSecureJson, writeSecureJson } from "./secure.js";
+import { isObject } from "./state.js";
 
 export interface SshHost {
 	id: string;
@@ -23,9 +29,50 @@ export interface SshHost {
 	path?: string;
 }
 
+/**
+ * A GitHub sign-in. Device-flow tokens from a GitHub App expire (8 hours) and
+ * come with a refresh token (6 months); OAuth App tokens and pasted tokens
+ * carry no expiry here. `expired` is set when GitHub rejected the token and it
+ * could not be refreshed: the account stays listed so the app can ask the
+ * user to sign in again instead of failing with a bare 401.
+ */
+interface GithubAccount {
+	token: string;
+	login: string;
+	name: string | null;
+	email: string;
+	avatarUrl: string;
+	refreshToken?: string;
+	/** Epoch ms; absent when the token does not expire. */
+	expiresAt?: number;
+	refreshExpiresAt?: number;
+	/** The Client ID the token was issued to; refreshing must use the same one. */
+	clientId?: string;
+	expired?: boolean;
+}
+
+/** What the device flow's token endpoint returns besides the access token. */
+interface GithubGrant {
+	refresh_token?: unknown;
+	expires_in?: unknown;
+	refresh_token_expires_in?: unknown;
+}
+
+/** Refresh this long before the access token runs out, so a long git push never starts on a dying token. */
+const GITHUB_REFRESH_MARGIN_MS = 30 * 60_000;
+
+/** Raised when GitHub no longer accepts the sign-in; the app shows "sign in again". */
+export class GithubAuthError extends Error {
+	readonly code = "github_auth_expired";
+	constructor() {
+		super("GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.");
+	}
+}
+
 interface Store {
-	github?: { token: string; login: string; name: string | null; email: string; avatarUrl: string };
+	github?: GithubAccount;
 	vercel?: { token: string; username: string };
+	cloudflare?: { token: string; accounts: CloudflareAccount[]; accountId: string };
 	sshHosts: SshHost[];
 	settings?: AppSettings;
 }
@@ -33,22 +80,105 @@ interface Store {
 export interface AppSettings {
 	dns: DnsMode;
 	dnsUrl?: string;
+	/** Search API keys, one per line (several are used in turn). */
 	braveKey?: string;
 	tavilyKey?: string;
+	s1Key?: string;
+	/** Which Search1API features the agent uses; unset means on. */
+	s1Search?: boolean;
+	s1Crawl?: boolean;
+	s1Screenshot?: boolean;
+	/** TinyFish Search key; unset means the engine is skipped, never an error. */
+	tinyfishKey?: string;
+	/** Whether the agent uses TinyFish Search; unset means on. */
+	tinyfishSearch?: boolean;
+	/** Per-project web_search toggle, keyed by project path; absent means on. */
+	projectSearch?: Record<string, boolean>;
+	/** Per-backend switches for the keyed search tools; unset means on. */
+	braveSearch?: boolean;
+	tavilySearch?: boolean;
 	/** Agent shell in the Linux container; unset means on whenever it is installed. */
 	containerShell?: boolean;
+	/** Server only: the phone's time zone ("Etc/GMT-7"), so schedules run at the user's hours, not the server's (UTC). */
+	timeZone?: string | null;
 	/** When the agent must ask before acting (see guard.ts). */
 	approvalMode?: "ask_all" | "ask_risky" | "auto";
+	/** Subagent limits, global for all subagents (see subagent.ts); 0 = no limit. */
+	subagentCostLimit?: number;
+	subagentMinutesLimit?: number;
+	/** Approval mode for subagents; unset = follow the chat's approvalMode. */
+	subagentApprovalMode?: "ask_all" | "ask_risky" | "auto";
+	/** Subagent notification toggles; unset = on. */
+	subagentNotifyDone?: boolean;
+	subagentNotifyFailed?: boolean;
+	subagentNotifyApproval?: boolean;
+	/** Ongoing "subagent running" notification while subagents of other chats work; unset = on. */
+	subagentNotifyRunning?: boolean;
+	/**
+	 * Push notifications through ntfy while the app is closed (server agent only; notify.ts). Off until the user turns
+	 * them on; the app makes the random topic. An empty url means https://ntfy.sh.
+	 */
+	notify?: { enabled?: boolean; url?: string; topic?: string };
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
-	/** Daily spend cap in USD; prompts are refused once reached. 0 or unset = none. */
+	/** Daily spend cap in USD (pi's own cost); prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
+	/**
+	 * Summarize the chat once its context passes this many tokens (host.ts capContext), on models whose own limit is
+	 * larger: every request re-reads the whole context, so a 1M-token model would otherwise pay for ~850k tokens a
+	 * request before pi compacts it. Unset means the default share of the model's window (COMPACT_AT_SHARE, but never
+	 * under COMPACT_AT_DEFAULT); 0 leaves it to pi (near the model's limit).
+	 */
+	compactAt?: number;
+	/**
+	 * GitHub OAuth App Client ID for the device flow, entered in
+	 * Settings (Accounts). Sets the Client ID without a rebuild:
+	 * create your own OAuth App (Device Flow enabled) and paste its
+	 * Client ID here. The ID is public; there is no secret. Empty
+	 * means GitHub login is not configured.
+	 */
+	githubClientId?: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = { dns: "cloudflare" };
+/** A server resolves names itself: no ISP block pages to get around, and DoH would only add a hop. */
+const SERVER_DEFAULT_SETTINGS: AppSettings = { dns: "system" };
 
-/** Client ID of the Rynex GitHub OAuth App (device flow enabled). Public by design; no secret is used. */
-const GITHUB_CLIENT_ID = process.env.RYNEX_GITHUB_CLIENT_ID ?? "Ov23lidVAetnaasSTbSU";
+/**
+ * With no limit set, a chat is summarized once it fills this share of the model's window (host.ts capContext): room
+ * enough that a summary is rarely met, while a request never re-reads the better part of a very large window.
+ */
+export const COMPACT_AT_SHARE = 0.65;
+
+/**
+ * The least a default limit can be, in tokens (and the default itself when the model's window is unknown). A flat
+ * share alone would summarize a 200k model at 130k, more eagerly than before this default followed the window; under
+ * this floor the chat is left to pi, which compacts near the model's own limit anyway.
+ */
+export const COMPACT_AT_DEFAULT = 300_000;
+
+/**
+ * The context limit in force for a model whose window is [contextWindow] tokens: the user's own ([compactAt]; 0 turns
+ * the host's summaries off), or the default share of the window, never under the floor. Models at or under the floor
+ * are left to pi either way: capContext only acts when the window is larger than the limit.
+ */
+export function compactLimit(compactAt: number | undefined, contextWindow: number | undefined): number {
+	if (typeof compactAt === "number" && compactAt >= 0) return compactAt;
+	return Math.max(COMPACT_AT_DEFAULT, Math.round(((contextWindow ?? 0) * COMPACT_AT_SHARE) / 1_000) * 1_000);
+}
+
+/** Where pushes go when the user turned them on without naming a server. */
+export const NTFY_DEFAULT_URL = "https://ntfy.sh";
+
+export interface IntegrationsOptions {
+	/** The host runs as a server agent (server_agent.md). */
+	server?: boolean;
+	/** On a server: the `box` launcher when the rootless container is set up, else null (commands run on the server). */
+	boxScript?: () => string | null;
+}
+
+/** Optional build-time override for the GitHub OAuth App Client ID (device flow enabled). Public by design; no secret is used. Empty means not configured. */
+const GITHUB_CLIENT_ID = process.env.RYNEX_GITHUB_CLIENT_ID ?? "";
 
 /** Line output, plus an optional channel for structured CI progress. */
 export type Log = ((line: string) => void) & { ci?: (snapshot: CiSnapshot) => void };
@@ -67,12 +197,48 @@ export interface CiRun extends CiStep {
 	jobs: CiJob[];
 }
 export interface CiSnapshot {
-	provider: "github" | "vercel";
+	provider: "github" | "vercel" | "cloudflare";
 	runs: CiRun[];
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const FAILED = new Set(["failure", "cancelled", "timed_out", "startup_failure", "action_required"]);
+
+export type KeyService = "brave" | "tavily" | "s1" | "tinyfish";
+const KEY_FIELD = { brave: "braveKey", tavily: "tavilyKey", s1: "s1Key", tinyfish: "tinyfishKey" } as const;
+
+/**
+ * A sign-in with a code that is under way (GitHub's device flow). The HOST waits for the approval, not the app: the app
+ * used to poll, so leaving the app, locking the screen or cancelling the wait before the user had approved on github.com
+ * ended the polling for good, the code expired after 15 minutes and no token was ever saved. On a server the host also
+ * outlives the app's connection, so an approval given later still completes the sign-in.
+ */
+interface DeviceFlow {
+	deviceCode: string;
+	userCode: string;
+	verificationUri: string;
+	expiresAt: number;
+	/** Seconds between polls: GitHub's, raised when it says to slow down. */
+	interval: number;
+	status: "pending" | "done" | "expired" | "denied" | "error";
+	error?: string;
+	/** The token GitHub gave once the user approved. The code is spent then, so a failed sign-in retries with this. */
+	grant?: Record<string, unknown> & { access_token: string };
+	loginFailures: number;
+	timer?: NodeJS.Timeout;
+}
+
+/** What one question to GitHub's token endpoint came to. */
+type DeviceExchange =
+	| { status: "grant"; grant: Record<string, unknown> & { access_token: string } }
+	| { status: "pending" }
+	| { status: "slow_down"; interval?: number }
+	| { status: "expired" }
+	| { status: "denied" }
+	| { status: "error"; error: string };
+
+/** Failed sign-ins with a token GitHub has already given, before the flow stops and says so. */
+const DEVICE_LOGIN_ATTEMPTS = 5;
 
 export class Integrations {
 	private store: Store = { sshHosts: [] };
@@ -82,40 +248,107 @@ export class Integrations {
 	constructor(
 		agentDir: string,
 		private readonly workspace: string,
+		private readonly options: IntegrationsOptions = {},
 	) {
 		const dir = join(agentDir, "rynex");
 		mkdirSync(dir, { recursive: true });
 		this.file = join(dir, "integrations.json");
 		this.home = process.env.HOME ?? agentDir;
 		// Encrypted at rest when the Keystore key is available (see secure.ts).
-		this.store = { sshHosts: [], ...readSecureJson<Partial<Store>>(this.file, {}) };
+		this.store = { sshHosts: [], ...readSecureJson<Partial<Store>>(this.file, {}, (v) => isObject(v) && (v.sshHosts === undefined || Array.isArray(v.sshHosts))) };
 		this.exportEnv();
 		this.applySettings();
 	}
 
 	get settings(): AppSettings {
-		return { ...DEFAULT_SETTINGS, ...this.store.settings };
+		return { ...(this.options.server ? SERVER_DEFAULT_SETTINGS : DEFAULT_SETTINGS), ...this.store.settings };
 	}
 
-	/** Keys are write-only from the app's point of view: it only learns whether one is set. */
+	/** Where to send pushes, or null while they are off or not set up. */
+	notifyConfig(): NotifyConfig | null {
+		const n = this.settings.notify;
+		if (n?.enabled !== true || !n.topic) return null;
+		return { url: n.url || NTFY_DEFAULT_URL, topic: n.topic };
+	}
+
+	/** Keys are write-only from the app's point of view: it only sees their last four characters. */
 	publicSettings() {
-		const { dns, dnsUrl, braveKey, tavilyKey, approvalMode, fallbackModels, dailyBudget } = this.settings;
+		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget, subagentCostLimit, subagentMinutesLimit, subagentApprovalMode, subagentNotifyDone, subagentNotifyFailed, subagentNotifyApproval, subagentNotifyRunning } = this.settings;
+		const masked = (text?: string) => parseKeys(text).map(maskKey);
 		return {
 			dns,
 			dnsUrl: dnsUrl ?? null,
 			braveKey: !!braveKey,
 			tavilyKey: !!tavilyKey,
+			keys: { brave: masked(braveKey), tavily: masked(tavilyKey), s1: masked(s1Key), tinyfish: masked(tinyfishKey) },
+			s1Search: this.settings.s1Search ?? true,
+			s1Crawl: this.settings.s1Crawl ?? true,
+			s1Screenshot: this.settings.s1Screenshot ?? true,
+			tinyfishSearch: this.settings.tinyfishSearch ?? true,
+			projectSearch: this.settings.projectSearch ?? {},
+			braveSearch: this.settings.braveSearch ?? true,
+			tavilySearch: this.settings.tavilySearch ?? true,
 			approvalMode: approvalMode ?? "ask_risky",
 			fallbackModels: fallbackModels ?? [],
 			dailyBudget: dailyBudget ?? 0,
+			// Null while the user set nothing: the limit then follows the open chat's model (compactLimit). An app too old
+			// to know the share shows its old default instead, which only mislabels the row. The floor is the fallback.
+			compactAt: this.settings.compactAt ?? null,
+			compactAtShare: COMPACT_AT_SHARE,
+			compactAtFloor: COMPACT_AT_DEFAULT,
+			// Public by design (an OAuth App's Client ID is no secret). It was left out, so the app never showed the one
+			// saved, and said "built-in" for a build that has none.
+			githubClientId: (this.settings.githubClientId ?? "").trim(),
+			githubClientIdBuiltIn: !!GITHUB_CLIENT_ID,
+			subagentCostLimit: subagentCostLimit ?? 5,
+			subagentMinutesLimit: subagentMinutesLimit ?? 30,
+			subagentApprovalMode: subagentApprovalMode ?? approvalMode ?? "ask_risky",
+			// False while subagents follow the chat's approval mode (no override saved).
+			subagentApprovalOverride: subagentApprovalMode != null,
+			subagentNotifyDone: subagentNotifyDone ?? true,
+			subagentNotifyFailed: subagentNotifyFailed ?? true,
+			subagentNotifyApproval: subagentNotifyApproval ?? true,
+			subagentNotifyRunning: subagentNotifyRunning ?? true,
+			// The topic is shown to its owner so they can subscribe to it; it is not a credential for anything else.
+			notify: { enabled: this.settings.notify?.enabled === true, url: this.settings.notify?.url || NTFY_DEFAULT_URL, topic: this.settings.notify?.topic ?? null },
 		};
 	}
 
 	updateSettings(patch: Partial<AppSettings>) {
+		if (patch.notify) {
+			const merged = { ...this.settings.notify, ...patch.notify };
+			const problem = checkConfig({ url: merged.url || NTFY_DEFAULT_URL, topic: merged.topic });
+			// Turning them off never needs a valid address.
+			if (merged.enabled === true && problem) throw new Error(`Notifications: ${problem}`);
+			patch = { ...patch, notify: merged };
+		}
 		const next: AppSettings = { ...this.settings };
 		for (const [k, v] of Object.entries(patch)) {
 			if (v === undefined) continue;
 			(next as any)[k] = v === "" || v === null ? undefined : v;
+		}
+		// Validate a custom DoH URL before it is saved: a malformed URL must
+		// be rejected with an error here, not stored and then silently
+		// ignored (or worse, crash the host) on the next boot.
+		if (patch.dns !== undefined || patch.dnsUrl !== undefined) {
+			if (next.dns === "custom") {
+				const err = validateCustomDohUrl(next.dnsUrl ?? "");
+				if (err) throw new Error(`Invalid custom DoH URL: ${err}`);
+			}
+		}
+		// Subagent limits: 0 means no limit; anything else must be a positive number
+		// (whole minutes). A bad value would otherwise stop every subagent at once.
+		const limit = (v: unknown, whole: boolean) =>
+			typeof v === "number" && Number.isFinite(v) && v >= 0 && (!whole || Number.isInteger(v));
+		if (next.subagentCostLimit !== undefined && !limit(next.subagentCostLimit, false)) {
+			throw new Error("The subagent cost limit must be 0 (no limit) or a positive number");
+		}
+		if (next.subagentMinutesLimit !== undefined && !limit(next.subagentMinutesLimit, true)) {
+			throw new Error("The subagent time limit must be 0 (no limit) or a whole number of minutes");
+		}
+		// 0 turns the host's summaries off (pi's own stay); anything else must be a sane token count.
+		if (next.compactAt !== undefined && !(typeof next.compactAt === "number" && Number.isInteger(next.compactAt) && next.compactAt >= 0)) {
+			throw new Error("The context limit must be 0 (the model's own limit) or a whole number of tokens");
 		}
 		this.store.settings = next;
 		this.save();
@@ -129,7 +362,39 @@ export class Integrations {
 	}
 
 	searchKeys() {
-		return { brave: this.settings.braveKey, tavily: this.settings.tavilyKey };
+		const s = this.settings;
+		return {
+			brave: parseKeys(s.braveKey),
+			tavily: parseKeys(s.tavilyKey),
+			s1: parseKeys(s.s1Key),
+			tinyfish: parseKeys(s.tinyfishKey),
+			s1Search: s.s1Search ?? true,
+			s1Crawl: s.s1Crawl ?? true,
+			s1Screenshot: s.s1Screenshot ?? true,
+			tinyfishSearch: s.tinyfishSearch ?? true,
+			projectSearch: s.projectSearch ?? {},
+			braveSearch: s.braveSearch ?? true,
+			tavilySearch: s.tavilySearch ?? true,
+		};
+	}
+
+	/** Adds the keys found in pasted text (one per line) to a service's keys; returns how many were new. */
+	addSearchKeys(service: KeyService, text: string) {
+		const field = KEY_FIELD[service];
+		if (!field) throw new Error(`Unknown service: ${service}`);
+		const have = parseKeys(this.settings[field]);
+		const fresh = parseKeys(text).filter((k) => !have.includes(k));
+		if (fresh.length) this.updateSettings({ [field]: [...have, ...fresh].join("\n") });
+		return { added: fresh.length, settings: this.publicSettings() };
+	}
+
+	/** Removes a service's key by its position in the list publicSettings shows. */
+	removeSearchKey(service: KeyService, index: number) {
+		const field = KEY_FIELD[service];
+		if (!field) throw new Error(`Unknown service: ${service}`);
+		const keys = parseKeys(this.settings[field]);
+		keys.splice(index, 1);
+		return this.updateSettings({ [field]: keys.join("\n") });
 	}
 
 	private save() {
@@ -146,14 +411,24 @@ export class Integrations {
 		}
 		if (this.store.vercel) process.env.VERCEL_TOKEN = this.store.vercel.token;
 		else delete process.env.VERCEL_TOKEN;
+		// What wrangler reads, so the agent can use it without logging in.
+		const cf = this.store.cloudflare;
+		if (cf) {
+			process.env.CLOUDFLARE_API_TOKEN = cf.token;
+			process.env.CLOUDFLARE_ACCOUNT_ID = cf.accountId;
+		} else {
+			delete process.env.CLOUDFLARE_API_TOKEN;
+			delete process.env.CLOUDFLARE_ACCOUNT_ID;
+		}
 	}
 
 	summary() {
-		const { github, vercel, sshHosts } = this.store;
+		const { github, vercel, cloudflare, sshHosts } = this.store;
 		const pub = join(this.home, ".ssh", "id_ed25519.pub");
 		return {
-			github: github ? { login: github.login, name: github.name, avatarUrl: github.avatarUrl } : null,
+			github: github ? { login: github.login, name: github.name, avatarUrl: github.avatarUrl, expired: !!github.expired } : null,
 			vercel: vercel ? { username: vercel.username } : null,
+			cloudflare: cloudflare ? { accounts: cloudflare.accounts, accountId: cloudflare.accountId } : null,
 			ssh: { publicKey: existsSync(pub) ? readFileSync(pub, "utf8").trim() : null, hosts: sshHosts },
 		};
 	}
@@ -161,10 +436,35 @@ export class Integrations {
 	// -------------------------------------------------------------------------
 	// GitHub
 
-	private async github(path: string, init: RequestInit = {}, token = this.store.github?.token) {
-		if (!token) throw new Error("Not signed in to GitHub");
+	/**
+	 * Calls the GitHub REST API with the stored sign-in, refreshing it first when
+	 * it is about to expire. A 401 refreshes once and retries; when that is not
+	 * possible the account is marked expired and a GithubAuthError is thrown.
+	 * An explicit [token] (signing in) is used as is.
+	 */
+	private async github(path: string, init: RequestInit = {}, token?: string): Promise<any> {
+		if (token) return this.githubRequest(path, init, token);
+		if (!this.store.github) throw new Error("Not signed in to GitHub");
+		const fresh = await this.githubToken();
+		try {
+			return await this.githubRequest(path, init, fresh);
+		} catch (e) {
+			if ((e as any)?.status !== 401) throw e;
+			// Rejected before its expiry (revoked, or the clock is off): one refresh, one retry.
+			const again = await this.githubToken(true);
+			try {
+				return await this.githubRequest(path, init, again);
+			} catch (e2) {
+				if ((e2 as any)?.status === 401) this.markGithubExpired();
+				throw (e2 as any)?.status === 401 ? new GithubAuthError() : e2;
+			}
+		}
+	}
+
+	private async githubRequest(path: string, init: RequestInit, token: string) {
 		const res = await fetch(`https://api.github.com${path}`, {
 			...init,
+			signal: init.signal ?? AbortSignal.timeout(30_000),
 			headers: {
 				Accept: "application/vnd.github+json",
 				Authorization: `Bearer ${token}`,
@@ -188,7 +488,7 @@ export class Integrations {
 		return this.github(path, init);
 	}
 
-	async githubLogin(token: string) {
+	async githubLogin(token: string, grant?: GithubGrant & { clientId?: string }) {
 		token = token.trim();
 		const user = await this.github("/user", {}, token);
 		this.store.github = {
@@ -197,41 +497,262 @@ export class Integrations {
 			name: user.name ?? null,
 			email: user.email ?? `${user.id}+${user.login}@users.noreply.github.com`,
 			avatarUrl: user.avatar_url,
+			...this.grantFields(grant, grant?.clientId),
 		};
 		this.save();
 		await this.configureGit();
 		return this.summary();
 	}
 
+	/** Expiry and refresh fields from a token response; empty for tokens that do not expire. */
+	private grantFields(grant: GithubGrant | undefined, clientId: string | undefined): Partial<GithubAccount> {
+		const now = Date.now();
+		const secs = (v: unknown) => (typeof v === "number" && v > 0 ? v : typeof v === "string" && Number(v) > 0 ? Number(v) : 0);
+		const expiresIn = secs(grant?.expires_in);
+		const refreshToken = typeof grant?.refresh_token === "string" && grant.refresh_token ? grant.refresh_token : undefined;
+		return {
+			refreshToken,
+			expiresAt: expiresIn ? now + expiresIn * 1000 : undefined,
+			refreshExpiresAt: secs(grant?.refresh_token_expires_in) ? now + secs(grant?.refresh_token_expires_in) * 1000 : undefined,
+			clientId: refreshToken ? clientId : undefined,
+			expired: false,
+		};
+	}
+
+	private refreshing?: Promise<string>;
+
+	/**
+	 * The current access token, refreshed when it expires within the margin (or
+	 * now, with [force]). Single-flight: GitHub rotates the refresh token on use,
+	 * so two refreshes at once would sign the user out.
+	 */
+	async githubToken(force = false): Promise<string> {
+		const gh = this.store.github;
+		if (!gh) throw new Error("Not signed in to GitHub");
+		if (gh.expired) throw new GithubAuthError();
+		const due = gh.expiresAt !== undefined && Date.now() >= gh.expiresAt - GITHUB_REFRESH_MARGIN_MS;
+		if (!force && !due) return gh.token;
+		if (!gh.refreshToken || !gh.clientId) {
+			// Nothing to refresh with: a token that has already expired is dead; otherwise try it.
+			if (gh.expiresAt !== undefined && Date.now() >= gh.expiresAt) {
+				this.markGithubExpired();
+				throw new GithubAuthError();
+			}
+			if (force) {
+				this.markGithubExpired();
+				throw new GithubAuthError();
+			}
+			return gh.token;
+		}
+		this.refreshing ??= this.refreshGithub(gh).finally(() => {
+			this.refreshing = undefined;
+		});
+		return this.refreshing;
+	}
+
+	private async refreshGithub(gh: GithubAccount): Promise<string> {
+		if (gh.refreshExpiresAt !== undefined && Date.now() >= gh.refreshExpiresAt) {
+			this.markGithubExpired();
+			throw new GithubAuthError();
+		}
+		// Device-flow tokens refresh without a client secret (GitHub docs, "Refreshing user access tokens").
+		// A network failure throws here without touching the account, so the next call tries again.
+		const r = await this.githubOAuth("/login/oauth/access_token", {
+			client_id: gh.clientId!,
+			grant_type: "refresh_token",
+			refresh_token: gh.refreshToken!,
+		});
+		if (typeof r.access_token !== "string" || !r.access_token) {
+			// bad_refresh_token, unauthorized_client, ...: only a new sign-in helps.
+			this.markGithubExpired();
+			throw new GithubAuthError();
+		}
+		// Signed out or re-signed in meanwhile: leave the newer account alone. (Not githubToken():
+		// this promise is still the in-flight refresh, so that would wait on itself.)
+		if (this.store.github !== gh) {
+			if (!this.store.github) throw new Error("Not signed in to GitHub");
+			return this.store.github.token;
+		}
+		const fields = this.grantFields(r, gh.clientId);
+		// GitHub rotates the refresh token on every use; should a response lack one, keep the old one.
+		if (!fields.refreshToken) {
+			delete fields.refreshToken;
+			delete fields.refreshExpiresAt;
+			delete fields.clientId;
+		}
+		Object.assign(gh, { token: r.access_token, ...fields });
+		this.save();
+		await this.configureGit();
+		return gh.token;
+	}
+
+	/** Refreshes the token if it is due, for callers about to run git; never throws. */
+	async githubFresh() {
+		if (!this.store.github || this.store.github.expired) return;
+		await this.githubToken().catch(() => {});
+	}
+
+	private markGithubExpired() {
+		const gh = this.store.github;
+		if (!gh || gh.expired) return;
+		gh.expired = true;
+		this.save();
+		this.onChange?.();
+	}
+
+	/** Called when the account summary changes on its own (a sign-in expiring), so the app can redraw. */
+	onChange?: () => void;
+
+	/**
+	 * The OAuth App Client ID for the device flow: the one entered in
+	 * Settings wins, then the build-time env var. There is deliberately
+	 * no built-in default: the upstream template's OAuth App ID must
+	 * never be used, so an empty result means "not configured".
+	 */
+	private get githubClientId() {
+		return (this.settings.githubClientId ?? "").trim() || GITHUB_CLIENT_ID;
+	}
+
 	/**
 	 * GitHub device flow: the user types a short code at github.com/login/device
 	 * instead of creating and pasting a token. Needs the Client ID of an OAuth
 	 * App with "Enable Device Flow" ticked (the ID is public; there is no secret).
+	 * Starting it also starts the host waiting for the approval (see [DeviceFlow]); one flow at a time.
 	 */
 	async githubDeviceStart() {
-		if (!GITHUB_CLIENT_ID) throw new Error("GitHub device login is not set up in this build (missing OAuth Client ID). Use a token instead.");
-		const r = await this.githubOAuth("/login/device/code", { client_id: GITHUB_CLIENT_ID, scope: "repo workflow read:org" });
+		if (!this.githubClientId) {
+			throw new Error("Sign-in with a code needs a GitHub OAuth Client ID. Paste one under Advanced, or sign in with a token.");
+		}
+		const r = await this.githubOAuth("/login/device/code", { client_id: this.githubClientId, scope: "repo workflow read:org" });
 		if (r.error || !r.device_code) {
 			// "device_flow_disabled" means the OAuth App exists but the Device Flow box is not ticked.
 			throw new Error((r.error_description as string) ?? (r.error as string) ?? "GitHub did not return a device code");
 		}
-		return {
+		const expiresIn = (r.expires_in as number) ?? 900;
+		const flow: DeviceFlow = {
 			deviceCode: r.device_code as string,
 			userCode: r.user_code as string,
 			verificationUri: (r.verification_uri as string) ?? "https://github.com/login/device",
-			expiresIn: (r.expires_in as number) ?? 900,
+			expiresAt: Date.now() + expiresIn * 1000,
 			interval: (r.interval as number) ?? 5,
+			status: "pending",
+			loginFailures: 0,
+		};
+		this.cancelDeviceFlow();
+		this.deviceFlow = flow;
+		this.waitForDeviceApproval(flow);
+		return {
+			deviceCode: flow.deviceCode,
+			userCode: flow.userCode,
+			verificationUri: flow.verificationUri,
+			expiresIn,
+			interval: flow.interval,
 		};
 	}
 
-	/** One poll of the device flow. The app calls this every `interval` seconds until it is not pending. */
+	private deviceFlow: DeviceFlow | null = null;
+
+	private waitForDeviceApproval(flow: DeviceFlow) {
+		flow.timer = setTimeout(() => void this.pollDeviceFlow(flow), flow.interval * 1000);
+		flow.timer.unref();
+	}
+
+	private cancelDeviceFlow() {
+		if (this.deviceFlow) clearTimeout(this.deviceFlow.timer);
+		this.deviceFlow = null;
+	}
+
+	/** One round of the host's wait: ask GitHub, and sign in once the user has approved. */
+	private async pollDeviceFlow(flow: DeviceFlow) {
+		if (this.deviceFlow !== flow || flow.status !== "pending") return;
+		if (Date.now() >= flow.expiresAt) {
+			flow.status = "expired";
+			return;
+		}
+		try {
+			if (!flow.grant) {
+				const r = await this.githubDeviceExchange(flow.deviceCode);
+				if (this.deviceFlow !== flow) return;
+				if (r.status === "grant") flow.grant = r.grant;
+				else if (r.status === "slow_down") flow.interval = r.interval ?? flow.interval + 5;
+				else if (r.status === "expired" || r.status === "denied") {
+					flow.status = r.status;
+					return;
+				} else if (r.status === "error") {
+					flow.status = "error";
+					flow.error = r.error;
+					return;
+				}
+			}
+			if (flow.grant) {
+				await this.githubLogin(flow.grant.access_token, { ...flow.grant, clientId: this.githubClientId });
+				if (this.deviceFlow !== flow) return;
+				flow.status = "done";
+				// Nobody may be waiting for the answer any more: tell the app, so it shows the account by itself.
+				this.onChange?.();
+				return;
+			}
+		} catch (e) {
+			// No network, or GitHub is down: keep asking until the code expires. Once GitHub has given the token, though,
+			// a sign-in that keeps failing is a real problem, said rather than retried for ever.
+			if (this.deviceFlow !== flow) return;
+			if (flow.grant && ++flow.loginFailures >= DEVICE_LOGIN_ATTEMPTS) {
+				flow.status = "error";
+				flow.error = (e as Error).message;
+				return;
+			}
+		}
+		this.waitForDeviceApproval(flow);
+	}
+
+	/** Where the sign-in with a code stands, for an app that came back to it (or was away while it went on). */
+	githubDeviceStatus() {
+		const f = this.deviceFlow;
+		if (!f) return { status: "none" as const };
+		if (f.status === "pending" && Date.now() >= f.expiresAt) f.status = "expired";
+		return {
+			status: f.status,
+			deviceCode: f.deviceCode,
+			userCode: f.userCode,
+			verificationUri: f.verificationUri,
+			// Seconds left, not a time: the app's clock and a server's may differ.
+			expiresIn: Math.max(0, Math.round((f.expiresAt - Date.now()) / 1000)),
+			interval: f.interval,
+			...(f.error ? { error: f.error } : {}),
+		};
+	}
+
+	/** The user gave up on the sign-in: the host stops asking. */
+	githubDeviceCancel() {
+		this.cancelDeviceFlow();
+		return { status: "none" as const };
+	}
+
+	/**
+	 * What the app that polls for itself (an older one) gets: the host's own wait answers it, so GitHub is asked once
+	 * per interval, not twice. A code the host has no flow for (it was restarted since) is asked about once, as before.
+	 */
 	async githubDevicePoll(deviceCode: string) {
+		const flow = this.deviceFlow;
+		if (flow?.deviceCode === deviceCode) {
+			if (flow.status === "done") return { status: "done", state: this.summary() };
+			if (flow.status === "error") throw new Error(flow.error ?? "GitHub login failed");
+			return { status: flow.status === "pending" ? "pending" : flow.status };
+		}
+		const r = await this.githubDeviceExchange(deviceCode);
+		if (r.status === "grant") return { status: "done", state: await this.githubLogin(r.grant.access_token, { ...r.grant, clientId: this.githubClientId }) };
+		if (r.status === "error") throw new Error(r.error);
+		return r;
+	}
+
+	/** One question to GitHub's token endpoint: has the user approved the code yet? */
+	private async githubDeviceExchange(deviceCode: string): Promise<DeviceExchange> {
 		const r = await this.githubOAuth("/login/oauth/access_token", {
-			client_id: GITHUB_CLIENT_ID,
+			client_id: this.githubClientId,
 			device_code: deviceCode,
 			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 		});
-		if (r.access_token) return { status: "done", state: await this.githubLogin(r.access_token as string) };
+		if (typeof r.access_token === "string" && r.access_token) return { status: "grant", grant: r as Record<string, unknown> & { access_token: string } };
 		switch (r.error) {
 			case "authorization_pending":
 				return { status: "pending" };
@@ -242,14 +763,15 @@ export class Integrations {
 			case "access_denied":
 				return { status: "denied" };
 			default:
-				throw new Error((r.error_description as string) ?? (r.error as string) ?? "GitHub login failed");
+				return { status: "error", error: (r.error_description as string) ?? (r.error as string) ?? "GitHub login failed" };
 		}
 	}
 
 	private async githubOAuth(path: string, body: Record<string, string>) {
 		const res = await fetch(`https://github.com${path}`, {
 			method: "POST",
-			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Rynex" },
+			signal: AbortSignal.timeout(30_000),
+			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "Rynex AI Agent" },
 			body: JSON.stringify(body),
 		});
 		const text = await res.text();
@@ -264,6 +786,7 @@ export class Integrations {
 	}
 
 	async githubLogout() {
+		this.cancelDeviceFlow();
 		delete this.store.github;
 		this.save();
 		await this.configureGit();
@@ -288,6 +811,7 @@ export class Integrations {
 	}
 
 	async repos() {
+		const clones = await this.workspaceClones();
 		const list: any[] = [];
 		for (let page = 1; page <= 5; page++) {
 			const batch = await this.github(
@@ -306,18 +830,70 @@ export class Integrations {
 			stars: r.stargazers_count ?? 0,
 			pushedAt: r.pushed_at,
 			defaultBranch: r.default_branch,
-			cloned: existsSync(join(this.workspace, r.name, ".git")),
+			...this.clonedAt(r.full_name, clones),
 		}));
 	}
 
-	async clone(fullName: string, log: Log) {
-		const name = fullName.split("/").pop()!;
-		const dest = join(this.workspace, name);
-		if (existsSync(join(dest, ".git"))) {
-			log(`${name} is already cloned`);
-			return { path: dest };
+	/**
+	 * Workspace folders that are clones of a GitHub repository, keyed by
+	 * lower-cased "owner/repo" (GitHub names are case-insensitive). Matched on
+	 * the origin remote, never on the folder name: akun1/repo1 and akun2/repo1
+	 * are different repositories that would both want the folder "repo1".
+	 */
+	private async workspaceClones(): Promise<Map<string, string>> {
+		const out = new Map<string, string>();
+		let names: string[] = [];
+		try {
+			names = readdirSync(this.workspace);
+		} catch {
+			return out;
 		}
-		await run("git", ["clone", "--progress", `https://github.com/${fullName}.git`, dest], {
+		await Promise.all(
+			names.map(async (name) => {
+				const dir = join(this.workspace, name);
+				if (name.startsWith(".") || !existsSync(join(dir, ".git"))) return;
+				// The URL as configured; `remote get-url` would apply url.insteadOf rewrites.
+				const origin = (await gitRun(["config", "--get", "remote.origin.url"], { cwd: dir }).catch(() => "")).trim();
+				const slug = parseGithubSlug(origin)?.toLowerCase();
+				// Two folders with the same origin: the one named after the repo wins, as before.
+				if (slug && (!out.has(slug) || name.toLowerCase() === slug.split("/")[1])) out.set(slug, dir);
+			}),
+		);
+		return out;
+	}
+
+	private clonedAt(fullName: string, clones: Map<string, string>) {
+		const path = clones.get(fullName.toLowerCase());
+		return { cloned: path !== undefined, path: path ?? null };
+	}
+
+	/**
+	 * The folder a new clone of [fullName] goes to: the repository's name, or
+	 * "<name>-<owner>" (then "-2", "-3", ...) when that name is taken by any
+	 * other file or folder.
+	 */
+	private cloneDest(fullName: string): string {
+		const [owner, name] = fullName.split("/");
+		const free = (n: string) => !existsSync(join(this.workspace, n));
+		if (free(name)) return join(this.workspace, name);
+		const base = `${name}-${owner}`;
+		if (free(base)) return join(this.workspace, base);
+		for (let i = 2; ; i++) if (free(`${base}-${i}`)) return join(this.workspace, `${base}-${i}`);
+	}
+
+	async clone(fullName: string, log: Log) {
+		if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName) || fullName.split("/").some((p) => p === "." || p === "..")) {
+			throw new Error(`Not a GitHub repository name: ${fullName}`);
+		}
+		const existing = (await this.workspaceClones()).get(fullName.toLowerCase());
+		if (existing) {
+			log(`${fullName} is already cloned in ${basename(existing)}`);
+			return { path: existing };
+		}
+		mkdirSync(this.workspace, { recursive: true });
+		const dest = this.cloneDest(fullName);
+		// From the workspace folder: a `.git` there (the agent can make one) would be read as the settings of this clone.
+		await gitRun(["clone", "--progress", `https://github.com/${fullName}.git`, dest], {
 			cwd: this.workspace,
 			log,
 		});
@@ -337,9 +913,9 @@ export class Integrations {
 			let remote: string | null = null;
 			let dirty = false;
 			if (git) {
-				branch = (await run("git", ["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
-				remote = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim() || null;
-				dirty = (await run("git", ["status", "--porcelain"], { cwd: dir }).catch(() => "")).trim().length > 0;
+				branch = (await gitRun(["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
+				remote = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim() || null;
+				dirty = (await gitRun(["status", "--porcelain"], { cwd: dir }).catch(() => "")).trim().length > 0;
 			}
 			out.push({ name, path: dir, git, branch, remote, dirty, modified: statSync(dir).mtimeMs });
 		}
@@ -424,6 +1000,7 @@ export class Integrations {
 		if (!token) throw new Error("Not connected to Vercel");
 		const res = await fetch(`https://api.vercel.com${path}`, {
 			...init,
+			signal: init.signal ?? AbortSignal.timeout(30_000),
 			headers: { Authorization: `Bearer ${token}`, ...init.headers },
 		});
 		const body = await res.json().catch(() => null);
@@ -446,15 +1023,138 @@ export class Integrations {
 	}
 
 	// -------------------------------------------------------------------------
+	// Cloudflare (cloudflare.ts)
+
+	async cloudflareLogin(token: string) {
+		token = token.trim();
+		const accounts = await Cloudflare.accounts(token);
+		this.store.cloudflare = { token, accounts, accountId: accounts[0].id };
+		this.save();
+		return this.summary();
+	}
+
+	cloudflareSelectAccount(accountId: string) {
+		const cf = this.store.cloudflare;
+		if (!cf) throw new Error("Not connected to Cloudflare");
+		if (!cf.accounts.some((a) => a.id === accountId)) throw new Error("Unknown Cloudflare account");
+		cf.accountId = accountId;
+		this.save();
+		return this.summary();
+	}
+
+	cloudflareLogout() {
+		delete this.store.cloudflare;
+		this.save();
+		return this.summary();
+	}
+
+	private cloudflare() {
+		const cf = this.store.cloudflare;
+		if (!cf) throw new Error("Not connected to Cloudflare");
+		return new Cloudflare(cf.token, cf.accountId);
+	}
+
+	/** Commands in the Linux container (wrangler and npm live there), when it is installed. */
+	private containerRunner() {
+		if (this.options.server) return this.serverRunner();
+		const rootfs = process.env.RYNEX_ROOTFS;
+		const available = !!rootfs && existsSync(join(rootfs, "etc"));
+		return {
+			available,
+			run: async (cmd: string, args: string[], opts: { cwd: string; log?: Log }) => {
+				try {
+					return await run(cmd, args, opts);
+				} catch (e) {
+					// bash says "npm: command not found", busybox sh "npm: not found".
+					if (/\b(npx|npm): (command )?not found/.test((e as Error).message)) {
+						const alpine = !!rootfs && existsSync(join(rootfs, "etc", "alpine-release"));
+						const install = alpine ? "apk add nodejs npm" : "apt-get install -y nodejs npm";
+						throw new Error(`Node.js isn't installed in the Linux container. Ask the agent to install it (${install}), then deploy again.`);
+					}
+					throw e;
+				}
+			},
+		};
+	}
+
+	/**
+	 * On a server, `box -c` is the rootless container when it is set up (the same launcher the agent's shell uses), and
+	 * a plain shell on the server otherwise: Node.js is installed there for the host, so wrangler and npm can run.
+	 */
+	private serverRunner() {
+		const box = this.options.boxScript?.() ?? null;
+		return {
+			available: true,
+			run: async (cmd: string, args: string[], opts: { cwd: string; log?: Log }) => {
+				try {
+					return await run(cmd === "box" ? (box ?? "/bin/sh") : cmd, args, opts);
+				} catch (e) {
+					if (box && /\b(npx|npm): (command )?not found/.test((e as Error).message)) {
+						throw new Error("Node.js isn't installed in the box. Ask the agent to install it (apt-get install -y nodejs npm), then deploy again.");
+					}
+					throw e;
+				}
+			},
+		};
+	}
+
+	/** `npm run build` (installing dependencies first if needed) in the container, before a deploy. */
+	private async build(root: string, log: Log) {
+		const container = this.containerRunner();
+		if (!container.available) {
+			throw new Error("Building needs the Linux container with Node.js (Settings > Linux container). Or build the project first and deploy its output folder.");
+		}
+		if (!existsSync(join(root, "package.json"))) throw new Error("No package.json to build");
+		log("Building (npm run build)…");
+		const install = existsSync(join(root, "node_modules")) ? "" : "npm install && ";
+		try {
+			await container.run("box", ["-c", `${install}npm run build`], { cwd: root, log });
+		} catch (e) {
+			const message = (e as Error).message;
+			if (message.startsWith("Node.js isn't installed")) throw e;
+			// The log above has npm's own output; say what failed in words.
+			if (/Missing script: "?build/.test(message)) {
+				throw new Error("package.json has no build script. Choose a folder that is already built, or add a build script.");
+			}
+			throw new Error(`The build failed (npm ${install ? "install or " : ""}run build); see the log above.\n${message}`);
+		}
+	}
+
+	// -------------------------------------------------------------------------
 	// Deploy
 
 	async deploy(target: string, dir: string, options: Record<string, any>, log: Log) {
-		if (!existsSync(dir)) throw new Error(`No such folder: ${dir}`);
+		// A Cloudflare deploy may build its output folder first.
+		if (!existsSync(dir) && !(target.startsWith("cloudflare") && options.build)) {
+			// Name it the way the user typed it: relative to the project, not the app's private path.
+			const root = typeof options.root === "string" ? options.root : null;
+			const shown = root ? relative(root, dir) || "." : basename(dir);
+			throw new Error(`No such folder: ${shown}${target.startsWith("cloudflare") ? ". Build the project first, or turn on Build first." : ""}`);
+		}
+		// Pages and Vercel deploys publish to the public internet: the UI must
+		// have shown the resolved target and the user must have confirmed it.
+		if ((target === "github_pages" || target === "vercel") && options.confirmed !== true) {
+			throw new Error("Confirm the deploy target before deploying.");
+		}
 		switch (target) {
 			case "vercel":
 				return this.deployVercel(dir, options, log);
 			case "github_pages":
 				return this.deployPages(dir, options, log);
+			case "cloudflare_workers":
+			case "cloudflare_pages": {
+				const root = typeof options.root === "string" && existsSync(options.root) ? options.root : dir;
+				const rel = relative(root, dir);
+				if (rel.startsWith("..")) throw new Error("The folder to deploy must be inside the project");
+				if (options.build) {
+					await this.build(root, log);
+					if (!existsSync(dir)) throw new Error(`The build didn't produce ${relative(root, dir) || dir}`);
+				}
+				const cf = this.cloudflare();
+				return target === "cloudflare_workers"
+					? cf.deployWorker(dir, root, { name: options.name, spa: !!options.spa }, log, this.containerRunner())
+					: cf.deployPages(dir, root, { project: options.name, preview: !!options.preview }, log, this.containerRunner());
+			}
 			case "ssh":
 				return this.deploySsh(dir, options, log);
 			default:
@@ -625,10 +1325,10 @@ export class Integrations {
 
 	/** CI for the latest commit of a project folder with a GitHub remote. */
 	async watchProject(dir: string, log: Log) {
-		const remote = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+		const remote = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
 		const slug = parseGithubSlug(remote);
 		if (!slug) throw new Error("This folder has no GitHub remote");
-		const sha = (await run("git", ["rev-parse", "HEAD"], { cwd: dir })).trim();
+		const sha = (await gitRun(["rev-parse", "HEAD"], { cwd: dir })).trim();
 		log(`CI for ${slug}@${sha.slice(0, 7)}`);
 		await this.watchActions(slug, sha, log);
 		return { url: null };
@@ -637,7 +1337,8 @@ export class Integrations {
 	private async jobLogTail(slug: string, jobId: number, lines = 30) {
 		try {
 			const res = await fetch(`https://api.github.com/repos/${slug}/actions/jobs/${jobId}/logs`, {
-				headers: { Authorization: `Bearer ${this.store.github?.token}`, Accept: "application/vnd.github+json" },
+				signal: AbortSignal.timeout(60_000),
+				headers: { Authorization: `Bearer ${await this.githubToken()}`, Accept: "application/vnd.github+json" },
 			});
 			if (!res.ok) return [`(logs unavailable: ${res.status})`];
 			const text = await res.text();
@@ -652,94 +1353,183 @@ export class Integrations {
 		}
 	}
 
+	/**
+	 * Resolves a deploy target without side effects, so the UI can confirm
+	 * the exact destination (repository + visibility) before anything is
+	 * pushed. Only read-only calls happen here.
+	 */
+	async deployPlan(target: string, dir: string, options: Record<string, any>) {
+		if (target === "github_pages") {
+			const gh = this.store.github;
+			if (!gh) throw new Error("Sign in to GitHub first");
+			const origin = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+			const slug = parseGithubSlug(origin);
+			if (slug) {
+				const repo = await this.github(`/repos/${slug}`).catch(() => null);
+				return {
+					target,
+					dir,
+					repo: slug,
+					willCreate: false,
+					visibility: repo == null ? "unknown" : repo.private === true ? "private" : "public",
+					branch: "gh-pages",
+				};
+			}
+			const name = sanitizeRepo(options.repo || basename(dir));
+			return {
+				target,
+				dir,
+				repo: `${gh.login}/${name}`,
+				willCreate: true,
+				visibility: "public",
+				branch: "gh-pages",
+				note: "New repositories are created public so Pages serves on free accounts.",
+			};
+		}
+		if (target === "vercel") {
+			return {
+				target,
+				dir,
+				project: sanitizeProject(options.project || basename(dir)),
+				preview: options.preview === true,
+			};
+		}
+		if (target === "ssh") {
+			const h = this.host(options.hostId);
+			const remoteDir = (options.remotePath || h.path || "").trim();
+			const files = walk(dir);
+			return {
+				target,
+				dir,
+				server: `${h.user}@${h.host}`,
+				remoteDir,
+				files: files.length,
+				// What stays home, so the dialog can name it (.env above all).
+				skipped: skippedEntries(dir),
+			};
+		}
+		return { target, dir };
+	}
+
+	/**
+	 * GitHub Pages deploy that never touches the user's own repository: only
+	 * the selected folder's filtered content is copied to a temp dir and
+	 * pushed to a dedicated gh-pages branch. The old code ran `git add -A`
+	 * in the project (staging the whole tree, .env included), committed to
+	 * the current branch, deleted a non-GitHub origin, and created public
+	 * repos silently; Pages then served the branch root (or /docs), not the
+	 * selected folder.
+	 */
 	private async deployPages(dir: string, options: Record<string, any>, log: Log) {
 		const gh = this.store.github;
 		if (!gh) throw new Error("Sign in to GitHub first");
-		const git = (args: string[]) => run("git", args, { cwd: dir, log });
-		const quiet = (args: string[]) => run("git", args, { cwd: dir });
-
-		let root = (await quiet(["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
-		if (!root) {
-			log("Initialising a git repository…");
-			await git(["init", "-b", "main"]);
-			root = dir;
-		}
-		let remote = (await quiet(["remote", "get-url", "origin"]).catch(() => "")).trim();
-		let slug = parseGithubSlug(remote);
+		if (options.confirmed !== true) throw new Error("Confirm the deploy target (repository + visibility) before deploying.");
+		// Resolve the target repo read-only: the user's local repo is never modified.
+		const origin = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+		let slug = parseGithubSlug(origin);
 		if (!slug) {
-			const name = sanitizeRepo(options.repo || basename(root));
+			const name = sanitizeRepo(options.repo || basename(dir));
 			log(`Creating GitHub repository ${gh.login}/${name}…`);
 			const repo = await this.github("/user/repos", {
 				method: "POST",
-				body: JSON.stringify({ name, private: false, description: "Deployed from Rynex" }),
+				body: JSON.stringify({ name, private: false, description: "Deployed from Rynex AI Agent" }),
 			}).catch(async (e) => {
 				if ((e as any).status === 422) return this.github(`/repos/${gh.login}/${name}`);
 				throw e;
 			});
 			slug = repo.full_name as string;
-			remote = `https://github.com/${slug}.git`;
-			await quiet(["remote", "remove", "origin"]).catch(() => {});
-			await git(["remote", "add", "origin", remote]);
 		}
-
-		if (options.commit !== false) {
-			await git(["add", "-A"]);
-			const staged = (await quiet(["diff", "--cached", "--name-only"])).trim();
-			const hasHead = await quiet(["rev-parse", "--verify", "HEAD"]).then(() => true, () => false);
-			if (staged || !hasHead) {
-				await git(["commit", "--allow-empty", "-m", options.message || "Deploy from Rynex"]);
-			} else {
-				log("No changes to commit");
-			}
+		if (options.planRepo && options.planRepo !== slug) {
+			throw new Error("Deploy target changed since confirmation; confirm again.");
 		}
-		const branch = (await quiet(["branch", "--show-current"])).trim() || "main";
-		log(`Pushing ${branch} to ${slug}…`);
-		await git(["push", "-u", "origin", `HEAD:${branch}`]);
-
-		const path = options.path === "/docs" ? "/docs" : "/";
-		log("Enabling GitHub Pages…");
+		const branch = "gh-pages";
+		const files = walk(dir);
+		if (files.length === 0) throw new Error("Nothing to deploy: the folder is empty");
+		log(`Deploying ${files.length} files from ${basename(dir)} to ${slug} (${branch})…`);
+		const tmp = mkdtempSync(join(tmpdir(), "rynex-deploy-"));
 		try {
-			await this.github(`/repos/${slug}/pages`, {
-				method: "POST",
-				body: JSON.stringify({ source: { branch, path } }),
-			});
-		} catch (e) {
-			if ((e as any).status !== 409) throw e;
-			await this.github(`/repos/${slug}/pages`, {
-				method: "PUT",
-				body: JSON.stringify({ source: { branch, path } }),
-			}).catch(() => {});
+			for (const rel of files) {
+				const target = join(tmp, rel);
+				mkdirSync(dirname(target), { recursive: true });
+				copyFileSync(join(dir, rel), target);
+			}
+			const git = (args: string[]) => run("git", args, { cwd: tmp, log });
+			const quiet = (args: string[]) => run("git", args, { cwd: tmp });
+			await git(["init", "-b", branch]);
+			await git(["add", "-A"]);
+			await git(["commit", "-m", options.message || "Deploy from Rynex AI Agent"]);
+			await quiet(["remote", "add", "origin", `https://github.com/${slug}.git`]);
+			// Push with a lease when the branch already exists, so a
+			// concurrent change to the deploy branch is refused, not clobbered.
+			const lease = (await quiet(["fetch", "origin", branch]).then(() => quiet(["rev-parse", "FETCH_HEAD"])).catch(() => "")).trim();
+			await git(lease ? ["push", `--force-with-lease=${branch}:${lease}`, "origin", `HEAD:${branch}`] : ["push", "origin", `HEAD:${branch}`]);
+			log("Enabling GitHub Pages…");
+			try {
+				await this.github(`/repos/${slug}/pages`, {
+					method: "POST",
+					body: JSON.stringify({ source: { branch, path: "/" } }),
+				});
+			} catch (e) {
+				if ((e as any).status !== 409) throw e;
+				await this.github(`/repos/${slug}/pages`, {
+					method: "PUT",
+					body: JSON.stringify({ source: { branch, path: "/" } }),
+				}).catch(() => {});
+			}
+			const pages = await this.github(`/repos/${slug}/pages`);
+			const url = pages.html_url as string;
+			const sha = (await quiet(["rev-parse", "HEAD"])).trim();
+			log(`Waiting for CI on ${sha.slice(0, 7)}…`);
+			await this.watchActions(slug, sha, log);
+			log(`Live at ${url}`);
+			return { url, repo: `https://github.com/${slug}` };
+		} finally {
+			rmSync(tmp, { recursive: true, force: true });
 		}
-		const pages = await this.github(`/repos/${slug}/pages`);
-		const url = pages.html_url as string;
-		const sha = (await quiet(["rev-parse", "HEAD"])).trim();
-		log(`Waiting for CI on ${sha.slice(0, 7)}…`);
-		await this.watchActions(slug, sha, log);
-		log(`Live at ${url}`);
-		return { url, repo: `https://github.com/${slug}` };
 	}
 
+	/**
+	 * SSH deploy of exactly the files every other target uploads (see walk):
+	 * no dotfiles (.env), no .git or node_modules, no symlinks. It used to
+	 * rsync/scp the whole folder minus .git and node_modules, so a project's
+	 * .env landed on the server, often inside the web root.
+	 */
 	private async deploySsh(dir: string, options: Record<string, any>, log: Log) {
+		if (options.confirmed !== true) throw new Error("Confirm the deploy target (server + folder) before deploying.");
 		const h = this.host(options.hostId);
 		const remoteDir = (options.remotePath || h.path || "").trim();
 		if (!remoteDir) throw new Error("Choose a remote folder to deploy into");
+		const files = walk(dir);
+		if (!files.length) throw new Error("Nothing to deploy: the folder has no files (dotfiles are never uploaded)");
 		const config = join(this.home, ".ssh", "config");
 		const target = `${h.name}:${remoteDir.replace(/\/?$/, "/")}`;
-		log(`Syncing to ${h.user}@${h.host}:${remoteDir}…`);
+		log(`Syncing ${files.length} files to ${h.user}@${h.host}:${remoteDir}…`);
 		await run("ssh", ["-F", config, "-o", "BatchMode=yes", h.name, `mkdir -p '${remoteDir.replace(/'/g, "'\\''")}'`], {
 			cwd: dir,
 			log,
 		});
-		const exclude = ["--exclude=.git", "--exclude=node_modules"];
+		const tmp = mkdtempSync(join(tmpdir(), "rynex-ssh-"));
 		try {
-			await run("rsync", ["-az", "--stats", ...exclude, "-e", `ssh -F ${config} -o BatchMode=yes`, `${dir}/`, target], {
-				cwd: dir,
-				log,
-			});
-		} catch (e) {
-			if (!/rsync.*(not found|No such file)|protocol/i.test(String((e as Error).message))) throw e;
-			log("rsync unavailable on the server, falling back to scp");
-			await run("scp", ["-F", config, "-S", "ssh", "-o", "BatchMode=yes", "-r", `${dir}/.`, target], { cwd: dir, log });
+			const list = join(tmp, "files.txt");
+			writeFileSync(list, `${files.join("\n")}\n`);
+			try {
+				await run("rsync", ["-az", "--stats", `--files-from=${list}`, "-e", `ssh -F ${config} -o BatchMode=yes`, `${dir}/`, target], {
+					cwd: dir,
+					log,
+				});
+			} catch (e) {
+				if (!/rsync.*(not found|No such file)|protocol/i.test(String((e as Error).message))) throw e;
+				log("rsync unavailable on the server, falling back to scp");
+				// scp copies trees, not lists: stage the filtered files first.
+				const stage = join(tmp, "stage");
+				for (const f of files) {
+					mkdirSync(dirname(join(stage, f)), { recursive: true });
+					copyFileSync(join(dir, f), join(stage, f));
+				}
+				await run("scp", ["-F", config, "-S", "ssh", "-o", "BatchMode=yes", "-r", `${stage}/.`, target], { cwd: dir, log });
+			}
+		} finally {
+			rmSync(tmp, { recursive: true, force: true });
 		}
 		log("Done");
 		return { url: null };
@@ -750,11 +1540,30 @@ export class Integrations {
 // Helpers
 
 /** Runs a command, streaming lines to `log`. Resolves with stdout. */
-export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log }): Promise<string> {
+/**
+ * Runs a child process and returns its stdout. A hung git/ssh/rsync used to
+ * block forever (no timeout anywhere); every call now dies after
+ * `timeoutMs` (default 10 minutes) with a clear error instead.
+ */
+export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log; timeoutMs?: number; env?: NodeJS.ProcessEnv }): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(cmd, args, { cwd: opts.cwd, env: process.env });
+		const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env ?? process.env });
 		let stdout = "";
 		const tail: string[] = [];
+		let done = false;
+		const timer = setTimeout(() => {
+			if (done) return;
+			done = true;
+			child.kill("SIGKILL");
+			reject(new Error(`${cmd} timed out after ${opts.timeoutMs ?? 600_000}ms`));
+		}, opts.timeoutMs ?? 600_000);
+		timer.unref?.();
+		const finish = (fn: () => void) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			fn();
+		};
 		const feed = (chunk: Buffer, keep: boolean) => {
 			const text = chunk.toString("utf8");
 			if (keep) stdout += text;
@@ -768,21 +1577,46 @@ export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log 
 		};
 		child.stdout.on("data", (c) => feed(c, true));
 		child.stderr.on("data", (c) => feed(c, false));
-		child.on("error", reject);
+		child.on("error", (e) => finish(() => reject(e)));
 		child.on("close", (code) => {
-			if (code === 0) resolve(stdout);
-			else reject(new Error(`${cmd} exited with ${code}\n${tail.slice(-6).join("\n")}`));
+			finish(() => {
+				if (code === 0) resolve(stdout);
+				else reject(new Error(`${cmd} exited with ${code}\n${tail.slice(-6).join("\n")}`));
+			});
 		});
 	});
 }
 
+/**
+ * git in a project folder, which the agent can write the git settings of: see gitsafe.ts for what that means and what is
+ * done about it. Everything that runs git in a folder the agent worked in goes through here (or gitops.ts), not `run`.
+ */
+export async function gitRun(args: string[], opts: { cwd: string; log?: Log; timeoutMs?: number }): Promise<string> {
+	await assertRepoConfigSafe(opts.cwd);
+	return run("git", [...SAFE_GIT_FLAGS, ...args], { ...opts, env: gitEnv() });
+}
+
 const SKIP_DIRS = new Set([".git", "node_modules", ".vercel", ".next", ".DS_Store"]);
 
-function walk(root: string, dir = root, out: string[] = []): string[] {
+/**
+ * Files under a folder, for deploys. Dotfiles (.env included) and symlinks
+ * are never uploaded: a symlink could point outside the folder (or at
+ * /etc), and dotfiles are where secrets live. statSync follows symlinks,
+ * so lstatSync is what makes the symlink check real.
+ */
+/** Top-level names a deploy leaves out (dotfiles and SKIP_DIRS), for the confirm dialog. */
+export function skippedEntries(root: string): string[] {
+	return readdirSync(root)
+		.filter((name) => SKIP_DIRS.has(name) || name.startsWith("."))
+		.sort();
+}
+
+export function walk(root: string, dir = root, out: string[] = []): string[] {
 	for (const name of readdirSync(dir)) {
-		if (SKIP_DIRS.has(name)) continue;
+		if (SKIP_DIRS.has(name) || name.startsWith(".")) continue;
 		const path = join(dir, name);
-		const st = statSync(path);
+		const st = lstatSync(path);
+		if (st.isSymbolicLink()) continue;
 		if (st.isDirectory()) walk(root, path, out);
 		else if (st.isFile()) out.push(relative(root, path));
 		if (out.length > 5000) throw new Error("Too many files to deploy (over 5000)");

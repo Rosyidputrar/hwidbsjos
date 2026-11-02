@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
@@ -6,11 +8,13 @@ import 'package:flutter/services.dart';
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'code_view.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'task_log.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
-/// GitHub, Vercel, the device SSH key and saved servers.
+/// GitHub, Vercel, Cloudflare, the device SSH key and saved servers.
 class AccountsScreen extends StatefulWidget {
   const AccountsScreen({super.key, required this.agent});
   final AgentController agent;
@@ -28,36 +32,64 @@ class _AccountsScreenState extends State<AccountsScreen> {
     it.refresh();
   }
 
-  void _snack(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  void _snack(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(message))));
+
+  /// Disconnects after a confirmation: a token can't be read back, so reconnecting means pasting it again.
+  Future<void> _disconnect(String service, Future<void> Function() action) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Disconnect {service}?').replaceAll('{service}', service)),
+        content: Text(tr('Its token is removed from this device. To reconnect you will need to paste a token again.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Disconnect')),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await _guard(action, success: tr('{service} disconnected').replaceAll('{service}', service));
+  }
 
   Future<void> _guard(Future<void> Function() action, {String? success}) async {
     try {
       await action();
       if (success != null && mounted) _snack(success);
     } catch (e) {
-      if (mounted) _snack(e.toString());
+      if (mounted) _snack(friendlyError(e));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
     return ListenableBuilder(
       listenable: it,
       builder: (context, _) => Scaffold(
         appBar: AppBar(
-          title: const Text('Accounts & servers'),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(1),
-            child: Divider(height: 1, color: p.border),
-          ),
+          title: Text(tr('Accounts & servers')),
         ),
         body: !it.loaded
-            ? const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+            ? const Center(child: BusySpinner(size: 18))
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
-                  const _Header('GitHub'),
+                  // Each agent keeps its own accounts, on its own machine: a sign-in made while the phone's agent was in
+                  // use is not on the server, and the other way round.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+                    child: Text(
+                      tr(
+                        widget.agent.client.isRemote
+                            ? "These accounts are the server's: the agent there signs in to them, so what you connect on this phone's own agent does not carry over."
+                            : "These accounts are for this phone's agent. A server agent keeps its own: connect there too if you use one.",
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  _Header(tr('GitHub')),
                   it.github == null
                       ? _GithubConnect(
                           agent: widget.agent,
@@ -65,13 +97,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
                           onDone: () => _snack('GitHub connected'),
                           tokenFallback: _TokenConnect(
                             icon: SimpleIcons.github,
-                            title: 'Connect GitHub',
+                            title: tr('Connect GitHub'),
                             body:
                                 'Clone your repositories, push commits and publish to GitHub Pages. '
                                 'Create a classic token with the repo and workflow scopes, then paste it here.',
                             linkLabel: 'Create a token',
                             onLink: () => widget.agent.client.openUrl(
-                              'https://github.com/settings/tokens/new?scopes=repo,workflow,read:org&description=Rynex',
+                              'https://github.com/settings/tokens/new?scopes=repo,workflow,read:org&description=Rynex AI Agent',
                             ),
                             hint: 'ghp_… or github_pat_…',
                             onConnect: (t) => _guard(() => it.githubLogin(t), success: 'GitHub connected'),
@@ -81,14 +113,16 @@ class _AccountsScreenState extends State<AccountsScreen> {
                           avatarUrl: it.github!.avatarUrl,
                           icon: SimpleIcons.github,
                           title: it.github!.name ?? it.github!.login,
-                          subtitle: '@${it.github!.login} · git push and Pages enabled',
-                          onDisconnect: () => _guard(it.githubLogout),
+                          subtitle: '@${it.github!.login} · ${tr(it.github!.expired ? 'sign-in expired' : 'git push and Pages enabled')}',
+                          onDisconnect: () => _disconnect('GitHub', it.githubLogout),
+                          // GitHub rejected the sign-in and it couldn't be refreshed: say so, and offer the way back.
+                          footer: it.github!.expired ? _GithubExpired(onSignIn: () => _guard(it.githubLogout)) : null,
                         ),
-                  const _Header('Vercel'),
+                  _Header(tr('Vercel')),
                   it.vercelUser == null
                       ? _TokenConnect(
                           icon: SimpleIcons.vercel,
-                          title: 'Connect Vercel',
+                          title: tr('Connect Vercel'),
                           body: 'Deploy any project folder to Vercel from the chat. Create an access token and paste it here.',
                           linkLabel: 'Create a token',
                           onLink: () => widget.agent.client.openUrl('https://vercel.com/account/tokens'),
@@ -98,27 +132,71 @@ class _AccountsScreenState extends State<AccountsScreen> {
                       : _Connected(
                           icon: SimpleIcons.vercel,
                           title: it.vercelUser!,
-                          subtitle: 'Deploys enabled',
-                          onDisconnect: () => _guard(it.vercelLogout),
+                          subtitle: tr('Deploys enabled'),
+                          onDisconnect: () => _disconnect('Vercel', it.vercelLogout),
                         ),
-                  const _Header('SSH key'),
+                  _Header(tr('Cloudflare')),
+                  if (!it.cloudflareConnected)
+                    _TokenConnect(
+                      icon: SimpleIcons.cloudflare,
+                      title: tr('Connect Cloudflare'),
+                      body:
+                          'Deploy to Workers and Pages from the chat. Create an API token with the '
+                          '"Edit Cloudflare Workers" template (it covers Pages too) and paste it here.',
+                      linkLabel: 'Create a token',
+                      onLink: () => widget.agent.client.openUrl('https://dash.cloudflare.com/profile/api-tokens'),
+                      hint: 'Cloudflare API token',
+                      onConnect: (t) => _guard(() => it.cloudflareLogin(t), success: 'Cloudflare connected'),
+                    )
+                  else
+                    _Connected(
+                      icon: SimpleIcons.cloudflare,
+                      title: it.cloudflareAccountName ?? 'Cloudflare',
+                      subtitle: tr('Workers and Pages deploys enabled'),
+                      onDisconnect: () => _disconnect('Cloudflare', it.cloudflareLogout),
+                      footer: it.cloudflareAccounts.length > 1
+                          ? DropdownButtonFormField<String>(
+                              initialValue: it.cloudflareAccountId,
+                              isExpanded: true,
+                              decoration: InputDecoration(labelText: tr('Deploy to account')),
+                              items: [
+                                for (final a in it.cloudflareAccounts)
+                                  DropdownMenuItem(
+                                    value: a.id,
+                                    child: Text(a.name, overflow: TextOverflow.ellipsis),
+                                  ),
+                              ],
+                              onChanged: (id) {
+                                if (id == null) return;
+                                _guard(
+                                  () => it.cloudflareSelectAccount(id),
+                                  success: tr('Deploys now go to this account'),
+                                );
+                              },
+                            )
+                          : null,
+                    ),
+                  _Header(tr('SSH key')),
                   _SshKeyCard(integrations: it, openUrl: widget.agent.client.openUrl),
                   _Header(
-                    'Servers',
+                    tr('Servers'),
                     trailing: TextButton.icon(
                       onPressed: () => _editHost(null),
                       icon: const Icon(LucideIcons.plus, size: 18),
-                      label: const Text('Add'),
+                      label: Text(tr('Add')),
                     ),
                   ),
                   if (it.hosts.isEmpty)
                     _Card(
                       child: Text(
-                        'Save a server to deploy over SSH. The agent can reach it too, as `ssh <name>`.',
+                        tr('Save a server to deploy over SSH. The agent can reach it too, as `ssh <name>`.'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
                   for (final h in it.hosts) _HostTile(host: h, onEdit: () => _editHost(h), onTest: () => _testHost(h)),
+                  // Build configuration, not something to set up first: last and folded.
+                  _Header(tr('Advanced')),
+                  _GithubClientIdField(agent: widget.agent, onSaved: _snack),
                 ],
               ),
       ),
@@ -130,7 +208,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
     if (!mounted) return;
     await runWithLog<void>(
       context,
-      title: 'Connecting to ${h.name}',
+      title: '${tr('Connecting to')} ${h.name}',
       task: (log, _) => it.testHost(h.id, onLine: log),
     );
   }
@@ -161,7 +239,7 @@ class _Header extends StatelessWidget {
     child: Row(
       children: [
         Expanded(child: Text(label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall)),
-        ?trailing,
+        if (trailing != null) SectionAction(child: trailing!),
       ],
     ),
   );
@@ -173,16 +251,8 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: p.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: p.border),
-      ),
-      child: child,
-    );
+    // The same card as the rest of the app (Web & DNS, Settings).
+    return SurfaceCard(padding: const EdgeInsets.all(16), child: child);
   }
 }
 
@@ -202,13 +272,34 @@ class _GithubConnect extends StatefulWidget {
 class _GithubConnectState extends State<_GithubConnect> {
   bool starting = false;
   bool showToken = false;
-  ({String deviceCode, String userCode, String verificationUri, int expiresIn, int interval})? flow;
+  GithubDeviceFlow? flow;
   int attempt = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    _resume();
+  }
+
+  /// Leaving the screen only stops watching: the host goes on waiting for the approval, and signs in by itself when it
+  /// comes (the app is told).
   @override
   void dispose() {
     attempt++;
     super.dispose();
+  }
+
+  /// A sign-in the host is still waiting on (the screen was left, or the app closed, before it was approved): its code
+  /// is shown again and the wait goes on.
+  Future<void> _resume() async {
+    final f = await widget.agent.integrations.githubDeviceStatus();
+    if (f == null || !mounted || starting) return;
+    final mine = ++attempt;
+    setState(() {
+      starting = true;
+      flow = f;
+    });
+    await _watch(f, mine);
   }
 
   Future<void> _start() async {
@@ -221,10 +312,24 @@ class _GithubConnectState extends State<_GithubConnect> {
       setState(() => flow = f);
       await Clipboard.setData(ClipboardData(text: f.userCode));
       await widget.agent.client.openUrl(f.verificationUri);
-      final ok = await it.githubDeviceWait(f.deviceCode, f.interval, cancelled: () => !mounted || mine != attempt);
+      await _watch(f, mine);
+    } catch (e) {
+      if (mounted && mine == attempt) {
+        widget.onError(friendlyError(e));
+        setState(() {
+          starting = false;
+          flow = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _watch(GithubDeviceFlow f, int mine) async {
+    try {
+      final ok = await widget.agent.integrations.githubDeviceWait(f, cancelled: () => !mounted || mine != attempt);
       if (ok && mounted) widget.onDone();
     } catch (e) {
-      if (mounted && mine == attempt) widget.onError('$e');
+      if (mounted && mine == attempt) widget.onError(friendlyError(e));
     } finally {
       if (mounted && mine == attempt) {
         setState(() {
@@ -235,11 +340,15 @@ class _GithubConnectState extends State<_GithubConnect> {
     }
   }
 
-  void _cancel() => setState(() {
-    attempt++;
-    starting = false;
-    flow = null;
-  });
+  /// Gives the sign-in up: the host stops waiting too, so approving on github.com later signs in nothing.
+  void _cancel() {
+    unawaited(widget.agent.integrations.githubDeviceCancel());
+    setState(() {
+      attempt++;
+      starting = false;
+      flow = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -257,7 +366,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                 children: [
                   IconTile(icon: SimpleIcons.github, color: p.text, size: 36),
                   const SizedBox(width: 10),
-                  Text('Connect GitHub', style: text.titleSmall),
+                  Text(tr('Connect GitHub'), style: text.titleSmall),
                 ],
               ),
               const SizedBox(height: 8),
@@ -271,7 +380,7 @@ class _GithubConnectState extends State<_GithubConnect> {
               const SizedBox(height: 14),
               if (f == null)
                 PrimaryButton(
-                  label: 'Sign in with GitHub',
+                  label: tr('Sign in with GitHub'),
                   icon: SimpleIcons.github,
                   busy: starting,
                   onPressed: starting ? null : _start,
@@ -284,7 +393,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(16)),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.lg)),
                     alignment: Alignment.center,
                     child: Text(
                       f.userCode,
@@ -305,20 +414,20 @@ class _GithubConnectState extends State<_GithubConnect> {
                       child: OutlinedButton.icon(
                         onPressed: () => widget.agent.client.openUrl(f.verificationUri),
                         icon: const Icon(LucideIcons.externalLink, size: 16),
-                        label: const Text('Open GitHub'),
+                        label: Text(tr('Open GitHub')),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    TextButton(onPressed: _cancel, child: const Text('Cancel')),
+                    TextButton(onPressed: _cancel, child: Text(tr('Cancel'))),
                   ],
                 ),
                 const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    SizedBox.square(dimension: 12, child: CircularProgressIndicator(strokeWidth: 1.6, color: p.muted)),
+                    BusySpinner(size: 12),
                     const SizedBox(width: 8),
-                    Text('Waiting for you to approve on GitHub…', style: text.bodySmall),
+                    Text(tr('Waiting for you to approve on GitHub…'), style: text.bodySmall),
                   ],
                 ),
               ],
@@ -326,7 +435,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                 TextButton(
                   onPressed: () => setState(() => showToken = !showToken),
                   style: TextButton.styleFrom(foregroundColor: p.muted),
-                  child: Text(showToken ? 'Hide token option' : 'Use a personal access token instead'),
+                  child: Text(tr(showToken ? 'Hide token option' : 'Use a personal access token instead')),
                 ),
             ],
           ),
@@ -388,18 +497,18 @@ class _TokenConnectState extends State<_TokenConnect> {
             children: [
               IconTile(icon: widget.icon, color: p.text, size: 36),
               const SizedBox(width: 10),
-              Text(widget.title, style: text.titleSmall),
+              Text(tr(widget.title), style: text.titleSmall),
             ],
           ),
           const SizedBox(height: 8),
-          Text(widget.body, style: text.bodySmall),
+          Text(tr(widget.body), style: text.bodySmall),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
               onPressed: widget.onLink,
               style: TextButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: p.text),
               icon: const Icon(LucideIcons.externalLink, size: 15),
-              label: Text(widget.linkLabel),
+              label: Text(tr(widget.linkLabel)),
             ),
           ),
           TextField(
@@ -407,16 +516,153 @@ class _TokenConnectState extends State<_TokenConnect> {
             obscureText: true,
             autocorrect: false,
             enableSuggestions: false,
-            decoration: InputDecoration(hintText: widget.hint),
+            decoration: InputDecoration(hintText: tr(widget.hint)),
             onSubmitted: (_) => _connect(),
           ),
           const SizedBox(height: 10),
           FilledButton(
             onPressed: busy ? null : _connect,
             child: busy
-                ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Connect'),
+                ? const BusySpinner()
+                : Text(tr('Connect')),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The GitHub OAuth App Client ID for the device flow. This is how a
+/// distributed build points GitHub login at its own OAuth App without a
+/// rebuild: create an OAuth App with Device Flow enabled, paste its Client
+/// ID here. The ID is public, not a secret. Empty means GitHub login is
+/// not configured.
+class _GithubClientIdField extends StatefulWidget {
+  const _GithubClientIdField({required this.agent, required this.onSaved});
+  final AgentController agent;
+  final void Function(String message) onSaved;
+
+  @override
+  State<_GithubClientIdField> createState() => _GithubClientIdFieldState();
+}
+
+class _GithubClientIdFieldState extends State<_GithubClientIdField> {
+  late final TextEditingController _id = TextEditingController(
+    text: widget.agent.integrations.settings?.githubClientId ?? '',
+  );
+  bool _saving = false;
+  bool _open = false;
+  bool _edited = false;
+
+  /// What the agent uses now; the field may hold an unsaved edit.
+  String get _saved => widget.agent.integrations.settings?.githubClientId?.trim() ?? '';
+  bool get _builtIn => widget.agent.integrations.settings?.githubClientIdBuiltIn ?? false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Opened straight from Home, the settings may not be loaded yet. Fill the field once they
+    // are, so saving an untouched box can't replace a custom client ID with an empty one.
+    if (widget.agent.integrations.settings == null) {
+      widget.agent.integrations.refreshSettings().then((_) {
+        if (mounted && !_edited) setState(() => _id.text = _saved);
+      }, onError: (_) {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _id.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.agent.integrations.updateSettings({'githubClientId': _id.text.trim()});
+      if (mounted) widget.onSaved('OAuth client ID saved');
+    } catch (e) {
+      if (mounted) widget.onSaved(friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            borderRadius: BorderRadius.circular(Radii.md),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
+                        const SizedBox(height: 2),
+                        Text(
+                          _saved.isNotEmpty
+                              ? _saved
+                              : (_builtIn ? tr('Built-in Rynex app') : tr('Not set: sign-in with a code is off')),
+                          style: text.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: _open ? 0.5 : 0,
+                    duration: Motion.of(context, const Duration(milliseconds: 200)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Icon(LucideIcons.chevronDown, size: 18, color: p.faint),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_open)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 4, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _builtIn
+                        ? tr('Only for your own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.')
+                        : tr('Sign-in with a code needs the Client ID of a GitHub OAuth App with Device Flow enabled: paste it here (it is public, not a secret). Without one, sign in with a token instead.'),
+                    style: text.bodySmall,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _id,
+                          autocorrect: false,
+                          style: const TextStyle(fontFamily: mono, fontSize: 14),
+                          decoration: const InputDecoration(hintText: 'Ov23…'),
+                          onChanged: (_) => _edited = true,
+                          onSubmitted: (_) => _save(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(onPressed: _saving ? null : _save, child: Text(tr('Save'))),
+                    ],
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -430,6 +676,7 @@ class _Connected extends StatelessWidget {
     required this.subtitle,
     required this.onDisconnect,
     this.avatarUrl,
+    this.footer,
   });
   final IconData icon;
   final String title;
@@ -437,37 +684,85 @@ class _Connected extends StatelessWidget {
   final VoidCallback onDisconnect;
   final String? avatarUrl;
 
+  /// Shown under the account, inside the card (e.g. which Cloudflare account deploys go to).
+  final Widget? footer;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return _Card(
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: p.raised,
-            foregroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl!),
-            child: Icon(icon, size: 18, color: p.text),
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: p.raised,
+                foregroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl!),
+                child: Icon(icon, size: 18, color: p.text),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: text.titleSmall),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: text.bodySmall),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: onDisconnect,
+                style: TextButton.styleFrom(foregroundColor: p.danger),
+                child: Text(tr('Disconnect')),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: text.titleSmall),
-                const SizedBox(height: 2),
-                Text(subtitle, style: text.bodySmall),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: onDisconnect,
-            style: TextButton.styleFrom(foregroundColor: p.danger),
-            child: const Text('Disconnect'),
-          ),
+          if (footer != null) ...[const SizedBox(height: 12), footer!],
         ],
       ),
+    );
+  }
+}
+
+/// Under an expired GitHub account: why git and Pages stopped working, and a button back to sign-in.
+class _GithubExpired extends StatelessWidget {
+  const _GithubExpired({required this.onSignIn});
+  final VoidCallback onSignIn;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(LucideIcons.triangleAlert, size: 16, color: p.warning),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                tr('This sign-in expired or was revoked. Sign in again to keep cloning, pushing and publishing.'),
+                style: text.bodySmall?.copyWith(color: p.warning),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          onPressed: onSignIn,
+          icon: const Icon(SimpleIcons.github, size: 16),
+          label: Text(tr('Sign in again')),
+        ),
+      ],
     );
   }
 }
@@ -493,9 +788,11 @@ class _SshKeyCardState extends State<_SshKeyCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            key == null
-                ? 'Generate a key for this device, then add its public half to your servers or GitHub.'
-                : 'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.',
+            tr(
+              key == null
+                  ? 'Generate a key for this device, then add its public half to your servers or GitHub.'
+                  : 'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.',
+            ),
             style: text.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -512,7 +809,7 @@ class _SshKeyCardState extends State<_SshKeyCard> {
                       }
                     },
               icon: const Icon(LucideIcons.keyRound, size: 18),
-              label: const Text('Generate key'),
+              label: Text(tr('Generate key')),
             )
           else ...[
             CodeBox(text: key, label: 'id_ed25519.pub', lineNumbers: false),
@@ -523,10 +820,10 @@ class _SshKeyCardState extends State<_SshKeyCard> {
                   child: OutlinedButton.icon(
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: key));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Public key copied')));
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Public key copied'))));
                     },
                     icon: const Icon(LucideIcons.copy, size: 16),
-                    label: const Text('Copy'),
+                    label: Text(tr('Copy')),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -537,7 +834,7 @@ class _SshKeyCardState extends State<_SshKeyCard> {
                       widget.openUrl('https://github.com/settings/ssh/new');
                     },
                     icon: const Icon(LucideIcons.externalLink, size: 16),
-                    label: const Text('Add to GitHub'),
+                    label: Text(tr('Add to GitHub')),
                   ),
                 ),
               ],
@@ -561,21 +858,19 @@ class _HostTile extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
+      // The same borderless card and icon tile as every other row on this screen.
       child: Material(
         color: p.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: p.border),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.xl)),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
           onTap: onEdit,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
             child: Row(
               children: [
-                Icon(LucideIcons.server, size: 20, color: p.muted),
-                const SizedBox(width: 12),
+                IconTile(icon: LucideIcons.server, color: p.muted),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -589,7 +884,7 @@ class _HostTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                TextButton(onPressed: onTest, child: const Text('Test')),
+                TextButton(onPressed: onTest, child: Text(tr('Test'))),
               ],
             ),
           ),
@@ -626,15 +921,15 @@ class _HostSheetState extends State<_HostSheet> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    Widget field(TextEditingController c, String label, {String? hint, TextInputType? type, bool mono = false}) =>
+    Widget field(TextEditingController c, String label, {String? hint, TextInputType? type, bool monospace = false}) =>
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: TextField(
             controller: c,
             keyboardType: type,
             autocorrect: false,
-            style: mono ? const TextStyle(fontFamily: 'GeistMono', fontSize: 14) : null,
-            decoration: InputDecoration(labelText: label, hintText: hint),
+            style: monospace ? const TextStyle(fontFamily: mono, fontSize: 14) : null,
+            decoration: InputDecoration(labelText: tr(label), hintText: hint),
           ),
         );
     return SafeArea(
@@ -645,18 +940,18 @@ class _HostSheetState extends State<_HostSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(widget.host == null ? 'Add server' : 'Edit server', style: text.titleLarge),
+              Text(tr(widget.host == null ? 'Add server' : 'Edit server'), style: text.titleLarge),
               const SizedBox(height: 16),
               field(name, 'Name', hint: 'my-vps'),
               Row(
                 children: [
-                  Expanded(flex: 3, child: field(host, 'Host', hint: '203.0.113.10', mono: true)),
+                  Expanded(flex: 3, child: field(host, 'Host', hint: '203.0.113.10', monospace: true)),
                   const SizedBox(width: 10),
-                  Expanded(child: field(port, 'Port', type: TextInputType.number, mono: true)),
+                  Expanded(child: field(port, 'Port', type: TextInputType.number, monospace: true)),
                 ],
               ),
-              field(user, 'User', hint: 'root', mono: true),
-              field(path, 'Deploy folder (optional)', hint: '/var/www/html', mono: true),
+              field(user, 'User', hint: 'root', monospace: true),
+              field(path, 'Deploy folder (optional)', hint: '/var/www/html', monospace: true),
               const SizedBox(height: 6),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop({
@@ -666,14 +961,14 @@ class _HostSheetState extends State<_HostSheet> {
                   'user': user.text,
                   'path': path.text,
                 }),
-                child: const Text('Save'),
+                child: Text(tr('Save')),
               ),
               if (widget.host != null) ...[
                 const SizedBox(height: 8),
                 TextButton(
                   style: TextButton.styleFrom(foregroundColor: p.danger),
                   onPressed: () => Navigator.of(context).pop({'delete': true}),
-                  child: const Text('Remove server'),
+                  child: Text(tr('Remove server')),
                 ),
               ],
             ],

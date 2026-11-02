@@ -59,3 +59,14 @@ hs_err_pid*.log
 
 # Release outputs (APK/AAB and the Play Store bundle)
 /release/
+
+# Release signing (never commit the keystore or its passwords)
+android/key.properties
+*.keystore
+*.jks
+
+# Host test bundles (agent/test)
+/agent/build/
+
+# Written by a failing golden test
+test/golden/failures/

@@ -2,94 +2,104 @@
   <img src="assets/brand/logo.png" width="120" alt="Rynex logo">
 </p>
 
-<h1 align="center">Rynex</h1>
+<h1 align="center">Rynex AI Agent</h1>
 
 <p align="center">An AI coding agent that runs on your Android phone.<br>
 Write, run, preview and deploy code without a laptop.</p>
 
 <p align="center">
-  <a href="https://play.google.com/store/apps/details?id=com.rynex.agent"><b>Google Play</b></a> ·
-  <a href="https://github.com/seseegy/rynex/releases/latest"><b>APK downloads</b></a> ·
-  <a href="https://github.com/seseegy/rynex"><b>Website</b></a>
+  <a href="https://github.com/seseegy/rynex-releases/releases/latest"><b>APK downloads</b></a> ·
+  <a href="https://github.com/seseegy/rynex"><b>Source</b></a>
 </p>
 
 <p align="center">
-  <img src="store/en/screenshots-panorama.png" alt="Rynex screenshots">
+  <img src="store/en/screenshot-1-home.png" alt="Rynex screenshots">
 </p>
 
-Rynex puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs locally in a
-bundled Node.js runtime. It reads and writes files, runs shell commands in a real Debian or Alpine container,
-searches the web, and ships your project to GitHub Pages, Vercel or your own server. You bring the model:
-Anthropic, OpenAI, Gemini, OpenRouter and the other providers pi supports — or any OpenAI-compatible
-endpoint you run yourself.
+Rynex AI Agent puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs
+locally in a bundled Node.js runtime. It reads and writes files, runs shell commands in a real Debian or Alpine
+container, searches the web, and ships your project to GitHub Pages, Vercel or your own server.
+
+Chat runs through a provider you choose — bring your own: sign in with an account (Anthropic, OpenAI,
+Gemini, OpenRouter and more), paste an API key, or add any compatible endpoint of your own, such as a local
+Ollama, a company gateway or your own server. There is no built-in provider and no account with us. Costs are
+each model's own prices; the Usage screen totals them in USD from the agent's own accounting.
+
+## Privacy in one paragraph
+
+The app developer collects nothing and runs no server. Every chat you send goes to the provider you
+connected, which processes it as a service (see the [Privacy Policy](docs/privacy.html) for the full table of where data goes).
+Your provider API keys, GitHub/Vercel tokens and SSH keys are encrypted on the device with a key held by the
+Android Keystore. Backups are created only when you ask for them. Server mode (optional) runs the agent on a server of
+your own over SSH instead of on the phone; your data then lives on that server, and push notifications, if you turn
+them on, go through ntfy with a generic title only.
 
 ## Features
 
 - **Chat with a coding agent.** Replies stream in real time, with code blocks, tool calls and a live HTML
   preview that updates while the agent writes the page.
-- **Bring your own endpoint.** Any OpenAI-compatible server — Ollama, LM Studio, vLLM, a proxy or a company
-  gateway — becomes a provider of its own: give it a base URL, fetch its model list, chat through it.
 - **Linux container.** Debian or Alpine through proot, so `apt`, `pip` and `npm` work. It is on by default and is
   the agent's shell.
 - **Projects.** Each chat can use its own folder, or you can open any folder on the phone. The app includes a file
   explorer, a code editor, project search, a diff view and a checkpoint/undo for every agent run.
-- **Git and GitHub.** Sign in with GitHub's device code, then clone repositories, commit, push, pick branches,
-  turn issues into pull requests and follow GitHub Actions runs.
+- **Git and GitHub.** Sign in with GitHub's device code (or a token), then clone repositories, commit, push, pick
+  branches, turn issues into pull requests and follow GitHub Actions runs. Distributed builds point device login
+  at their own OAuth App: create one with Device Flow enabled and paste its Client ID in Accounts → GitHub
+  OAuth client ID — no rebuild needed.
 - **Deploy.** GitHub Pages, Vercel, or SSH/rsync to your own servers. Dev servers can be shared with a public tunnel.
+  Pages and Vercel deploys always show the destination (repository + visibility) for confirmation first, and
+  upload only the folder you chose.
 - **Terminal.** Multi-tab terminal with SSH to saved servers.
 - **Agent controls.**
   - Approval modes: ask for everything, ask for risky actions only, or bypass all approvals.
   - Plan mode, message queue, and fork or edit-and-resend on any message.
-  - Background tasks and schedules.
+  - Background tasks and schedules, and background jobs: a long command runs while the agent goes on, and its
+    result calls the chat back.
   - MCP servers, skills (with a searchable skills catalogue), prompt templates and slash commands.
 - **Everyday use.**
-  - Image and file attachments, and voice input.
+  - Image and file attachments (paste a copied picture too), and voice input.
   - Share to Rynex from other apps; home screen widget and Quick Settings tile.
   - Notifications.
-  - Usage and cost tracking with a daily budget, and automatic fallback to another model.
+  - Usage and costs in USD at each model's own prices, and automatic fallback to another model.
   - App lock, encrypted tokens, and backup and restore.
   - Themes and accents, English and Bahasa Indonesia.
 - **Web search that survives DNS blocking.** DNS-over-HTTPS for the agent's network access.
 
 ## Build
 
-Requirements: Flutter (stable), Node.js 20+, Python 3 with `lief`, the Android SDK/NDK, and an Android 8+ device
-(arm64, armv7 or x86_64). The repo's `mise.toml` installs all of it for this checkout only — [mise](https://mise.jdx.dev)
-pins Flutter, JDK 17, the Android command-line tools, Node and Python without touching the machine's global
-environment:
-
-```bash
-mise install                                # the toolchain, installed per checkout
-mise x -- python -m pip install lief        # for tool/bundle_runtime.py
-mise x -- sdkmanager --licenses             # accept the SDK licences once
-mise x -- sdkmanager platform-tools "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
-```
-
-On Windows, do this once per shell before step 2: build scripts shell out to `python`, and the WindowsApps
-App Execution Alias otherwise answers it with "Python was not found". `bin/python.cmd` forwards to the mise Python.
-
-```powershell
-$env:PATH = "$PWD\bin;$env:PATH"
-```
+Requirements: Flutter (stable), Node.js 20+, Python 3 with `lief` (`pip install lief`), the Android SDK/NDK, and an
+Android 8+ device (arm64, armv7 or x86_64).
 
 ```bash
 # 1. Native runtime: node, git, ssh, rsync, curl, proot, ... from the Termux repository, repackaged as jniLibs
 #    for arm64-v8a, armeabi-v7a and x86_64 (pass ABI names to build only some)
-mise x -- python tool/bundle_runtime.py
+python tool/bundle_runtime.py
 
 # 2. The agent host (TypeScript), bundled into android/app/src/main/assets/agent.zip
-cd agent && mise x -- npm install && mise x -- node build.mjs && cd ..
+cd agent && npm install && node build.mjs && cd ..
 
 # 3. The app. Two flavors:
 #    full: GitHub builds, with "All files access" so projects can live in any folder on the phone
 #    play: Google Play builds, without it (projects live in the app's workspace)
-mise x -- flutter pub get
-mise x -- flutter build apk --flavor full --release --split-per-abi --target-platform android-arm,android-arm64,android-x64
-mise x -- flutter build appbundle --flavor play --release --target-platform android-arm,android-arm64,android-x64
+flutter pub get
+flutter build apk --flavor full --release --split-per-abi --target-platform android-arm,android-arm64,android-x64
+flutter build appbundle --flavor play --release --target-platform android-arm,android-arm64,android-x64
 ```
 
 Steps 1 and 2 generate files that are not in the repository (`jniLibs/`, `agent.zip`). Run them again after you
 change `tool/` or `agent/`.
+
+## Releases and updates
+
+Every push to `main` runs [`.github/workflows/release.yml`](.github/workflows/release.yml): it builds the `full`
+APKs (one per ABI), signs them with the release key from the repository secrets (`KEYSTORE_BASE64`,
+`KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) and publishes a GitHub release. The version is the one in
+`pubspec.yaml` with the patch and build numbers raised by the workflow run number, so every release is newer than
+the last and installs over it.
+
+A GitHub build checks this repository's latest release (Settings → About → App updates, and on its own every few
+hours). The APK is downloaded by Android's download manager, so it keeps going when the app is closed and can be
+cancelled at any time; its SHA-256 is checked before the installer opens.
 
 ## Layout
 
@@ -100,7 +110,7 @@ change `tool/` or `agent/`.
 | `agent/skills/` | Skills bundled with the app |
 | `android/` | Kotlin side: runtime extraction, foreground service, share targets, widget, tile |
 | `tool/` | Runtime bundler and the `box` container launcher |
-| `store/` | Play Store assets (English and Indonesian) |
+| `store/` | Store assets (English and Indonesian) |
 
 ## Credits
 
@@ -113,4 +123,4 @@ change `tool/` or `agent/`.
 
 ## License
 
-[BSD 3-Clause](LICENSE) © seseegy. Rynex builds on BSD-licensed open-source code; the original copyright notice stays in [LICENSE](LICENSE) as that license requires.
+[MIT](LICENSE)

@@ -40,4 +40,4 @@ BRING YOUR OWN MODEL
 Works with Anthropic Claude, OpenAI, Google Gemini, OpenRouter and other providers supported by the pi agent. You sign in with your own account or API key.
 
 OPEN SOURCE
-Rynex is open source (BSD 3-Clause): https://github.com/seseegy/rynex
+Rynex is MIT licensed: https://github.com/seseegy/rynex

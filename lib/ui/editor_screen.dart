@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:re_editor/re_editor.dart';
@@ -37,9 +38,14 @@ import 'package:re_highlight/languages/xml.dart';
 import 'package:re_highlight/languages/yaml.dart';
 import 'package:re_highlight/re_highlight.dart' show Mode;
 
+import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
+import 'errors.dart';
 import 'illustration.dart';
-import 'preview_screen.dart';
+import 'kit.dart';
+import 'preview_open.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Files bigger than this open read-only: the editor keeps every line in memory and re-highlights on edits.
@@ -58,7 +64,7 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> {
+class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver {
   final _controller = CodeLineEditingController();
   late final _find = CodeFindController(_controller);
   final _scroll = CodeScrollController();
@@ -73,7 +79,19 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _canRedo = false;
   String? _error;
   String _saved = '';
+
+  /// The file used CRLF line endings. The editor normalizes to LF, so the
+  /// comparison baseline is normalized too — otherwise every CRLF file
+  /// looked modified on open — and saving converts back, so the file's
+  /// endings survive an edit.
+  bool _crlf = false;
   int _size = 0;
+
+  /// The file's bytes as last read or written here. The agent (or a
+  /// background run) may write the same file while it is open; saving then
+  /// used to overwrite its changes silently. Saving now compares the disk
+  /// with this first.
+  List<int>? _diskBytes;
 
   String get _name => widget.path.split('/').last;
   String get _ext => _name.contains('.') ? _name.split('.').last.toLowerCase() : '';
@@ -82,11 +100,55 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  /// Back from another app or screen: an unedited buffer quietly follows the disk.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_dirty && !_loading && !_binary) _reloadIfChanged();
+  }
+
+  /// This phone's files, or the server's (server_agent.md, phase 5).
+  AgentFs get _fs => widget.agent.fs;
+
+  Future<bool> _changedOnDisk() async {
+    final known = _diskBytes;
+    if (known == null) return false;
+    try {
+      final now = await _fs.read(widget.path);
+      if (now.length != known.length) return true;
+      for (var i = 0; i < now.length; i++) {
+        if (now[i] != known[i]) return true;
+      }
+      return false;
+    } on FileSystemException {
+      // Deleted or moved away: saving recreates it, which is what the user asked for.
+      return false;
+    } on AgentError catch (e) {
+      // The same on a server.
+      if (e.code == 'ENOENT') return false;
+      rethrow;
+    }
+  }
+
+  Future<void> _reloadIfChanged() async {
+    if (await _changedOnDisk() && mounted) await _reload();
+  }
+
+  Future<void> _reload() async {
+    _controller.removeListener(_onChanged);
+    setState(() {
+      _loading = true;
+      _dirty = false;
+    });
+    await _load();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onChanged);
     _find.dispose();
     _controller.dispose();
@@ -96,9 +158,9 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<void> _load() async {
     try {
-      final file = File(widget.path);
-      final bytes = await file.readAsBytes();
+      final bytes = await _fs.read(widget.path);
       _size = bytes.length;
+      _diskBytes = bytes;
       final head = bytes.length > 8192 ? bytes.sublist(0, 8192) : bytes;
       if (head.contains(0)) {
         setState(() {
@@ -109,7 +171,10 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       _readOnly = bytes.length > _maxEditableBytes;
       final text = utf8.decode(bytes, allowMalformed: true);
-      _saved = text;
+      _crlf = text.contains('\r\n');
+      // Match the editor's own normalization (it splits on \n after
+      // collapsing \r\n and \r), or the file is dirty before any edit.
+      _saved = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
       _controller.value = CodeLineEditingValue(codeLines: CodeLines.fromText(text));
       _controller.clearHistory();
       _controller.addListener(_onChanged);
@@ -117,7 +182,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _jumpToLine();
     } catch (e) {
       setState(() {
-        _error = '$e';
+        _error = friendlyError(e);
         _loading = false;
       });
     }
@@ -135,6 +200,14 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _onChanged() {
+    // The editor also notifies while it is being built (CodeEditor.initState, e.g. when it comes back after a
+    // reload); the state is updated after that frame then.
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onChanged();
+      });
+      return;
+    }
     final dirty = _controller.text != _saved;
     final canUndo = _controller.canUndo;
     final canRedo = _controller.canRedo;
@@ -149,10 +222,30 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<bool> _save() async {
     if (_readOnly || _saving) return false;
+    final bool changed;
+    try {
+      changed = await _changedOnDisk();
+    } catch (e) {
+      // The server cannot be reached: nothing is written, the edits stay.
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      return false;
+    }
+    if (changed) {
+      if (!mounted) return false;
+      final choice = await _confirmOverwrite();
+      if (choice == 'reload') {
+        await _reload();
+        return false;
+      }
+      if (choice != 'overwrite') return false;
+    }
+    if (!mounted) return false;
     setState(() => _saving = true);
     try {
       final text = _controller.text;
-      await File(widget.path).writeAsString(text);
+      final bytes = utf8.encode(_crlf ? text.replaceAll('\n', '\r\n') : text);
+      await _fs.write(widget.path, Uint8List.fromList(bytes));
+      _diskBytes = bytes;
       _saved = text;
       if (!mounted) return true;
       setState(() {
@@ -161,26 +254,78 @@ class _EditorScreenState extends State<EditorScreen> {
       });
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('Saved'), duration: Duration(seconds: 1)));
+        ..showSnackBar(SnackBar(content: Text(tr('Saved')), duration: Duration(seconds: 1)));
       return true;
     } catch (e) {
       if (!mounted) return false;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       return false;
     }
+  }
+
+  /// The file changed on disk since it was opened (usually the agent wrote it). Both ways out lose something (Reload my
+  /// edits, Overwrite the other changes), so both are red, and my edits can be copied first.
+  Future<String?> _confirmOverwrite() {
+    var copied = false;
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          // On a server "disk" would read as this phone's.
+          title: Text(_fs.isLocal ? tr('File changed on disk') : tr('File changed on the server')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tr('{name} was changed outside the editor, probably by the agent. Overwrite replaces those changes with yours; Reload drops your edits and shows the new file.')
+                    .replaceAll('{name}', _name),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                icon: Icon(copied ? LucideIcons.check : LucideIcons.copy, size: 16),
+                label: Text(copied ? tr('Copied') : tr('Copy my edits')),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: _controller.text));
+                  setDialog(() => copied = true);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'reload'),
+              style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+              child: Text(tr('Reload')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'overwrite'),
+              style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+              child: Text(tr('Overwrite')),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmLeave() async {
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Unsaved changes'),
-        content: Text('Save changes to $_name before leaving?'),
+        title: Text(tr('Unsaved changes')),
+        content: Text('${tr('Save changes before leaving?')} ($_name)'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'discard'), child: const Text('Discard')),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'save'), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Discard')),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'save'), child: Text(tr('Save'))),
         ],
       ),
     );
@@ -201,15 +346,15 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  void _preview() {
-    final dir = widget.path.substring(0, widget.path.lastIndexOf('/').clamp(0, widget.path.length));
-    HtmlPreviewScreen.open(context, title: _name, source: () => _controller.text, baseDir: dir);
-  }
+  /// The text as it stands in the editor (saved or not), with its pictures and styles from next to the file: on this
+  /// phone by path, on a server through the server.
+  void _preview() =>
+      openTextPreview(context, widget.agent, title: _name, path: widget.path, source: () => _controller.text);
 
   Future<void> _copyAll() async {
     await Clipboard.setData(ClipboardData(text: _controller.text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Copied'))));
   }
 
   @override
@@ -259,7 +404,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   ],
                 ),
                 Text(
-                  _relativePath,
+                  _location,
                   overflow: TextOverflow.ellipsis,
                   style: t.labelSmall?.copyWith(fontFamily: mono, color: p.muted),
                 ),
@@ -268,23 +413,23 @@ class _EditorScreenState extends State<EditorScreen> {
             actions: [
               if (ready && !_readOnly) ...[
                 IconButton(
-                  tooltip: 'Undo',
+                  tooltip: tr('Undo'),
                   icon: const Icon(LucideIcons.undo2, size: 20),
                   onPressed: _canUndo ? _controller.undo : null,
                 ),
                 IconButton(
-                  tooltip: 'Redo',
+                  tooltip: tr('Redo'),
                   icon: const Icon(LucideIcons.redo2, size: 20),
                   onPressed: _canRedo ? _controller.redo : null,
                 ),
               ],
               if (ready)
-                IconButton(tooltip: 'Find', icon: const Icon(LucideIcons.search, size: 20), onPressed: _toggleFind),
+                IconButton(tooltip: tr('Find'), icon: const Icon(LucideIcons.search, size: 20), onPressed: _toggleFind),
               if (ready && !_readOnly)
                 IconButton(
-                  tooltip: 'Save',
+                  tooltip: tr('Save'),
                   icon: _saving
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const BusySpinner(size: 18)
                       : Icon(LucideIcons.save, size: 20, color: _dirty ? p.accent : null),
                   onPressed: _dirty && !_saving ? _save : null,
                 ),
@@ -296,8 +441,8 @@ class _EditorScreenState extends State<EditorScreen> {
                     if (v == 'copy') _copyAll();
                   },
                   itemBuilder: (_) => [
-                    if (_previewable) const PopupMenuItem(value: 'preview', child: Text('Preview')),
-                    const PopupMenuItem(value: 'copy', child: Text('Copy all')),
+                    if (_previewable) PopupMenuItem(value: 'preview', child: Text(tr('Preview'))),
+                    PopupMenuItem(value: 'copy', child: Text(tr('Copy all'))),
                   ],
                 ),
               const SizedBox(width: 4),
@@ -309,6 +454,16 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  /// Where the file is, under its name: its folder in the project, or the project itself for a
+  /// top-level file (the relative path alone just repeated the name).
+  String get _location {
+    final rel = _relativePath;
+    final slash = rel.lastIndexOf('/');
+    if (slash > 0) return rel.substring(0, slash);
+    final cwd = widget.agent.cwd;
+    return rel == widget.path || cwd.isEmpty ? rel : cwd.split('/').last;
+  }
+
   String get _relativePath {
     final cwd = widget.agent.cwd;
     if (cwd.isNotEmpty && widget.path.startsWith('$cwd/')) return widget.path.substring(cwd.length + 1);
@@ -318,7 +473,7 @@ class _EditorScreenState extends State<EditorScreen> {
   Widget _body(BuildContext context) {
     final p = context.palette;
     final t = Theme.of(context).textTheme;
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const Center(child: BusySpinner.page());
     if (_error != null) {
       return Center(
         child: Padding(
@@ -340,9 +495,9 @@ class _EditorScreenState extends State<EditorScreen> {
             children: [
               const Illustration('projects', height: 150),
               const SizedBox(height: 16),
-              Text('Binary file', style: t.titleMedium),
+              Text(tr('Binary file'), style: t.titleMedium),
               const SizedBox(height: 4),
-              Text('${_formatSize(_size)} · can\'t be shown as text', style: t.bodySmall?.copyWith(color: p.muted)),
+              Text('${_formatSize(_size)} · ${tr("can't be shown as text")}', style: t.bodySmall?.copyWith(color: p.muted)),
             ],
           ),
         ),
@@ -362,7 +517,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Large file (${_formatSize(_size)}), opened read-only.',
+                    tr('Large file ({size}), opened read-only.').replaceAll('{size}', _formatSize(_size)),
                     style: t.bodySmall?.copyWith(color: p.muted),
                   ),
                 ),
@@ -563,7 +718,7 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
           filled: true,
           fillColor: p.bg,
           contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.sm), borderSide: BorderSide.none),
         ),
       ),
     );
@@ -573,13 +728,13 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
     final p = context.palette;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(Radii.sm),
       child: Container(
         margin: const EdgeInsets.only(left: 4),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         decoration: BoxDecoration(
           color: on ? p.accent.withValues(alpha: 0.15) : null,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(Radii.sm),
         ),
         child: Text(
           label,
@@ -592,7 +747,6 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
   Widget _icon(IconData icon, String tooltip, VoidCallback? onTap, Color color) {
     return IconButton(
       tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
       iconSize: 18,
       color: color,
       onPressed: onTap,

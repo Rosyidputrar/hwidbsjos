@@ -2,6 +2,12 @@
  * Checkpoints: snapshots of a project folder in a shadow git repository kept
  * in app storage (never inside the project), so any folder can be undone,
  * git repo or not.
+ *
+ * .env policy: environment files are snapshotted too, even when the
+ * project's .gitignore ignores them — undo must actually undo, so a
+ * deleted .env comes back and a new one is removed on restore. The
+ * shadow repo lives in app-private storage, the same trust boundary as
+ * the project itself. Dependency and build folders stay excluded.
  */
 
 import { spawn } from "node:child_process";
@@ -16,10 +22,29 @@ function git(args: string[], env: Record<string, string>, cwd: string): Promise<
 		const child = spawn("git", args, { cwd, env: { ...process.env, ...env } });
 		let out = "";
 		let err = "";
+		let done = false;
+		// Local git is fast; a hung one must not block checkpoint ops forever.
+		const timer = setTimeout(() => {
+			if (done) return;
+			done = true;
+			child.kill("SIGKILL");
+			reject(new Error("git timed out"));
+		}, 60_000);
+		timer.unref?.();
 		child.stdout.on("data", (c) => (out += c));
 		child.stderr.on("data", (c) => (err += c));
-		child.on("error", reject);
-		child.on("close", (code) => resolve({ code: code ?? 1, out, err }));
+		child.on("error", (e) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			reject(e);
+		});
+		child.on("close", (code) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve({ code: code ?? 1, out, err });
+		});
 	});
 }
 
@@ -35,7 +60,12 @@ export class Checkpoints {
 
 	private repo(cwd: string) {
 		const dir = join(this.root, createHash("sha1").update(cwd).digest("hex").slice(0, 16));
-		return { dir, env: { GIT_DIR: dir, GIT_WORK_TREE: cwd, GIT_AUTHOR_NAME: "Rynex", GIT_AUTHOR_EMAIL: "rynex@local", GIT_COMMITTER_NAME: "Rynex", GIT_COMMITTER_EMAIL: "rynex@local" } };
+		return { dir, env: { GIT_DIR: dir, GIT_WORK_TREE: cwd, GIT_AUTHOR_NAME: "Rynex AI Agent", GIT_AUTHOR_EMAIL: "rynex@local", GIT_COMMITTER_NAME: "Rynex AI Agent", GIT_COMMITTER_EMAIL: "rynex@local" } };
+	}
+
+	/** Drops a folder's snapshots, e.g. when the folder itself is deleted. */
+	forget(cwd: string) {
+		rmSync(this.repo(cwd).dir, { recursive: true, force: true });
 	}
 
 	private async ensure(cwd: string) {
@@ -49,11 +79,22 @@ export class Checkpoints {
 		return env;
 	}
 
+	/** Force-stages .env files the project's .gitignore ignores (see header policy). */
+	private async addEnv(env: Record<string, string>, cwd: string) {
+		const r = await git(["ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--", ":(glob)**/.env", ":(glob)**/.env.*"], env, cwd);
+		const files = r.out
+			.split("\0")
+			.filter(Boolean)
+			.filter((f) => !EXCLUDES.some((d) => d.endsWith("/") && f.startsWith(d)) && !f.endsWith(".log"));
+		if (files.length) await git(["add", "-f", "--", ...files], env, cwd);
+	}
+
 	/** Records the folder as it is now. Skips when nothing changed since the last one. */
 	async snapshot(cwd: string, label: string): Promise<Checkpoint | null> {
 		if (!existsSync(cwd)) return null;
 		const env = await this.ensure(cwd);
 		await git(["add", "-A"], env, cwd);
+		await this.addEnv(env, cwd);
 		const head = await git(["rev-parse", "--verify", "-q", "HEAD"], env, cwd);
 		if (head.code === 0) {
 			const same = await git(["diff", "--cached", "--quiet", "HEAD"], env, cwd);
@@ -97,19 +138,45 @@ export class Checkpoints {
 	}
 
 	/**
-	 * Puts the folder back as it was at a checkpoint. The current state is
-	 * saved first, so a restore can itself be undone.
+	 * What a restore would delete: files that did not exist at the checkpoint.
+	 * Some may be the user's own (made after the agent's run), so the app
+	 * lists them and lets the user keep any of them.
 	 */
-	async restore(cwd: string, id: string) {
+	async restorePlan(cwd: string, id: string) {
+		const env = await this.ensure(cwd);
+		const known = await git(["rev-parse", "--verify", "-q", id], env, cwd);
+		if (known.code !== 0) throw new Error(`Unknown checkpoint ${id}`);
+		await git(["add", "-A"], env, cwd);
+		await this.addEnv(env, cwd);
+		const added = await git(["diff", "-z", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
+		return { checkpoint: id, removes: added.out.split("\0").filter(Boolean) };
+	}
+
+	/**
+	 * Puts the folder back as it was at a checkpoint. The current state is
+	 * saved first, so a restore can itself be undone. Files added since the
+	 * checkpoint are deleted, except those in [keep] (relative paths), which
+	 * stay as they are now.
+	 */
+	async restore(cwd: string, id: string, keep: string[] = []) {
 		const env = await this.ensure(cwd);
 		await this.snapshot(cwd, "Before restoring a checkpoint");
+		// Verify the checkpoint exists BEFORE deleting anything: the old
+		// order removed added files first, so a bad id left the folder
+		// half-restored. -z keeps weird filenames (newlines, quotes) intact.
+		const known = await git(["rev-parse", "--verify", "-q", id], env, cwd);
+		if (known.code !== 0) throw new Error(`Unknown checkpoint ${id}`);
 		await git(["add", "-A"], env, cwd);
+		await this.addEnv(env, cwd);
 		// Files that did not exist at the checkpoint are removed.
-		const added = await git(["diff", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
-		for (const f of added.out.split("\n").filter(Boolean)) rmSync(join(cwd, f), { force: true });
+		const added = await git(["diff", "-z", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
+		const kept = new Set(keep);
+		for (const f of added.out.split("\0").filter(Boolean)) {
+			if (!kept.has(f)) rmSync(join(cwd, f), { force: true });
+		}
 		const r = await git(["checkout", "-f", id, "--", "."], env, cwd);
 		if (r.code !== 0) throw new Error(r.err.trim() || "restore failed");
 		await git(["add", "-A"], env, cwd);
-		return { restored: id };
+		return { restored: id, kept: keep.length };
 	}
 }

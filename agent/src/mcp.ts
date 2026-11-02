@@ -9,6 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
+import { HOST_KEYS, stripSecrets } from "./gitsafe.js";
 import { readSecureJson, writeSecureJson } from "./secure.js";
 
 export interface McpServerConfig {
@@ -43,8 +44,13 @@ export class Mcp {
 	constructor(
 		private readonly file: string,
 		private readonly onChange: () => void,
+		/**
+		 * How local servers are started: the shell for a plain command, and the launcher for one that runs in the Linux
+		 * container. The defaults are the phone's; a server agent uses /bin/sh and its box (server_agent.md 4.8).
+		 */
+		private readonly shells: { shell: string; box: () => string } = { shell: "/system/bin/sh", box: () => "box" },
 	) {
-		this.servers = readSecureJson<McpServerConfig[]>(file, []);
+		this.servers = readSecureJson<McpServerConfig[]>(file, [], Array.isArray);
 	}
 
 	private save() {
@@ -81,11 +87,11 @@ export class Mcp {
 					? new StreamableHTTPClientTransport(new URL(s.url!), { requestInit: { headers: s.headers ?? {} } })
 					: new StdioClientTransport(
 							s.inContainer
-								? { command: "box", args: ["-c", s.command!], env: { ...(process.env as any), ...s.env }, stderr: "pipe" }
+								? { command: this.shells.box(), args: ["-c", s.command!], env: { ...(stripSecrets(process.env, HOST_KEYS) as any), ...s.env }, stderr: "pipe" }
 								: {
-										command: "/system/bin/sh",
+										command: this.shells.shell,
 										args: ["-c", s.command!],
-										env: { ...(process.env as any), ...s.env },
+										env: { ...(stripSecrets(process.env, HOST_KEYS) as any), ...s.env },
 										stderr: "pipe",
 									},
 						);

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Rynex Linux container launcher, shipped as libbox.so and linked as `box`.
+# Rynex AI Agent Linux container launcher, shipped as libbox.so and linked as `box`.
 #
 #   box                 interactive shell in the container
 #   box -c 'apt ...'    run a command (this is how pi calls its shell)
@@ -11,7 +11,7 @@
 
 R="$RYNEX_ROOTFS"
 if [ -z "$R" ] || { [ ! -e "$R/bin/sh" ] && [ ! -L "$R/bin/sh" ]; }; then
-  echo "box: the Linux container is not installed. Install it in Rynex under Settings > Linux container." >&2
+  echo "box: the Linux container is not installed. Install it in Rynex AI Agent under Settings > Linux container." >&2
   exit 127
 fi
 

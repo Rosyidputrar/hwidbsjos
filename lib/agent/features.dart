@@ -19,6 +19,12 @@ class Approval {
   String get summary => json['summary'] as String? ?? '';
   String get reason => json['reason'] as String? ?? '';
   String get key => json['key'] as String? ?? '';
+
+  /// For an edit or a write: the change as a unified patch, when the host could work it out.
+  String? get patch {
+    final p = json['patch'];
+    return p is String && p.trim().isNotEmpty ? p : null;
+  }
 }
 
 class CheckpointInfo {
@@ -51,6 +57,12 @@ class GitFile {
   GitFile(this.json);
   final Map<String, dynamic> json;
   String get path => json['path'] as String;
+
+  /// For a rename or copy: the old path.
+  String? get from => json['from'] as String?;
+
+  /// Paths git must be given to act on this entry (a rename has two sides).
+  List<String> get paths => [path, ?from];
   String get code => json['code'] as String;
   bool get staged => json['staged'] == true;
   bool get unstaged => json['unstaged'] == true;
@@ -66,7 +78,30 @@ class GitStatus {
   int get ahead => json['ahead'] as int? ?? 0;
   int get behind => json['behind'] as int? ?? 0;
   String? get remote => json['remote'] as String?;
+
+  /// The repository's top folder: the [files]' paths start there (null from a host before this was sent).
+  String? get root => json['root'] as String?;
   List<GitFile> get files => _l(json['files']).map(GitFile.new).toList();
+}
+
+/// The review before a commit: the status, and per file how many lines it adds and removes against the last commit.
+class GitReview {
+  GitReview(this.json) : status = GitStatus(json);
+  final Map<String, dynamic> json;
+  final GitStatus status;
+
+  ({int additions, int deletions, bool binary}) statOf(String path) {
+    final s = (json['stats'] as Map?)?[path];
+    if (s is! Map) return (additions: 0, deletions: 0, binary: false);
+    return (
+      additions: (s['additions'] as num?)?.toInt() ?? 0,
+      deletions: (s['deletions'] as num?)?.toInt() ?? 0,
+      binary: s['binary'] == true,
+    );
+  }
+
+  int get additions => status.files.fold(0, (n, f) => n + statOf(f.path).additions);
+  int get deletions => status.files.fold(0, (n, f) => n + statOf(f.path).deletions);
 }
 
 class GitBranch {
@@ -133,6 +168,12 @@ class UsageRow {
   int get input => json['input'] as int? ?? 0;
   int get output => json['output'] as int? ?? 0;
   int get cacheRead => json['cacheRead'] as int? ?? 0;
+  int get cacheWrite => json['cacheWrite'] as int? ?? 0;
+
+  /// All tokens the request was billed for (cache included).
+  int get tokens => input + output + cacheRead + cacheWrite;
+
+  /// pi's own cost in USD (0 when the model carries no pricing).
   double get cost => (json['cost'] as num? ?? 0).toDouble();
   int get requests => json['requests'] as int? ?? 0;
 }
@@ -229,6 +270,16 @@ class Features extends ChangeNotifier {
   List<ScheduleInfo> schedules = const [];
   int concurrency = 1;
   bool keepAlive = false;
+
+  /// Whether an interactive chat turn is streaming. Together with the
+  /// runs/schedules signal below, this keeps the foreground service alive
+  /// while the agent works — previously only runs/schedules did, so
+  /// Android could kill the host mid-chat when the app was backgrounded.
+  bool chatBusy = false;
+
+  /// Background jobs running on this phone's host (they outlive the turn that started them).
+  int jobsRunning = 0;
+  bool _runsKeepAlive = false;
   List<McpServer> mcpServers = const [];
 
   /// Fired when the chat's run ends (for notifications): preview text.
@@ -246,6 +297,16 @@ class Features extends ChangeNotifier {
         notifyListeners();
       case 'approval_dismiss':
         approvals.removeWhere((a) => a.id == r['approvalId']);
+        notifyListeners();
+      case 'exit':
+      case 'fatal':
+        // A server agent's link dropped: the host is still there and its approvals still wait. Reconnecting replays
+        // what changed, or, when it cannot, the controller reloads them (replaceApprovals).
+        if (r['type'] == 'exit' && client.isRemote) return;
+        // The host process is gone: any card left on screen belongs to a
+        // dead process, and its id must never answer a new process's approval.
+        approvals.clear();
+        _answered.clear();
         notifyListeners();
       case 'dev_server':
         final port = r['port'] as int;
@@ -269,16 +330,38 @@ class Features extends ChangeNotifier {
         mcpServers = _l(r['servers']).map(McpServer.new).toList();
         notifyListeners();
       case 'agent_done':
-        done.add(r['preview'] as String? ?? '');
+        // A fallback model taking over the failed turn: not done yet.
+        if (r['retrying'] != true) done.add(r['preview'] as String? ?? '');
     }
+  }
+
+  void setChatBusy(bool value) {
+    if (chatBusy == value) return;
+    chatBusy = value;
+    _updateKeepAlive();
+  }
+
+  /// How many background jobs run, so the host is kept alive for them while the app is in the background.
+  void setJobsRunning(int count) {
+    if (jobsRunning == count) return;
+    jobsRunning = count;
+    _updateKeepAlive();
+  }
+
+  void _updateKeepAlive() {
+    // A server agent works on the server; the phone has nothing to keep alive for it.
+    final next = !client.isRemote && (_runsKeepAlive || chatBusy || jobsRunning > 0);
+    if (keepAlive == next) return;
+    keepAlive = next;
+    unawaited(client.keepAlive(keepAlive, text: _keepAliveText()));
   }
 
   void _applyRuns(Map<String, dynamic> s) {
     runs = _l(s['runs']).map(RunInfo.new).toList();
     schedules = _l(s['schedules']).map(ScheduleInfo.new).toList();
     concurrency = s['concurrency'] as int? ?? 1;
-    keepAlive = s['keepAlive'] == true;
-    unawaited(client.keepAlive(keepAlive, text: _keepAliveText()));
+    _runsKeepAlive = s['keepAlive'] == true;
+    _updateKeepAlive();
     notifyListeners();
   }
 
@@ -286,6 +369,8 @@ class Features extends ChangeNotifier {
     final running = runs.where((r) => r.status == 'running').length;
     final queued = runs.where((r) => r.status == 'queued').length;
     if (running + queued > 0) return '$running running, $queued queued';
+    if (chatBusy) return 'Agent is working';
+    if (jobsRunning > 0) return jobsRunning == 1 ? '1 background job running' : '$jobsRunning background jobs running';
     return '${schedules.where((s) => s.enabled).length} scheduled tasks';
   }
 
@@ -302,10 +387,34 @@ class Features extends ChangeNotifier {
   }
 
   // Approvals & plan mode -----------------------------------------------------
+  /// Ids already answered: a double-tap on a card must never answer twice.
+  final _answered = <String>{};
+
+  /// Puts the chat's waiting approvals back as the host lists them (`approvals_pending`), after a server link could
+  /// not replay what it missed.
+  void replaceApprovals(Iterable<Map<String, dynamic>> records) {
+    approvals
+      ..clear()
+      ..addAll(records.where((r) => r['type'] == 'approval' && !_answered.contains(r['approvalId'])).map(Approval.new));
+    notifyListeners();
+  }
+
+  /// Answers a card. The card goes at once (and a second tap on it is ignored), but an answer that did not reach the
+  /// host brings it back and throws: the host goes on waiting for it, and a card that vanished with the answer would
+  /// leave the agent stuck at "Working" with nothing to tap.
   Future<void> answer(Approval a, {required bool allow, bool always = false}) async {
+    if (!_answered.add(a.id)) return;
+    final at = approvals.indexOf(a);
     approvals.remove(a);
     notifyListeners();
-    await client.call('approval_reply', {'approvalId': a.id, 'allow': allow, 'always': always, 'key': a.key});
+    try {
+      await client.call('approval_reply', {'approvalId': a.id, 'allow': allow, 'always': always, 'key': a.key});
+    } catch (_) {
+      _answered.remove(a.id);
+      if (!approvals.any((x) => x.id == a.id)) approvals.insert(at < 0 || at > approvals.length ? 0 : at, a);
+      notifyListeners();
+      rethrow;
+    }
   }
 
   // Conversation editing ------------------------------------------------------
@@ -321,8 +430,15 @@ class Features extends ChangeNotifier {
       client.call('checkpoint_create', {'label': label, 'dir': ?dir});
   Future<ChangeSet> changes({String? checkpoint, String? file, String? dir}) async =>
       ChangeSet(_m(await client.call('checkpoint_diff', {'checkpoint': ?checkpoint, 'file': ?file, 'dir': ?dir})));
-  Future<void> restore(String checkpoint, {String? dir}) =>
-      client.call('checkpoint_restore', {'checkpoint': checkpoint, 'dir': ?dir});
+  /// Files a restore to [checkpoint] would delete (they did not exist then).
+  Future<List<String>> restorePlan(String checkpoint, {String? dir}) async =>
+      ((_m(await client.call('checkpoint_restore_plan', {'checkpoint': checkpoint, 'dir': ?dir})))['removes'] as List? ??
+              const [])
+          .cast<String>();
+
+  /// Restores [checkpoint]; files in [keep] (from [restorePlan]) are left as they are.
+  Future<void> restore(String checkpoint, {String? dir, List<String> keep = const []}) =>
+      client.call('checkpoint_restore', {'checkpoint': checkpoint, 'dir': ?dir, 'keep': keep});
 
   // Git -----------------------------------------------------------------------
   Future<GitStatus> gitStatus({String? dir}) async => GitStatus(_m(await client.call('git_status', {'dir': ?dir})));
@@ -334,14 +450,22 @@ class Features extends ChangeNotifier {
       GitStatus(_m(await client.call('git_unstage', {'paths': paths ?? 'all', 'dir': ?dir})));
   Future<GitStatus> gitDiscard(List<String> paths, {String? dir}) async =>
       GitStatus(_m(await client.call('git_discard', {'paths': paths, 'dir': ?dir})));
-  Future<String> gitCommit(String message, {bool all = false, String? dir}) async =>
-      _m(await client.call('git_commit', {'message': message, 'all': all, 'dir': ?dir}))['commit'] as String;
+  Future<GitReview> gitReview({String? dir}) async => GitReview(_m(await client.call('git_review', {'dir': ?dir})));
+
+  /// A commit message for the uncommitted changes, written by the chat's model.
+  Future<String> gitCommitMessage({String? dir}) async =>
+      _m(await client.call('git_commit_message', {'dir': ?dir}))['message'] as String? ?? '';
+  /// Commits. [paths] (as the status lists them) commits exactly those files; [all] adds everything first.
+  Future<String> gitCommit(String message, {bool all = false, List<String>? paths, String? dir}) async =>
+      _m(await client.call('git_commit', {'message': message, 'all': all, 'paths': ?paths, 'dir': ?dir}))['commit'] as String;
   Future<List<GitCommit>> gitLog({String? dir}) async =>
       (await client.call<List>('git_log', {'dir': ?dir})).map((e) => GitCommit(_m(e))).toList();
   Future<List<GitBranch>> gitBranches({String? dir}) async =>
       (await client.call<List>('git_branches', {'dir': ?dir})).map((e) => GitBranch(_m(e))).toList();
   Future<GitStatus> gitCheckout(String branch, {bool create = false, String? dir}) async =>
       GitStatus(_m(await client.call('git_checkout', {'branch': branch, 'create': create, 'dir': ?dir})));
+  /// Fetches origin, so branches created on GitHub since the clone show up; returns the status after.
+  Future<GitStatus> gitFetch({String? dir}) async => GitStatus(_m(await client.call('git_fetch', {'dir': ?dir})));
   Future<void> gitPull({String? dir, void Function(String)? onLine}) => _task('git_pull', {'dir': ?dir}, onLine);
   Future<void> gitPush({String? dir, void Function(String)? onLine}) => _task('git_push', {'dir': ?dir}, onLine);
   Future<String> createPr(String title, String body, {String? base, String? dir}) async =>
@@ -370,6 +494,13 @@ class Features extends ChangeNotifier {
       }),
     );
     return (_l(r['matches']).map(SearchMatch.new).toList(), r['truncated'] == true);
+  }
+
+  /// The project's files best matching [query] by name, for the composer's @ list.
+  Future<List<String>> findFiles(String query, {int limit = 30}) async {
+    final r = _m(await client.call('files_find', {'query': query, 'limit': limit}));
+    final files = r['files'];
+    return files is List ? [for (final f in files) if (f is String) f] : const [];
   }
 
   Future<List<DbTable>> dbTables(String path) async =>
@@ -431,6 +562,18 @@ class Features extends ChangeNotifier {
 
   Future<void> cancelRun(String id) async => _applyRuns(_m(await client.call('run_cancel', {'runId': id})));
   Future<void> clearRuns() async => _applyRuns(_m(await client.call('runs_clear')));
+
+  /// Removes one finished run from the list (its chat stays). Returns what [restoreRun] needs for Undo.
+  Future<({Map<String, dynamic> run, int index})?> deleteRun(String id) async {
+    final r = _m(await client.call('run_delete', {'runId': id}));
+    _applyRuns(r);
+    final removed = r['removed'];
+    if (removed is! Map) return null;
+    return (run: _m(removed['run']), index: removed['index'] as int? ?? 0);
+  }
+
+  Future<void> restoreRun(Map<String, dynamic> run, int index) async =>
+      _applyRuns(_m(await client.call('run_restore', {'run': run, 'index': index})));
   Future<void> setConcurrency(int n) async => _applyRuns(_m(await client.call('runs_concurrency', {'n': n})));
   Future<void> saveSchedule(Map<String, dynamic> schedule) async =>
       _applyRuns(_m(await client.call('schedule_save', {'schedule': schedule})));
@@ -460,8 +603,10 @@ class Features extends ChangeNotifier {
     return (path: r['path'] as String, files: r['files'] as int);
   }
 
-  Future<int> restoreBackup(String path) async =>
-      _m(await client.call('backup_restore', {'path': path}))['restored'] as int;
+  Future<({int restored, int skipped})> restoreBackup(String path) async {
+    final m = _m(await client.call('backup_restore', {'path': path}));
+    return (restored: m['restored'] as int, skipped: m['skipped'] as int? ?? 0);
+  }
 
   @override
   void dispose() {

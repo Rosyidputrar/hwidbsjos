@@ -3,8 +3,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Prompt templates: reusable prompts the user runs as `/name args` in chat.
@@ -16,7 +18,7 @@ class TemplatesScreen extends StatefulWidget {
   State<TemplatesScreen> createState() => _TemplatesScreenState();
 }
 
-class _TemplatesScreenState extends State<TemplatesScreen> {
+class _TemplatesScreenState extends State<TemplatesScreen> with BusyActions {
   List<PromptTemplate>? _templates;
   Object? _error;
 
@@ -48,45 +50,55 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
   }
 
   Future<void> _edit([PromptTemplate? existing]) async {
-    final result = await showModalBottomSheet<_TemplateDraft>(
+    if (existing != null && busy(existing.name)) return;
+    // The sheet saves itself and closes only once that worked: a failed save keeps what the user wrote, with the
+    // reason, instead of closing first and losing it behind a snackbar.
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _TemplateSheet(existing: existing, taken: {...?_templates?.map((t) => t.name)}),
+      builder: (_) => _TemplateSheet(
+        existing: existing,
+        taken: {...?_templates?.map((t) => t.name)},
+        onSave: (result) async {
+          await f.saveTemplate(
+            result.name,
+            result.description,
+            result.body,
+            argumentHint: result.hint.isEmpty ? null : result.hint,
+          );
+          if (existing != null && existing.name != result.name) await f.deleteTemplate(existing.name);
+          await _load();
+        },
+      ),
     );
-    if (result == null) return;
-    try {
-      await f.saveTemplate(
-        result.name,
-        result.description,
-        result.body,
-        argumentHint: result.hint.isEmpty ? null : result.hint,
-      );
-      if (existing != null && existing.name != result.name) await f.deleteTemplate(existing.name);
-      await _load();
-    } catch (e) {
-      _snack('$e');
-    }
   }
 
   Future<bool> _delete(PromptTemplate t) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete /${t.name}?'),
-        content: const Text('The slash command will no longer be available in chat.'),
+        title: Text('${tr('Delete')} /${t.name}?'),
+        content: Text(tr('The slash command will no longer be available in chat.')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Delete')),
+          ),
         ],
       ),
     );
     if (ok != true) return false;
     try {
-      await f.deleteTemplate(t.name);
-      await _load();
-      return true;
+      return await runBusy(t.name, () async {
+            await f.deleteTemplate(t.name);
+            await _load();
+            return true;
+          }) ??
+          false;
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
       return false;
     }
   }
@@ -98,8 +110,8 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
     final list = _templates;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Prompt templates'),
-        actions: [IconButton(tooltip: 'New template', onPressed: _edit, icon: const Icon(LucideIcons.plus))],
+        title: Text(tr('Prompt templates')),
+        actions: [IconButton(tooltip: tr('New template'), onPressed: _edit, icon: const Icon(LucideIcons.plus))],
       ),
       body: RefreshIndicator(
         onRefresh: _load,
@@ -114,12 +126,12 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                     children: [
                       IconTile(icon: LucideIcons.slash, color: p.accent),
                       const SizedBox(width: 12),
-                      Expanded(child: Text('Slash commands', style: text.titleMedium)),
+                      Expanded(child: Text(tr('Slash commands'), style: text.titleMedium)),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Type /name followed by arguments in chat and pi expands the template.',
+                    tr('Type /name followed by arguments in chat and the agent expands the template.'),
                     style: text.bodyMedium?.copyWith(color: p.muted),
                   ),
                   const SizedBox(height: 12),
@@ -140,7 +152,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                               style: text.bodySmall?.copyWith(fontFamily: mono, color: p.text),
                             ),
                           ),
-                          Expanded(child: Text(meaning, style: text.bodySmall)),
+                          Expanded(child: Text(tr(meaning), style: text.bodySmall)),
                         ],
                       ),
                     ),
@@ -148,21 +160,19 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
               ),
             ),
             SectionLabel(
-              'Templates',
+              tr('Templates'),
               trailing: TextButton.icon(
                 onPressed: _edit,
                 icon: const Icon(LucideIcons.plus, size: 14),
-                label: const Text('New template'),
+                label: Text(tr('New template')),
               ),
             ),
             if (_error != null)
-              SurfaceCard(
-                child: Text('$_error', style: text.bodySmall?.copyWith(color: p.danger)),
-              )
+              SurfaceCard(child: ErrorNotice(error: _error, onRetry: _load))
             else if (list == null)
               const Padding(
                 padding: EdgeInsets.all(40),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: BusySpinner.page()),
               )
             else if (list.isEmpty)
               SurfaceCard(
@@ -171,7 +181,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                   children: [
                     const Illustration('ai', height: 140),
                     const SizedBox(height: 8),
-                    Text('No templates yet. Save a prompt you use often.', style: text.bodySmall),
+                    Text(tr('No templates yet. Save a prompt you use often.'), style: text.bodySmall),
                   ],
                 ),
               )
@@ -180,16 +190,16 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                 Dismissible(
                   key: ValueKey(t.name),
                   direction: DismissDirection.endToStart,
-                  confirmDismiss: (_) => _delete(t),
+                  confirmDismiss: (_) async => !busy(t.name) && await _delete(t),
                   background: Container(
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(right: 24),
-                    decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(24)),
+                    decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(Radii.xl)),
                     child: const Icon(LucideIcons.trash2, color: Colors.white),
                   ),
                   child: SurfaceCard(
                     padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
-                    onTap: () => _edit(t),
+                    onTap: busy(t.name) ? null : () => _edit(t),
                     child: Row(
                       children: [
                         Expanded(
@@ -214,14 +224,20 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                             ],
                           ),
                         ),
-                        PopupMenuButton<String>(
-                          icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
-                          onSelected: (v) => v == 'edit' ? _edit(t) : _delete(t),
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            PopupMenuItem(value: 'delete', child: Text('Delete')),
-                          ],
-                        ),
+                        if (busy(t.name))
+                          const Padding(padding: EdgeInsets.all(14), child: BusySpinner())
+                        else
+                          PopupMenuButton<String>(
+                            icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
+                            onSelected: (v) => v == 'edit' ? _edit(t) : _delete(t),
+                            itemBuilder: (_) => [
+                              PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text(tr('Delete'), style: TextStyle(color: p.danger)),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
                   ),
@@ -238,9 +254,12 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
 typedef _TemplateDraft = ({String name, String description, String hint, String body});
 
 class _TemplateSheet extends StatefulWidget {
-  const _TemplateSheet({this.existing, required this.taken});
+  const _TemplateSheet({this.existing, required this.taken, required this.onSave});
   final PromptTemplate? existing;
   final Set<String> taken;
+
+  /// Saves the template; the sheet stays open with the error when it throws.
+  final Future<void> Function(_TemplateDraft draft) onSave;
 
   @override
   State<_TemplateSheet> createState() => _TemplateSheetState();
@@ -252,6 +271,7 @@ class _TemplateSheetState extends State<_TemplateSheet> {
   late final _hint = TextEditingController(text: widget.existing?.argumentHint ?? '');
   late final _body = TextEditingController(text: widget.existing?.body ?? '');
   String? _problem;
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -261,7 +281,8 @@ class _TemplateSheetState extends State<_TemplateSheet> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving) return;
     final name = _name.text.trim().replaceFirst(RegExp(r'^/'), '');
     if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]*$').hasMatch(name)) {
       setState(() => _problem = 'Name: letters, digits, - and _ (no spaces).');
@@ -275,12 +296,23 @@ class _TemplateSheetState extends State<_TemplateSheet> {
       setState(() => _problem = 'The template needs a body.');
       return;
     }
-    Navigator.pop<_TemplateDraft>(context, (
-      name: name,
-      description: _description.text.trim(),
-      hint: _hint.text.trim(),
-      body: _body.text,
-    ));
+    setState(() {
+      _saving = true;
+      _problem = null;
+    });
+    try {
+      await widget.onSave((
+        name: name,
+        description: _description.text.trim(),
+        hint: _hint.text.trim(),
+        body: _body.text,
+      ));
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _problem = friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -294,26 +326,26 @@ class _TemplateSheetState extends State<_TemplateSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.existing == null ? 'New template' : 'Edit template', style: text.titleLarge),
+            Text(tr(widget.existing == null ? 'New template' : 'Edit template'), style: text.titleLarge),
             const SizedBox(height: 16),
             TextField(
               controller: _name,
               autocorrect: false,
               style: const TextStyle(fontFamily: mono),
-              decoration: const InputDecoration(labelText: 'Name', prefixText: '/', hintText: 'review'),
+              decoration: InputDecoration(labelText: tr('Name'), prefixText: '/', hintText: 'review'),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _description,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: 'Description', hintText: 'Review a file for bugs'),
+              decoration: InputDecoration(labelText: tr('Description'), hintText: tr('Review a file for bugs')),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _hint,
               autocorrect: false,
               style: const TextStyle(fontFamily: mono),
-              decoration: const InputDecoration(labelText: 'Argument hint', hintText: '<file> [focus]'),
+              decoration: InputDecoration(labelText: tr('Argument hint'), hintText: '<file> [focus]'),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -321,8 +353,8 @@ class _TemplateSheetState extends State<_TemplateSheet> {
               minLines: 6,
               maxLines: 16,
               style: const TextStyle(fontFamily: mono, fontSize: 13),
-              decoration: const InputDecoration(
-                labelText: 'Body',
+              decoration: InputDecoration(
+                labelText: tr('Body'),
                 alignLabelWithHint: true,
                 hintText: r'Review $1 for bugs, focusing on ${2:-correctness}.',
               ),
@@ -332,7 +364,7 @@ class _TemplateSheetState extends State<_TemplateSheet> {
               Text(_problem!, style: text.bodySmall?.copyWith(color: p.danger)),
             ],
             const SizedBox(height: 18),
-            PrimaryButton(label: 'Save', icon: LucideIcons.check, onPressed: _save),
+            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, busy: _saving, onPressed: _save),
           ],
         ),
       ),

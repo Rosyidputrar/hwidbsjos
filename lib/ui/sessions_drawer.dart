@@ -1,20 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import '../agent/models.dart';
 import 'accounts_screen.dart';
-import 'repos_screen.dart';
-import 'kit.dart';
-import 'settings_hub.dart';
-
-import 'package:simple_icons/simple_icons.dart';
-
-import 'new_chat_sheet.dart';
+import 'chat_screen.dart';
+import 'delete_flows.dart';
 import 'folder_picker.dart';
+import 'i18n.dart';
+import 'kit.dart';
+import 'new_chat_sheet.dart';
+import 'repos_screen.dart';
+import 'settings_hub.dart';
 import 'theme.dart';
 
+/// The chat list as a drawer over the home shell: brand row, new chat and clone,
+/// search, the projects, then the chats grouped by age. Opened from the home
+/// header's brand (and by the edge swipe the shell's drawer gives every tab).
 class SessionsDrawer extends StatefulWidget {
   const SessionsDrawer({super.key, required this.agent});
   final AgentController agent;
@@ -40,53 +44,81 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
     sessions = agent.listSessions();
   });
 
+  /// Closes the drawer, then opens [screen] over the shell.
   void _push(Widget screen) {
-    final nav = Navigator.of(context)..pop();
+    final nav = Navigator.of(context);
+    nav.pop();
     nav.push(MaterialPageRoute(builder: (_) => screen));
   }
 
-  /// Resumes the project's latest session, or starts one there.
-  Future<void> _openProject(ProjectInfo project, List<SessionSummary> all) async {
-    Navigator.of(context).pop();
-    final latest = all.where((s) => s.cwd == project.path && s.messageCount > 0).firstOrNull;
-    if (latest != null) {
-      if (latest.id != agent.sessionId) await agent.openSession(latest.path);
-    } else {
-      await agent.newSession(dir: project.path);
+  Future<void> _newChat() async {
+    final before = agent.sessionId;
+    final nav = Navigator.of(context);
+    nav.pop();
+    await showNewChatSheet(nav.context, agent);
+    if (agent.sessionId != before) {
+      nav.push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
     }
   }
 
+  /// Resumes the project's latest session, or starts one there, and opens the chat.
+  Future<void> _openProject(ProjectInfo project, List<SessionSummary> all) async {
+    final nav = Navigator.of(context);
+    nav.pop();
+    final latest = all.where((s) => s.cwd == project.path && s.messageCount > 0).firstOrNull;
+    if (latest != null) {
+      if (latest.id != agent.sessionId && !await agent.openSession(latest.path)) return;
+    } else {
+      if (!await agent.newSession(dir: project.path)) return;
+    }
+    nav.push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
+  }
+
+  Future<void> _openSession(SessionSummary s) async {
+    final nav = Navigator.of(context);
+    nav.pop();
+    if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+    nav.push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
+  }
+
   Future<void> _sessionMenu(SessionSummary s) async {
-    final active = s.id == agent.sessionId;
-    final action = await showModalBottomSheet<String>(
+    final action = await showAppSheet<String>(
       context: context,
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text(
-                s.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                child: Text(
+                  s.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
               ),
-            ),
-            ListTile(
-              leading: const Icon(LucideIcons.pencil),
-              title: const Text('Rename'),
-              onTap: () => Navigator.of(context).pop('rename'),
-            ),
-            ListTile(
-              enabled: !active,
-              leading: Icon(LucideIcons.trash2, color: active ? null : context.palette.danger),
-              title: Text('Delete', style: TextStyle(color: active ? null : context.palette.danger)),
-              subtitle: active ? const Text('Switch to another session first') : null,
-              onTap: () => Navigator.of(context).pop('delete'),
-            ),
-            const SizedBox(height: 8),
-          ],
+              SettingsGroup(
+                children: [
+                  SettingsRow(
+                    icon: LucideIcons.pencil,
+                    color: context.palette.accentAlt,
+                    title: tr('Rename'),
+                    onTap: () => Navigator.pop(context, 'rename'),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.trash2,
+                    color: context.palette.danger,
+                    title: tr('Delete'),
+                    destructive: true,
+                    onTap: () => Navigator.pop(context, 'delete'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -96,18 +128,18 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
       final name = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Rename session'),
-          content: TextField(controller: controller, autofocus: true, onSubmitted: (v) => Navigator.of(context).pop(v)),
+          title: Text(tr('Rename chat')),
+          content: TextField(controller: controller, autofocus: true, onSubmitted: (v) => Navigator.pop(context, v)),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('Save')),
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: Text(tr('Save'))),
           ],
         ),
       );
       controller.dispose();
       if (name != null && name.trim().isNotEmpty) await agent.renameSession(s.path, name.trim());
     } else if (action == 'delete') {
-      await agent.deleteSession(s.path);
+      await deleteChats(context, agent, [s]);
     }
     _reload();
   }
@@ -121,7 +153,7 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
       width: MediaQuery.sizeOf(context).width * 0.86,
       child: SafeArea(
         child: ListenableBuilder(
-          listenable: agent.integrations,
+          listenable: Listenable.merge([agent, agent.integrations]),
           builder: (context, _) => FutureBuilder<List<SessionSummary>>(
             future: sessions,
             builder: (context, snap) {
@@ -147,15 +179,15 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
                             children: [
                               const LogoMark(size: 30, glow: false),
                               const SizedBox(width: 10),
-                              Text('Rynex', style: text.titleLarge),
+                              Text(tr('Rynex'), style: text.titleLarge),
                               const Spacer(),
                               IconButton(
-                                tooltip: 'Accounts & servers',
+                                tooltip: tr('Accounts & servers'),
                                 icon: const Icon(LucideIcons.circleUser),
                                 onPressed: () => _push(AccountsScreen(agent: agent)),
                               ),
                               IconButton(
-                                tooltip: 'Settings',
+                                tooltip: tr('Settings'),
                                 icon: const Icon(LucideIcons.settings2),
                                 onPressed: () => _push(SettingsHub(agent: agent)),
                               ),
@@ -168,22 +200,17 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
                             children: [
                               Expanded(
                                 child: PrimaryButton(
-                                  onPressed: agent.busy
-                                      ? null
-                                      : () {
-                                          final nav = Navigator.of(context)..pop();
-                                          showNewChatSheet(nav.context, agent);
-                                        },
+                                  onPressed: _newChat,
                                   icon: LucideIcons.plus,
-                                  label: 'New chat',
+                                  label: tr('New chat'),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: OutlinedButton.icon(
-                                  onPressed: agent.busy ? null : () => _push(ReposScreen(agent: agent)),
+                                  onPressed: () => _push(ReposScreen(agent: agent)),
                                   icon: const Icon(SimpleIcons.github, size: 16),
-                                  label: const Text('Clone repo'),
+                                  label: Text(tr('Clone repo')),
                                 ),
                               ),
                             ],
@@ -193,10 +220,10 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                           child: TextField(
                             onChanged: (v) => setState(() => query = v),
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               isDense: true,
-                              hintText: 'Search chats and projects',
-                              prefixIcon: Icon(LucideIcons.search, size: 18),
+                              hintText: tr('Search chats and projects'),
+                              prefixIcon: const Icon(LucideIcons.search, size: 18),
                             ),
                           ),
                         ),
@@ -205,11 +232,11 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
                   ),
                   if (projects.isNotEmpty) ...[
                     _SectionLabel(
-                      'Projects',
+                      tr('Projects'),
                       trailing: projects.length > 4
                           ? TextButton(
                               onPressed: () => setState(() => allProjects = !allProjects),
-                              child: Text(allProjects ? 'Less' : 'All ${projects.length}'),
+                              child: Text(allProjects ? tr('Less') : '${tr('All')} ${projects.length}'),
                             )
                           : null,
                     ),
@@ -218,35 +245,36 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
                       itemBuilder: (context, i) => _ProjectTile(
                         project: shownProjects[i],
                         active: shownProjects[i].path == agent.cwd,
-                        onTap: agent.busy ? null : () => _openProject(shownProjects[i], all),
+                        onTap: () => _openProject(shownProjects[i], all),
                       ),
                     ),
                   ],
                   if (!snap.hasData)
                     const SliverFillRemaining(
                       hasScrollBody: false,
-                      child: Center(
-                        child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-                      ),
+                      child: Center(child: BusySpinner(size: 20)),
                     )
                   else if (matches.isEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.all(20),
                         child: Text(
-                          q.isEmpty ? 'Chats you start appear here.' : 'No chats match "$query".',
+                          q.isEmpty
+                              ? tr('Chats you start appear here.')
+                              : tr('No chats match "{q}".').replaceAll('{q}', query),
                           style: text.bodySmall,
                         ),
                       ),
                     )
                   else
                     for (final group in _group(matches)) ...[
-                      _SectionLabel(group.$1),
+                      _SectionLabel(tr(group.$1)),
                       SliverList.builder(
                         itemCount: group.$2.length,
                         itemBuilder: (context, i) {
                           final s = group.$2[i];
                           final active = s.id == agent.sessionId;
+                          final working = active && agent.busy;
                           final project = _project(s.cwd);
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -257,25 +285,31 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
                               selectedColor: p.text,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                              title: Text(
-                                s.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: text.bodyMedium,
-                              ),
-                              subtitle: Text(
-                                [?project, _time(s.modified)].join('  ·  '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: text.bodySmall?.copyWith(color: p.faint),
-                              ),
+                              title: Text(s.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodyMedium),
+                              subtitle: working
+                                  ? Row(
+                                      children: [
+                                        Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: BoxDecoration(color: p.warning, shape: BoxShape.circle),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          tr('Working'),
+                                          style: text.bodySmall?.copyWith(color: p.warning),
+                                        ),
+                                      ],
+                                    )
+                                  : Text(
+                                      [?project, formatAgo(s.modified)].join('  ·  '),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: text.bodySmall?.copyWith(color: p.faint),
+                                    ),
+                              trailing: agent.switchingTo == s.path ? const BusySpinner(size: 14) : null,
                               onLongPress: () => _sessionMenu(s),
-                              onTap: agent.busy
-                                  ? null
-                                  : () {
-                                      Navigator.of(context).pop();
-                                      if (!active) agent.openSession(s.path);
-                                    },
+                              onTap: () => _openSession(s),
                             ),
                           );
                         },
@@ -314,15 +348,6 @@ class _SessionsDrawerState extends State<SessionsDrawer> {
       groups.putIfAbsent(bucket(s.modified), () => []).add(s);
     }
     return [for (final e in groups.entries) (e.key, e.value)];
-  }
-
-  static String _time(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inMinutes < 1) return 'just now';
-    if (d.inHours < 1) return '${d.inMinutes}m ago';
-    if (d.inDays < 1) return '${d.inHours}h ago';
-    if (d.inDays < 7) return '${d.inDays}d ago';
-    return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
   }
 }
 
@@ -373,7 +398,7 @@ class _ProjectTile extends StatelessWidget {
         title: Text(project.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodyMedium),
         subtitle: project.isGit
             ? Text(
-                [project.githubSlug ?? 'local', ?project.branch].join('  ·  '),
+                [project.githubSlug ?? tr('local folder'), if (project.branch != null) project.branch!].join('  ·  '),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontFamily: mono, fontSize: 11, color: p.faint),
@@ -381,7 +406,7 @@ class _ProjectTile extends StatelessWidget {
             : null,
         trailing: project.dirty
             ? Tooltip(
-                message: 'Uncommitted changes',
+                message: tr('Uncommitted changes'),
                 child: Container(
                   width: 7,
                   height: 7,

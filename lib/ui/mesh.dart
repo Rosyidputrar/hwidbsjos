@@ -2,29 +2,33 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-/// A softly tinted tile for cards and thumbnails. The same [seed] always
-/// gives the same tone, and the tint works on both light and dark themes.
+/// A flat pastel tile for cards and thumbnails. The same [seed] always
+/// gives the same colour.
 class MeshArt extends StatelessWidget {
-  const MeshArt({super.key, required this.seed, this.radius = Radii.md, this.child});
+  const MeshArt({super.key, required this.seed, this.radius = 20, this.child});
   final String seed;
   final double radius;
   final Widget? child;
 
-  static const _tones = <Color>[
-    Color(0xFFF97316), // orange
-    Color(0xFFEC4899), // pink
-    Color(0xFF8B5CF6), // violet
-    Color(0xFF14B8A6), // teal
-    Color(0xFF84CC16), // lime
-    Color(0xFFEAB308), // amber
-    Color(0xFF3B82F6), // blue
-    Color(0xFFD946EF), // fuchsia
+  static const _palettes = <List<Color>>[
+    [Color(0xFFFFD8C2)], // peach
+    [Color(0xFFFFC9DE)], // pink
+    [Color(0xFFD9D2FF)], // lavender
+    [Color(0xFFC6EFEA)], // mint
+    [Color(0xFFDDF4B8)], // lime
+    [Color(0xFFFFE8A8)], // butter
+    [Color(0xFFCDE4FF)], // sky
+    [Color(0xFFF3D9FF)], // lilac
   ];
 
-  /// The strong colour for [seed]; use it for the glyph on the tile.
-  static Color tone(String seed) => _tones[_hash(seed) % _tones.length];
+  static List<Color> colorsFor(String seed) => _palettes[_hash(seed) % _palettes.length];
 
-  static List<Color> colorsFor(String seed) => [tone(seed)];
+  /// Icons and initials on the tile: a deep shade of its own hue (5:1 or more
+  /// against every pastel; white on them is barely 1.3:1).
+  static Color inkFor(String seed) {
+    final hsl = HSLColor.fromColor(colorsFor(seed)[0]);
+    return hsl.withLightness(0.26).withSaturation(hsl.saturation.clamp(0, 0.55)).toColor();
+  }
 
   static int _hash(String s) {
     var h = 0;
@@ -36,24 +40,17 @@ class MeshArt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = tone(seed);
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [c.withValues(alpha: 0.22), c.withValues(alpha: 0.08)],
-          ),
-        ),
+      child: ColoredBox(
+        color: colorsFor(seed)[0],
         child: child == null ? const SizedBox.expand() : Stack(fit: StackFit.passthrough, children: [child!]),
       ),
     );
   }
 }
 
-/// Coloured icon badge with a ring in the surface colour, meant to overlap
+/// Coloured icon badge with a ring in the background colour, meant to overlap
 /// the edge of a [MeshArt] image.
 class RingBadge extends StatelessWidget {
   const RingBadge({super.key, required this.icon, required this.color, this.size = 40});
@@ -69,16 +66,17 @@ class RingBadge extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(size * 0.3),
+        borderRadius: BorderRadius.circular(size * 0.34),
         border: Border.all(color: p.surface, width: 3),
+        boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 4))],
       ),
       alignment: Alignment.center,
-      child: Icon(icon, size: size * 0.45, color: Colors.white),
+      child: Icon(icon, size: size * 0.45, color: onFill(color)),
     );
   }
 }
 
-/// A round avatar: a photo when available, else initials on a tinted tile.
+/// A round avatar: a photo when available, else initials on mesh art.
 class Avatar extends StatelessWidget {
   const Avatar({super.key, required this.name, this.url, this.size = 40});
   final String name;
@@ -90,12 +88,27 @@ class Avatar extends StatelessWidget {
     final initials = name.trim().isEmpty
         ? '?'
         : name.trim().split(RegExp(r'\s+')).take(2).map((w) => w[0].toUpperCase()).join();
-    return SizedBox.square(
-      dimension: size,
-      child: ClipOval(
-        child: url != null
-            ? Image.network(url!, fit: BoxFit.cover, errorBuilder: (_, _, _) => _initials(initials))
-            : _initials(initials),
+    // Decoded at the size it is drawn (not the photo's full size), with the initials while it loads and a name for a
+    // screen reader.
+    final px = (size * MediaQuery.devicePixelRatioOf(context)).round();
+    return Semantics(
+      image: true,
+      label: name,
+      child: SizedBox.square(
+        dimension: size,
+        child: ClipOval(
+          child: url != null
+              ? Image.network(
+                  url!,
+                  fit: BoxFit.cover,
+                  cacheWidth: px,
+                  cacheHeight: px,
+                  excludeFromSemantics: true,
+                  loadingBuilder: (context, child, progress) => progress == null ? child : _initials(initials),
+                  errorBuilder: (_, _, _) => _initials(initials),
+                )
+              : ExcludeSemantics(child: _initials(initials)),
+        ),
       ),
     );
   }
@@ -106,7 +119,7 @@ class Avatar extends StatelessWidget {
     child: Center(
       child: Text(
         text,
-        style: TextStyle(fontSize: size * 0.38, fontWeight: FontWeight.w700, color: MeshArt.tone(name)),
+        style: TextStyle(fontSize: size * 0.38, fontWeight: FontWeight.w700, color: MeshArt.inkFor(name)),
       ),
     ),
   );

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'agent_client.dart';
+import 'clock.dart';
 
 class GithubAccount {
   GithubAccount(this.json);
@@ -11,6 +12,9 @@ class GithubAccount {
   String get login => json['login'] as String;
   String? get name => json['name'] as String?;
   String? get avatarUrl => json['avatarUrl'] as String?;
+
+  /// GitHub rejected the sign-in and it could not be refreshed: sign in again.
+  bool get expired => json['expired'] == true;
 }
 
 class SshHost {
@@ -38,6 +42,30 @@ class RepoInfo {
   int get stars => json['stars'] as int? ?? 0;
   DateTime? get pushedAt => DateTime.tryParse(json['pushedAt'] as String? ?? '');
   bool get cloned => json['cloned'] == true;
+
+  /// The folder it is cloned in (matched on its origin remote, not its name); null when not on the device.
+  String? get path => json['path'] as String?;
+  String? get defaultBranch => json['defaultBranch'] as String?;
+}
+
+class SyncStatus {
+  SyncStatus(this.json);
+  final Map<String, dynamic> json;
+
+  bool get enabled => json['enabled'] == true;
+  bool get running => json['running'] == true;
+  String? get repo => json['repo'] as String?;
+  DateTime? get lastSync {
+    final t = json['lastSync'] as int?;
+    return t == null ? null : DateTime.fromMillisecondsSinceEpoch(t);
+  }
+
+  String? get lastError => json['lastError'] as String?;
+  int get failures => json['failures'] as int? ?? 0;
+  List<String> get skipped => (json['skipped'] as List? ?? const []).cast<String>();
+  List<String> get localOnly => (json['localOnly'] as List? ?? const []).cast<String>();
+  List<String> get pendingDelete => (json['pendingDelete'] as List? ?? const []).cast<String>();
+  Map<String, int> get imported => ((json['imported'] as Map?) ?? const {}).cast<String, int>();
 }
 
 class ProjectInfo {
@@ -69,6 +97,47 @@ class ContainerStatus {
   List<(String, String)> get distros => [
     for (final d in (json['distros'] as List? ?? const [])) ((d as Map)['id'] as String, d['label'] as String),
   ];
+
+  // Only a server's box (Podman) has these (server_agent.md; from CoderRa).
+
+  /// This is the server's rootless container, not the phone's proot one.
+  bool get isBox => json['kind'] == 'podman';
+
+  /// The launcher exists on the server. Without it there is no box.
+  bool get available => json['available'] != false;
+
+  /// `running`, `stopped`, `none` (not made yet: the first command makes it) or `unknown`.
+  String get state => json['state'] as String? ?? 'none';
+
+  /// Something wrong with the box, in words.
+  String? get problem => json['problem'] as String?;
+
+  DateTime? get startedAt => DateTime.tryParse(json['startedAt'] as String? ?? '');
+
+  BoxUsage? get usage {
+    final u = json['usage'];
+    if (u is! Map) return null;
+    return BoxUsage(
+      memoryBytes: (u['memoryBytes'] as num).toInt(),
+      memoryLimitBytes: (u['memoryLimitBytes'] as num?)?.toInt(),
+      processes: (u['processes'] as num).toInt(),
+    );
+  }
+
+  /// `memory`, `swap` and `cpus` the container is made with.
+  Map<String, String> get limits => {
+    for (final e in ((json['limits'] as Map?) ?? const {}).entries) '${e.key}': '${e.value}',
+  };
+}
+
+class BoxUsage {
+  const BoxUsage({required this.memoryBytes, required this.memoryLimitBytes, required this.processes});
+
+  final int memoryBytes;
+
+  /// Null when the box has no memory limit.
+  final int? memoryLimitBytes;
+  final int processes;
 }
 
 class SkillInfo {
@@ -108,21 +177,101 @@ class AppSettings {
   final Map<String, dynamic> json;
 
   String get dns => json['dns'] as String? ?? 'cloudflare';
+
+  /// Tokens of context past which the chat is summarized (host.ts capContext); 0 leaves it to the model's own limit.
+  /// Null while the user set nothing: the host then uses [compactAtShare] of the model's window, at least
+  /// [compactAtFloor]. A host too old to say so sends its flat default instead of null.
+  int? get compactAt => (json['compactAt'] as num?)?.toInt();
+
+  /// The share of the model's window a chat may fill before it is summarized, when no limit is set
+  /// (integrations.ts COMPACT_AT_SHARE); null on a host too old to follow the window.
+  double? get compactAtShare => (json['compactAtShare'] as num?)?.toDouble();
+
+  /// The least the default limit can be, in tokens (integrations.ts COMPACT_AT_DEFAULT).
+  int get compactAtFloor => (json['compactAtFloor'] as num?)?.toInt() ?? compactAtDefault;
+
+  /// The old hosts' flat default, for one too old to send its own figures.
+  static const compactAtDefault = 300000;
+
+  /// The limit in force for a model whose window is [contextWindow] tokens (integrations.ts compactLimit):
+  /// the user's own (0 = off), or the default share of the window, never under the floor.
+  int compactLimit(int? contextWindow) {
+    final set = compactAt;
+    if (set != null) return set;
+    final share = compactAtShare;
+    if (share == null) return compactAtDefault;
+    final byWindow = (((contextWindow ?? 0) * share) / 1000).round() * 1000;
+    return byWindow > compactAtFloor ? byWindow : compactAtFloor;
+  }
   String? get dnsUrl => json['dnsUrl'] as String?;
   bool get hasBraveKey => json['braveKey'] == true;
   bool get hasTavilyKey => json['tavilyKey'] == true;
+
+  /// A search service's saved keys ('brave', 'tavily', 's1'), masked to their last four characters.
+  List<String> keys(String service) => ((json['keys'] as Map?)?[service] as List? ?? const []).cast<String>();
+  bool get s1Search => json['s1Search'] != false;
+  bool get s1Crawl => json['s1Crawl'] != false;
+  bool get s1Screenshot => json['s1Screenshot'] != false;
+
+  /// Per-project web_search toggle, keyed by project path; absent means on.
+  Map<String, bool> get projectSearch =>
+      ((json['projectSearch'] as Map?) ?? const {}).map((k, v) => MapEntry(k as String, v == true));
+  bool get braveSearch => json['braveSearch'] != false;
+  bool get tavilySearch => json['tavilySearch'] != false;
+  bool get tinyfishSearch => json['tinyfishSearch'] != false;
   String get approvalMode => json['approvalMode'] as String? ?? 'ask_risky';
+
+  /// Subagent limits (global for all subagents); a cost of 0 = no limit.
+  double get subagentCostLimit => (json['subagentCostLimit'] as num?)?.toDouble() ?? 5;
+  double get subagentMinutesLimit => (json['subagentMinutesLimit'] as num?)?.toDouble() ?? 30;
+  String get subagentApprovalMode => json['subagentApprovalMode'] as String? ?? approvalMode;
+  bool get subagentNotifyDone => json['subagentNotifyDone'] != false;
+  bool get subagentNotifyFailed => json['subagentNotifyFailed'] != false;
+  bool get subagentNotifyApproval => json['subagentNotifyApproval'] != false;
+  bool get subagentNotifyRunning => json['subagentNotifyRunning'] != false;
+
+  /// Whether subagents have their own approval mode; false = they follow [approvalMode].
+  /// Older hosts don't send it: then any explicit subagent mode counts as an override.
+  bool get subagentApprovalOverride =>
+      json['subagentApprovalOverride'] as bool? ?? json.containsKey('subagentApprovalMode') && json['subagentApprovalMode'] != approvalMode;
+
+  /// GitHub OAuth App Client ID for the device flow, entered in Settings.
+  /// Null means GitHub login is not configured (no fallback).
+  String? get githubClientId => json['githubClientId'] as String?;
+
+  /// Whether this build comes with a GitHub OAuth Client ID of its own (none does unless it was built with one).
+  bool get githubClientIdBuiltIn => json['githubClientIdBuiltIn'] == true;
   List<Map<String, dynamic>> get fallbackModels =>
       (json['fallbackModels'] as List? ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;
+
+  /// ntfy pushes from a server agent while the app is closed (agent/src/notify.ts). Off until turned on.
+  Map<String, dynamic> get _notify => (json['notify'] as Map?)?.cast<String, dynamic>() ?? const {};
+  bool get notifyEnabled => _notify['enabled'] == true;
+  String get notifyUrl => _notify['url'] as String? ?? 'https://ntfy.sh';
+  String? get notifyTopic => _notify['topic'] as String?;
 }
 
 /// Accounts, repositories, SSH and deploys, backed by the host's
 /// integrations module (agent/src/integrations.ts).
+/// A sign-in with a code (GitHub's device flow): what the user types at [verificationUri], and until when ([expiresAt],
+/// milliseconds since the epoch, by the clock of the app: the host says how long is left, not a time) the host waits
+/// for the approval.
+typedef GithubDeviceFlow = ({String deviceCode, String userCode, String verificationUri, int expiresAt, int interval});
+
 class Integrations extends ChangeNotifier {
   Integrations(this.client) {
     client.records.listen((r) {
       if (r['type'] == 'task') _taskLines.add(r);
+      // The host changed the accounts on its own (a GitHub sign-in expired).
+      if (r['type'] == 'integrations' && r['summary'] is Map) _apply(r['summary']);
+      if (r['type'] == 'sync') {
+        final s = SyncStatus((r['status'] as Map).cast<String, dynamic>());
+        // A finished sync may have brought projects in from another phone.
+        if (!s.running && (s.imported['projects'] ?? 0) > 0) unawaited(refreshProjects());
+        sync = s;
+        notifyListeners();
+      }
     });
   }
 
@@ -132,16 +281,31 @@ class Integrations extends ChangeNotifier {
 
   GithubAccount? github;
   String? vercelUser;
+
+  /// The Cloudflare accounts the saved token reaches, and the one deploys go to.
+  List<({String id, String name})> cloudflareAccounts = const [];
+  String? cloudflareAccountId;
+  bool get cloudflareConnected => cloudflareAccountId != null;
+  String? get cloudflareAccountName => cloudflareAccounts.where((a) => a.id == cloudflareAccountId).firstOrNull?.name;
   String? publicKey;
   List<SshHost> hosts = const [];
   List<ProjectInfo> projects = const [];
   bool loaded = false;
+
+  /// GitHub sync of chats, projects and settings (agent/src/sync.ts).
+  SyncStatus? sync;
 
   void _apply(dynamic summary) {
     final s = (summary as Map).cast<String, dynamic>();
     final gh = s['github'];
     github = gh == null ? null : GithubAccount((gh as Map).cast<String, dynamic>());
     vercelUser = (s['vercel'] as Map?)?['username'] as String?;
+    final cf = s['cloudflare'] as Map?;
+    cloudflareAccounts = [
+      for (final a in (cf?['accounts'] as List? ?? const []).cast<Map>())
+        (id: a['id'] as String, name: a['name'] as String? ?? a['id'] as String),
+    ];
+    cloudflareAccountId = cf?['accountId'] as String?;
     final ssh = (s['ssh'] as Map).cast<String, dynamic>();
     publicKey = ssh['publicKey'] as String?;
     hosts = (ssh['hosts'] as List).map((e) => SshHost((e as Map).cast<String, dynamic>())).toList();
@@ -150,6 +314,24 @@ class Integrations extends ChangeNotifier {
   }
 
   Future<void> refresh() async => _apply(await client.call('integrations'));
+
+  Future<void> refreshSync() async {
+    sync = SyncStatus(await client.call<Map<String, dynamic>>('sync_status'));
+    notifyListeners();
+  }
+
+  Future<void> setSync(bool on) async {
+    sync = SyncStatus(await client.call<Map<String, dynamic>>('sync_enable', {'on': on}));
+    notifyListeners();
+  }
+
+  /// Syncs now; with [soon], shortly after (the app is going to the background).
+  Future<void> syncNow({bool soon = false, bool confirmDelete = false}) async {
+    sync = SyncStatus(
+      await client.call<Map<String, dynamic>>('sync_now', {'soon': soon, 'confirmDelete': confirmDelete}),
+    );
+    notifyListeners();
+  }
 
   Future<void> refreshProjects() async {
     final list = await client.call<List>('projects');
@@ -182,26 +364,70 @@ class Integrations extends ChangeNotifier {
   // GitHub
   Future<void> githubLogin(String token) async => _apply(await client.call('github_login', {'token': token}));
 
-  /// Starts GitHub's device flow: returns the code the user types at [verificationUri].
-  Future<({String deviceCode, String userCode, String verificationUri, int expiresIn, int interval})>
-  githubDeviceStart() async {
+  /// Starts GitHub's device flow: returns the code the user types at [verificationUri]. The host then waits for the
+  /// approval itself ([githubDeviceStatus]); [githubDeviceWait] only watches it.
+  Future<GithubDeviceFlow> githubDeviceStart() async {
     final r = (await client.call<Map>('github_device_start')).cast<String, dynamic>();
+    final expiresIn = (r['expiresIn'] as num).toInt();
     return (
       deviceCode: r['deviceCode'] as String,
       userCode: r['userCode'] as String,
       verificationUri: r['verificationUri'] as String,
-      expiresIn: (r['expiresIn'] as num).toInt(),
+      expiresAt: clock().millisecondsSinceEpoch + expiresIn * 1000,
       interval: (r['interval'] as num).toInt(),
     );
   }
 
-  /// Polls until the user approves, denies or the code expires. Returns true once signed in.
-  Future<bool> githubDeviceWait(String deviceCode, int interval, {required bool Function() cancelled}) async {
-    var wait = interval;
+  /// The sign-in with a code the host is still waiting on, or null. The host waits for the approval, so it goes on when
+  /// the app is closed or its screen is left; coming back, the app picks it up again with this. A host from before this
+  /// has no such command, and then there is nothing to pick up. Asked when a screen opens and never awaited there, so
+  /// whatever goes wrong (a link that is down, an answer of a shape nobody expected) is "nothing", not an error.
+  Future<GithubDeviceFlow?> githubDeviceStatus() async {
+    try {
+      final r = await client.call<Object?>('github_device_status');
+      if (r is! Map || r['status'] != 'pending') return null;
+      return (
+        deviceCode: r['deviceCode'] as String,
+        userCode: r['userCode'] as String,
+        verificationUri: r['verificationUri'] as String,
+        expiresAt: clock().millisecondsSinceEpoch + (r['expiresIn'] as num).toInt() * 1000,
+        interval: (r['interval'] as num).toInt(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The user gave up: the host stops waiting for the approval. Best effort, and not awaited by the button: an older
+  /// host does not know the command, and a link that is down cannot take it.
+  Future<void> githubDeviceCancel() async {
+    try {
+      await client.call<Object?>('github_device_cancel');
+    } catch (_) {
+      // Nothing to stop, or a host that cannot.
+    }
+  }
+
+  /// Watches the sign-in until the host has it done, denied or expired. Returns true once signed in. The wait is the
+  /// host's, so a link that drops meanwhile (a server over a phone network) is waited out, up to the code's expiry,
+  /// not taken for a failure.
+  Future<bool> githubDeviceWait(
+    GithubDeviceFlow flow, {
+    required bool Function() cancelled,
+  }) async {
+    var wait = flow.interval;
     while (!cancelled()) {
       await Future<void>.delayed(Duration(seconds: wait));
       if (cancelled()) return false;
-      final r = (await client.call<Map>('github_device_poll', {'deviceCode': deviceCode})).cast<String, dynamic>();
+      final Map<String, dynamic> r;
+      try {
+        r = (await client.call<Map>('github_device_poll', {'deviceCode': flow.deviceCode})).cast<String, dynamic>();
+      } on AgentError catch (e) {
+        final link = e.code == 'offline' || e.code == 'not_sent' || e.code == 'connection_lost';
+        if (link && clock().millisecondsSinceEpoch < flow.expiresAt) continue;
+        if (link) throw 'The code expired. Try again.';
+        rethrow;
+      }
       switch (r['status']) {
         case 'done':
           _apply(r['state']);
@@ -234,6 +460,12 @@ class Integrations extends ChangeNotifier {
   Future<void> vercelLogin(String token) async => _apply(await client.call('vercel_login', {'token': token}));
   Future<void> vercelLogout() async => _apply(await client.call('vercel_logout'));
 
+  // Cloudflare
+  Future<void> cloudflareLogin(String token) async => _apply(await client.call('cloudflare_login', {'token': token}));
+  Future<void> cloudflareSelectAccount(String id) async =>
+      _apply(await client.call('cloudflare_account', {'accountId': id}));
+  Future<void> cloudflareLogout() async => _apply(await client.call('cloudflare_logout'));
+
   // SSH
   Future<String> ensureSshKey() async {
     publicKey = await client.call<String>('ssh_key');
@@ -257,6 +489,15 @@ class Integrations extends ChangeNotifier {
     return result['url'] as String?;
   }
 
+  /// Resolves a deploy target without side effects, for the confirmation dialog.
+  Future<Map<String, dynamic>> deployPlan({
+    required String target,
+    required String dir,
+    Map<String, dynamic> options = const {},
+  }) async =>
+      (await client.call<Map>('deploy_plan', {'target': target, 'dir': dir, 'options': options}))
+          .cast<String, dynamic>();
+
   /// Follows GitHub Actions for the latest commit in [dir].
   Future<void> watchCi(String dir, {void Function(String)? onLine, void Function(Map<String, dynamic>)? onCi}) =>
       _task('ci_watch', {'dir': dir}, onLine, onCi: onCi);
@@ -270,19 +511,45 @@ class Integrations extends ChangeNotifier {
     return container!;
   }
 
-  Future<void> installContainer(String distro, {void Function(String)? onLine}) async {
-    await _task('container_install', {'distro': distro}, onLine);
+  /// On the phone: installs a Linux. On a server: builds the box's image again.
+  Future<void> installContainer(String distro, {void Function(String)? onLine, bool force = false}) async {
+    await _task('container_install', {'distro': distro, if (force) 'force': true}, onLine);
     await refreshContainer();
   }
 
-  Future<void> removeContainer() async {
-    container = ContainerStatus((await client.call<Map>('container_remove')).cast<String, dynamic>());
+  /// On the phone: removes the Linux. On a server: throws the box's container away (a new one is made on the next
+  /// command).
+  Future<void> removeContainer({bool force = false}) async {
+    container = ContainerStatus(
+      (await client.call<Map>('container_remove', {if (force) 'force': true})).cast<String, dynamic>(),
+    );
     notifyListeners();
   }
 
   Future<void> setContainerShell(bool on) async {
     container = ContainerStatus((await client.call<Map>('container_enable', {'on': on})).cast<String, dynamic>());
     notifyListeners();
+  }
+
+  /// Runs a command inside the server's box to see that it works.
+  Future<({bool ok, String message})> checkBox() async {
+    final r = (await client.call<Map>('box_check')).cast<String, dynamic>();
+    return (ok: r['ok'] == true, message: r['message'] as String? ?? '');
+  }
+
+  Future<void> stopBox({bool force = false}) async {
+    container = ContainerStatus(
+      (await client.call<Map>('box_stop', {if (force) 'force': true})).cast<String, dynamic>(),
+    );
+    notifyListeners();
+  }
+
+  /// Empties the box's home folder (after removing its container). Returns how many things were removed.
+  Future<int> wipeBoxHome({bool force = false}) async {
+    final r = (await client.call<Map>('box_wipe_home', {if (force) 'force': true})).cast<String, dynamic>();
+    container = ContainerStatus((r['status'] as Map).cast<String, dynamic>());
+    notifyListeners();
+    return (r['removed'] as num).toInt();
   }
 
   // Skills
@@ -318,6 +585,27 @@ class Integrations extends ChangeNotifier {
     settings = AppSettings((await client.call<Map>('settings_set', {'settings': patch})).cast<String, dynamic>());
     notifyListeners();
   }
+
+  /// Adds the keys found in [text] (one per line) to [service]; returns how many were new.
+  Future<int> addSearchKeys(String service, String text) async {
+    final out = (await client.call<Map>('search_keys_add', {'service': service, 'text': text})).cast<String, dynamic>();
+    settings = AppSettings((out['settings'] as Map).cast<String, dynamic>());
+    notifyListeners();
+    return (out['added'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> removeSearchKey(String service, int index) async {
+    settings = AppSettings(
+      (await client.call<Map>('search_key_remove', {'service': service, 'index': index})).cast<String, dynamic>(),
+    );
+    notifyListeners();
+  }
+
+  /// Search1API credits left per key, in the order of [AppSettings.keys]; null where the check failed.
+  Future<List<({int? credits, String? error})>> s1Usage() async => [
+    for (final u in (await client.call<List>('s1_usage')).cast<Map>())
+      (credits: (u['usage'] as num?)?.toInt(), error: u['error'] as String?),
+  ];
 
   @override
   void dispose() {
