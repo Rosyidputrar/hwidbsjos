@@ -1020,7 +1020,7 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 20),
               Text(
-                tr(ready ? 'What should we build?' : 'Connect a model to begin'),
+                tr(ready ? 'What should we build?' : 'Add an endpoint to begin'),
                 style: text.headlineSmall,
                 textAlign: TextAlign.center,
               ),
@@ -1028,7 +1028,7 @@ class _EmptyState extends StatelessWidget {
               Text(
                 ready
                     ? tr('The agent codes, runs commands, installs packages and deploys, right here on your phone.')
-                    : tr('The agent runs on your phone. Sign in to a provider or add an API key to choose its model.'),
+                    : tr('The agent runs on your phone. Add an endpoint to choose its model.'),
                 style: text.bodyMedium?.copyWith(color: p.muted),
                 textAlign: TextAlign.center,
               ),
@@ -1037,7 +1037,7 @@ class _EmptyState extends StatelessWidget {
                 Center(
                   child: SizedBox(
                     width: 260,
-                    child: PrimaryButton(label: tr('Connect a model'), icon: LucideIcons.sparkles, onPressed: onConnect),
+                    child: PrimaryButton(label: tr('Add an endpoint'), icon: LucideIcons.sparkles, onPressed: onConnect),
                   ),
                 )
               else ...[

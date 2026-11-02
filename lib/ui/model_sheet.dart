@@ -94,7 +94,7 @@ class _ModelSheetState extends State<_ModelSheet> {
                       },
                       style: TextButton.styleFrom(foregroundColor: p.accentText),
                       icon: const Icon(LucideIcons.plugZap, size: 16),
-                      label: Text(tr('Providers')),
+                      label: Text(tr('Endpoints')),
                     ),
                   ],
                 ),
@@ -126,7 +126,7 @@ class _ModelSheetState extends State<_ModelSheet> {
                         child: Padding(
                           padding: const EdgeInsets.all(32),
                           child: Text(
-                            tr('No models yet. Connect a provider to see its models here.'),
+                            tr('No models yet. Add an endpoint to see its models here.'),
                             style: text.bodyMedium?.copyWith(color: p.muted),
                             textAlign: TextAlign.center,
                           ),

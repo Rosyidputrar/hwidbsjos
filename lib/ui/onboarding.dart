@@ -177,7 +177,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   SizedBox(
                     width: 170,
                     child: PrimaryButton(
-                      label: last ? tr('Connect a provider') : tr('Next'),
+                      label: last ? tr('Add an endpoint') : tr('Next'),
                       icon: last ? LucideIcons.arrowRight : null,
                       onPressed: last ? _addKey : _next,
                     ),

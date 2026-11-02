@@ -339,6 +339,10 @@ class AgentController extends ChangeNotifier {
 
   bool get hasModel => model != null;
 
+  /// Whether the host offers pi's built-in providers (sign in, API-key catalogue) next to the person's own endpoints.
+  /// Off for now: the host says so in its hello, and only the endpoints added in Settings are used.
+  bool get builtinProviders => info['builtinProviders'] == true;
+
   /// The display name for a model id from a transcript ("claude-sonnet-5-5" -> "Claude Sonnet 5.5"),
   /// or the id itself when the model isn't in the list.
   String modelLabel(String id) {
