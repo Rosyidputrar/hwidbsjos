@@ -9,6 +9,7 @@
 - Tampilan mengikuti desain Rynex: aksen lime, kartu dan kolom berbingkai, serta navigasi bawah dengan tombol buat.
 - Kunci API provider tidak lagi diteruskan ke git dan server MCP, dan perintah yang menyebut kunci itu kini meminta persetujuan.
 - Nama, ikon, dan identitas aplikasi diperbarui menjadi Rynex (paket com.airynex.agent). Folder data lama di server otomatis berganti nama saat pertama dijalankan, jadi sesi dan pengaturanmu tetap ada.
+- Perbaikan: agent tidak bisa menyala ("The agent could not start") di HP yang juga memasang Termux. Rynex kini memakai konfigurasi OpenSSL miliknya sendiri, bukan file milik aplikasi lain yang tidak boleh dibacanya.
 
 ## English
 
@@ -19,3 +20,4 @@
 - The look follows the Rynex design: lime accent, outlined cards and fields, and the docked navigation bar with the create button.
 - Provider API keys are no longer passed on to git and MCP servers, and a command that names such a key now asks first.
 - The app's name, icon and identity are now Rynex (package com.airynex.agent). On a server, the old data folder is renamed automatically on first run, so your sessions and settings carry over.
+- Fix: the agent could not start ("The agent could not start") on phones that also have Termux installed. Rynex now uses an OpenSSL configuration of its own instead of a file that belongs to another app and that it is not allowed to read.
