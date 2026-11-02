@@ -168,7 +168,7 @@ class _NewChatSheetState extends State<_NewChatSheet> with BusyActions {
                   children: [
                     SettingsRow(
                       icon: LucideIcons.folderOpen,
-                      color: const Color(0xFF14B8A6),
+                      color: p.accent,
                       title: tr('Open a folder'),
                       subtitle: tr('Continue in an existing project folder'),
                       onTap: busy() ? null : () => Navigator.pop(context, _pick),
@@ -190,15 +190,12 @@ class _NewChatSheetState extends State<_NewChatSheet> with BusyActions {
                     runSpacing: 8,
                     children: [
                       for (final pr in recent)
-                        ActionChip(
-                          avatar: busy(pr.path)
-                              ? BusySpinner(size: 14, color: p.accent)
-                              : Icon(pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder, size: 15, color: p.accent),
-                          label: Text(pr.name, style: const TextStyle(fontFamily: mono, fontSize: 12.5)),
-                          backgroundColor: p.raised,
-                          side: BorderSide(color: p.border),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.pill)),
-                          onPressed: busy() ? null : () => _startFrom(pr.path, pr.path),
+                        AppChip(
+                          leading: busy(pr.path) ? BusySpinner(size: 14, color: p.accent) : null,
+                          icon: busy(pr.path) ? null : (pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder),
+                          label: pr.name,
+                          maxWidth: 160,
+                          onTap: busy() ? null : () => _startFrom(pr.path, pr.path),
                         ),
                     ],
                   ),

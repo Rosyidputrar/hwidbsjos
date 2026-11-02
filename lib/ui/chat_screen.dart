@@ -11,7 +11,6 @@ import '../agent/models.dart';
 import '../agent/features.dart';
 import 'i18n.dart';
 import 'chat_extras.dart';
-import 'deploy_sheet.dart';
 import 'errors.dart';
 import 'rewind_confirm.dart';
 import 'message_menu.dart';
@@ -22,12 +21,9 @@ import 'package:simple_icons/simple_icons.dart';
 import 'repos_screen.dart';
 import 'kit.dart';
 import 'live_clock.dart';
-import 'illustration.dart';
-import 'mesh.dart';
 import 'model_sheet.dart';
 import 'review_screen.dart';
 import 'tasks_screen.dart';
-import 'terminal_screen.dart';
 import 'server_screen.dart';
 import 'settings_screen.dart';
 import 'folder_picker.dart';
@@ -557,11 +553,6 @@ class _ChatScreenState extends State<ChatScreen> {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
   }
 
-  /// With a server set up the bar also holds the connection badge, and on a narrow phone (or with large text) the chat's
-  /// title was squeezed to a few letters or nothing: the three tools then go into one menu.
-  bool _compactBar(BuildContext context) =>
-      agent.remote.configured && MediaQuery.sizeOf(context).width / MediaQuery.textScalerOf(context).scale(1) < 430;
-
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -580,51 +571,24 @@ class _ChatScreenState extends State<ChatScreen> {
           actions: [
             // Phone or server, and whether the server can be reached; only once a server is set up.
             ConnectionChip(agent: agent),
-            if (_compactBar(context))
-              ValueListenableBuilder<bool>(
-                valueListenable: deployPreparing,
-                builder: (context, preparing, _) => PopupMenuButton<String>(
-                  tooltip: tr('More'),
-                  icon: const Icon(LucideIcons.ellipsisVertical, size: 20),
-                  onSelected: (v) => switch (v) {
-                    'terminal' => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TerminalScreen(agent: agent))),
-                    'deploy' => showDeploySheet(context, agent),
-                    _ => showProjectTools(context, agent, onPrompt: _prefill),
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(value: 'terminal', child: _MenuLine(LucideIcons.squareTerminal, tr('Terminal'))),
-                    PopupMenuItem(
-                      value: 'deploy',
-                      enabled: !agent.busy && !preparing,
-                      child: _MenuLine(LucideIcons.rocket, tr('Deploy')),
-                    ),
-                    PopupMenuItem(value: 'tools', child: _MenuLine(LucideIcons.layoutGrid, tr('Project tools'))),
-                  ],
-                ),
-              )
-            else ...[
-            IconButton(
-              tooltip: tr('Terminal'),
-              icon: const Icon(LucideIcons.squareTerminal, size: 20),
-              onPressed: () =>
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => TerminalScreen(agent: agent))),
-            ),
-            ValueListenableBuilder<bool>(
-              valueListenable: deployPreparing,
-              builder: (context, preparing, _) => IconButton(
-                tooltip: tr('Deploy'),
-                icon: preparing ? const BusySpinner(size: 18) : const Icon(LucideIcons.rocket, size: 20),
-                onPressed: agent.busy || preparing ? null : () => showDeploySheet(context, agent),
+            // Everything that acts on the chat's folder lives behind this one button (the project tools sheet);
+            // the bar keeps the title's room however narrow the phone.
+            Tooltip(
+              message: tr('Project tools'),
+              child: AppIconButton(
+                icon: LucideIcons.layoutGrid,
+                label: tr('Project tools'),
+                size: 38,
+                onTap: () => showProjectTools(context, agent, onPrompt: _prefill),
               ),
             ),
-            IconButton(
-              tooltip: tr('Project tools'),
-              icon: const Icon(LucideIcons.layoutGrid, size: 20),
-              onPressed: () => showProjectTools(context, agent, onPrompt: _prefill),
-            ),
-            ],
-            const SizedBox(width: 4),
+            const SizedBox(width: 12),
           ],
+          // A thin running bar while the agent works; a hairline otherwise.
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(2),
+            child: agent.busy ? const BusyBar(busy: true) : Divider(height: 2, thickness: 1, color: p.border),
+          ),
         ),
         // A readable column on a wide screen; the bar above stays full width.
         body: ContentWidth(
@@ -674,9 +638,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     Positioned(
                       right: 16,
                       bottom: 12,
-                      child: _RoundButton(
+                      child: AppIconButton(
                         icon: LucideIcons.arrowDown,
                         label: tr('Scroll to bottom'),
+                        size: 38,
                         onTap: () => _jumpToBottom(animate: true),
                       ),
                     ),
@@ -783,6 +748,8 @@ class _ChatScreenState extends State<ChatScreen> {
       itemBuilder: (context, i) {
         if (i < entries.length) {
           final e = entries[i];
+          // The agent's replies get a small byline at the start of each turn.
+          final turnStart = i == 0 || entries[i - 1] is UserEntry;
           final child = switch (e) {
             UserEntry() => UserMessageView(
               e,
@@ -792,19 +759,25 @@ class _ChatScreenState extends State<ChatScreen> {
               fs: agent.fs,
               working: identical(_rewinding?.entry, e) ? _rewinding!.label : null,
             ),
-            AssistantEntry() => AssistantMessageView(
-              e,
-              tools: agent.tools,
-              cwd: agent.cwd,
-              agent: agent,
-              live: agent,
-              modelLabel: agent.modelLabel,
-              subagentCard: placed.cardFor,
-              subagentCost: (id) => switch (agent.subagentStore.all.where((s) => s.toolCallId == id).firstOrNull) {
-                final s? => (cost: s.cost),
-                null => null,
-              },
-              footer: footers[i],
+            AssistantEntry() => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (turnStart) const _Byline(),
+                AssistantMessageView(
+                  e,
+                  tools: agent.tools,
+                  cwd: agent.cwd,
+                  agent: agent,
+                  live: agent,
+                  modelLabel: agent.modelLabel,
+                  subagentCard: placed.cardFor,
+                  subagentCost: (id) => switch (agent.subagentStore.all.where((s) => s.toolCallId == id).firstOrNull) {
+                    final s? => (cost: s.cost),
+                    null => null,
+                  },
+                  footer: footers[i],
+                ),
+              ],
             ),
             NoticeEntry() => NoticeView(
               e,
@@ -926,38 +899,61 @@ class _Title extends StatelessWidget {
     final title = (name != null && name.isNotEmpty) ? name : (firstUser ?? tr('New chat'));
     // Sessions inside a project folder show which one.
     final project = sessionFolder(agent.cwd, agent.info['workspace'] as String? ?? '');
+    final sub = TextStyle(fontSize: 11.5, color: p.muted, fontWeight: FontWeight.w500);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        if (project != null || agent.model != null)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (project != null) ...[
-                Icon(LucideIcons.folderGit2, size: 12, color: p.accent),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    project,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.muted),
-                  ),
-                ),
-              ] else
-                Flexible(
-                  child: Text(
-                    agent.model!.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11.5, color: p.faint, fontWeight: FontWeight.w500),
-                  ),
-                ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (agent.busy) ...[
+              StatusDot(color: p.warning, size: 6, pulse: true),
+              const SizedBox(width: 5),
+              Text(tr('Working'), style: sub.copyWith(color: p.warning)),
+              const SizedBox(width: 6),
             ],
-          ),
+            if (project != null) ...[
+              Icon(LucideIcons.folderGit2, size: 12, color: p.accent),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  project,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: sub.copyWith(fontFamily: mono, fontWeight: FontWeight.w400),
+                ),
+              ),
+            ] else if (agent.model != null)
+              Flexible(
+                child: Text(agent.model!.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: sub.copyWith(color: p.faint)),
+              )
+            else if (!agent.busy)
+              Text(tr('Quick chat'), style: sub.copyWith(color: p.faint)),
+          ],
+        ),
       ],
+    );
+  }
+}
+
+/// "pi" with the logo, above the first reply of a turn.
+class _Byline extends StatelessWidget {
+  const _Byline();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const LogoMark(size: 20),
+          const SizedBox(width: 6),
+          Text('pi', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.text)),
+        ],
+      ),
     );
   }
 }
@@ -1007,24 +1003,28 @@ class _EmptyState extends StatelessWidget {
           constraints: BoxConstraints(minHeight: box.maxHeight - 40),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // In a pastel tile like the Home cards; on the bare page its white panels look like a pasted box.
-              const SizedBox(
-                width: 236,
-                height: 196,
-                child: MeshArt(
-                  seed: 'hello',
-                  radius: Radii.xl,
-                  child: Padding(padding: EdgeInsets.all(12), child: Illustration('ai', height: 172)),
+              Center(
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: p.surface,
+                    borderRadius: BorderRadius.circular(Radii.lg),
+                    border: Border.all(color: p.border),
+                  ),
+                  child: const LogoMark(size: 48),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               Text(
                 tr(ready ? 'What should we build?' : 'Connect a model to begin'),
-                style: text.displaySmall?.copyWith(fontSize: 26),
+                style: text.headlineSmall,
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Text(
                 ready
                     ? tr('The agent codes, runs commands, installs packages and deploys, right here on your phone.')
@@ -1034,46 +1034,31 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 28),
               if (!ready)
-                SizedBox(
-                  width: 260,
-                  child: PrimaryButton(label: tr('Connect a model'), icon: LucideIcons.sparkles, onPressed: onConnect),
-                )
-              else
-                // Two cards a row, each row as tall as its taller card. A grid with a fixed aspect ratio cut the blurb off
-                // (and drew overflow stripes) on a 360 dp phone at the default text size.
-                for (var i = 0; i < suggestions.length; i += 2) ...[
-                  if (i > 0) const SizedBox(height: 10),
-                  IntrinsicHeight(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final (j, (icon, color, title, blurb, prompt)) in suggestions.skip(i).take(2).indexed) ...[
-                          if (j > 0) const SizedBox(width: 10),
-                          Expanded(
-                            child: SurfaceCard(
-                              padding: const EdgeInsets.all(14),
-                              onTap: prompt == null ? onClone : () => onPrompt(tr(prompt)),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconTile(icon: icon, color: color, size: 32),
-                                  // Text from the top, so titles line up across a row whatever the blurb length.
-                                  const SizedBox(height: 14),
-                                  Text(tr(title), style: text.titleSmall),
-                                  const SizedBox(height: 2),
-                                  Text(tr(blurb), maxLines: 3, overflow: TextOverflow.ellipsis, style: text.bodySmall),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                        // An odd one out keeps half the width.
-                        if (suggestions.length - i == 1) ...[const SizedBox(width: 10), const Expanded(child: SizedBox())],
-                      ],
-                    ),
+                Center(
+                  child: SizedBox(
+                    width: 260,
+                    child: PrimaryButton(label: tr('Connect a model'), icon: LucideIcons.sparkles, onPressed: onConnect),
                   ),
-                ],
+                )
+              else ...[
+                SectionLabel(tr('Try one of these'), padding: const EdgeInsets.fromLTRB(4, 0, 4, 8)),
+                SettingsGroup(
+                  children: [
+                    for (final (icon, color, title, blurb, prompt) in suggestions)
+                      SettingsRow(
+                        leading: IconTile(icon: icon, color: color, size: 34),
+                        title: tr(title),
+                        subtitle: tr(blurb),
+                        trailing: Icon(
+                          prompt == null ? LucideIcons.arrowUpRight : LucideIcons.cornerDownLeft,
+                          size: 16,
+                          color: p.faint,
+                        ),
+                        onTap: prompt == null ? onClone : () => onPrompt(tr(prompt)),
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -1119,17 +1104,6 @@ class _Composer extends StatelessWidget {
   final AgentController agent;
   final VoidCallback onSend;
 
-  /// Stop. With a server agent and the link down it cannot reach the host: it says so instead of looking like it worked.
-  Future<void> _stop(BuildContext context) {
-    if (!agent.client.connection.value.connected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(tr("Offline: can't stop it from here. It stops by itself when it finishes; reconnect to stop it now."))),
-      );
-      return Future.value();
-    }
-    return tellFailure(context, agent.abort, done: tr('Stopping…'));
-  }
-
   /// The last message is still on its way: Send spins and is off.
   final bool sending;
   final VoidCallback onQueue;
@@ -1150,6 +1124,17 @@ class _Composer extends StatelessWidget {
   final void Function(Attachment) onRemoveAttachment;
   final VoidCallback onPickModel;
 
+  /// Stop. With a server agent and the link down it cannot reach the host: it says so instead of looking like it worked.
+  Future<void> _stop(BuildContext context) {
+    if (!agent.client.connection.value.connected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr("Offline: can't stop it from here. It stops by itself when it finishes; reconnect to stop it now."))),
+      );
+      return Future.value();
+    }
+    return tellFailure(context, agent.abort, done: tr('Stopping…'));
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -1159,21 +1144,24 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
         child: ListenableBuilder(
           listenable: focus,
           builder: (context, child) => AnimatedContainer(
             duration: Motion.of(context, const Duration(milliseconds: 180)),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(Radii.xl),
-              border: Border.all(color: focus.hasFocus ? p.accent.withValues(alpha: 0.55) : p.border),
+              borderRadius: BorderRadius.circular(Radii.lg),
+              border: Border.all(
+                color: focus.hasFocus ? p.accent.withValues(alpha: 0.7) : p.border,
+                width: focus.hasFocus ? 1.4 : 1,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: (focus.hasFocus ? p.accent : Colors.black).withValues(alpha: focus.hasFocus ? 0.18 : 0.12),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                  spreadRadius: -8,
+                  color: (focus.hasFocus ? p.accent : Colors.black).withValues(alpha: focus.hasFocus ? 0.14 : 0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                  spreadRadius: -6,
                 ),
               ],
             ),
@@ -1212,99 +1200,101 @@ class _Composer extends StatelessWidget {
                 textCapitalization: TextCapitalization.sentences,
                 style: Theme.of(context).textTheme.bodyLarge,
                 decoration: InputDecoration(
-                  hintText: busy ? tr('Queue a follow-up…') : tr('Ask the agent to build, fix or deploy…'),
+                  hintText: busy ? tr('Queue a follow-up…') : tr('Ask pi to build, fix or deploy…'),
                   filled: false,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  // 48 dp tall with one line, like the controls under it.
-                  contentPadding: const EdgeInsets.fromLTRB(18, 16, 18, 7),
+                  contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
                 ),
               ),
               Padding(
-                // Less inset than the look suggests: the controls' touch boxes reach past what they draw.
-                padding: const EdgeInsets.fromLTRB(3, 0, 5, 3),
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                 child: Row(
                   children: [
-                    // Each control's 48 dp touch box carries its own margin: no gaps between them.
-                    _IconChip(icon: LucideIcons.plus, label: tr('Attach'), onTap: onAttach),
-                    // The chips share what the buttons on the right leave; the model chip shrinks first,
-                    // and the buttons stay flush right however short the model name is.
+                    // The options scroll sideways on narrow phones instead of squeezing the model name;
+                    // the right edge fades so it reads as scrollable.
                     Expanded(
-                      child: Row(
-                        children: [
-                          Flexible(
-                            child: _Chip(
-                              leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 20),
-                              label: agent.model?.name ?? tr('Choose model'),
-                              icon: LucideIcons.chevronsUpDown,
-                              onTap: onPickModel,
-                            ),
+                      child: ShaderMask(
+                        blendMode: BlendMode.dstIn,
+                        shaderCallback: (r) => const LinearGradient(
+                          colors: [Colors.white, Colors.white, Colors.transparent],
+                          stops: [0, 0.88, 1],
+                        ).createShader(r),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.only(right: 16),
+                          child: Row(
+                            children: [
+                              AppIconButton(icon: LucideIcons.plus, label: tr('Attach'), size: 34, onTap: onAttach),
+                              const SizedBox(width: 6),
+                              AppChip(
+                                leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 22),
+                                label: agent.model?.name ?? tr('Choose model'),
+                                trailingIcon: LucideIcons.chevronsUpDown,
+                                maxWidth: 110,
+                                onTap: onPickModel,
+                              ),
+                              if (agent.thinkingLevels.length > 1) ...[
+                                const SizedBox(width: 6),
+                                _ThinkingChip(agent: agent),
+                              ],
+                              const SizedBox(width: 6),
+                              Tooltip(
+                                message: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
+                                child: AppChip(
+                                  icon: LucideIcons.listChecks,
+                                  label: tr('Plan'),
+                                  semanticsLabel: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
+                                  selected: agent.planMode,
+                                  onTap: () => tellFailure(context, () => agent.setPlanMode(!agent.planMode)),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              _ApprovalChip(agent: agent),
+                            ],
                           ),
-                          if (agent.thinkingLevels.length > 1) ...[
-                            const SizedBox(width: 6),
-                            _ThinkingChip(agent: agent),
-                          ],
-                          _IconChip(
-                            icon: LucideIcons.listChecks,
-                            label: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
-                            active: agent.planMode,
-                            onTap: () => tellFailure(context, () => agent.setPlanMode(!agent.planMode)),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     // While the agent works, Stop stays reachable; typed text adds Send (queues a follow-up).
                     if (busy)
-                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: () => _stop(context)),
-                    if (hasText || sending)
-                      _RoundButton(
-                        onLongPress: sending ? null : onQueue,
-                        icon: LucideIcons.arrowUp,
-                        label: tr(sending ? 'Sending…' : 'Send'),
-                        filled: true,
-                        busy: sending,
-                        onTap: sending ? null : onSend,
-                      )
-                    else if (!busy)
-                      _RoundButton(icon: LucideIcons.mic, label: tr('Voice'), filled: false, onTap: onVoice),
+                      AppIconButton(
+                        icon: LucideIcons.square,
+                        label: tr('Stop'),
+                        size: 38,
+                        filled: !hasText,
+                        onTap: () => _stop(context),
+                      ),
+                    if (hasText || sending) ...[
+                      if (busy) const SizedBox(width: 6),
+                      if (sending)
+                        // A tap here is swallowed: the message is already on its way. The button's own label says so.
+                        Semantics(
+                          button: true,
+                          label: tr('Sending…'),
+                          child: TapTarget(
+                            onTap: () {},
+                            child: const SizedBox.square(dimension: 38, child: Center(child: BusySpinner(size: 18, semanticsLabel: ''))),
+                          ),
+                        )
+                      else
+                        AppIconButton(
+                          icon: LucideIcons.arrowUp,
+                          label: tr('Send'),
+                          size: 38,
+                          filled: true,
+                          onTap: onSend,
+                          // Hold to hand the message to a background agent instead.
+                          onLongPress: onQueue,
+                        ),
+                    ] else if (!busy)
+                      AppIconButton(icon: LucideIcons.mic, label: tr('Voice'), size: 38, onTap: onVoice),
                   ],
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A round icon-only chip for composer actions.
-class _IconChip extends StatelessWidget {
-  const _IconChip({required this.icon, required this.label, required this.onTap, this.active = false});
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Tooltip(
-      message: label,
-      child: Semantics(
-        button: true,
-        label: label,
-        child: TapTarget(
-          onTap: onTap,
-          child: Material(
-            color: active ? p.accent : p.raised,
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: onTap,
-              child: SizedBox.square(dimension: 34, child: Icon(icon, size: 17, color: active ? p.onAccent : p.text)),
-            ),
           ),
         ),
       ),
@@ -1336,11 +1326,7 @@ class _ThinkingChip extends StatelessWidget {
           PopupMenuItem(value: level, height: 40, child: Text(_levelLabel(level))),
       ],
       child: IgnorePointer(
-        child: _Chip(
-          leading: Icon(LucideIcons.brain, size: 14, color: on ? context.palette.accent : context.palette.muted),
-          label: _levelLabel(agent.thinkingLevel),
-          onTap: () {},
-        ),
+        child: AppChip(icon: LucideIcons.brain, label: _levelLabel(agent.thinkingLevel), selected: on, onTap: () {}),
       ),
     );
   }
@@ -1356,133 +1342,63 @@ class _ThinkingChip extends StatelessWidget {
   };
 }
 
-class _Chip extends StatelessWidget {
-  const _Chip({required this.label, required this.onTap, this.icon, this.leading});
-  final String label;
-  final VoidCallback onTap;
-  final IconData? icon;
-  final Widget? leading;
+/// The approval mode, visible and switchable right in the composer.
+class _ApprovalChip extends StatelessWidget {
+  const _ApprovalChip({required this.agent});
+  final AgentController agent;
+
+  static const _modes = ['ask_all', 'ask_risky', 'auto'];
+
+  static String _label(String mode) => switch (mode) {
+    'ask_all' => tr('Ask all'),
+    'auto' => tr('Bypass all'),
+    _ => tr('Risky only'),
+  };
+
+  static IconData _icon(String mode) => switch (mode) {
+    'ask_all' => LucideIcons.shieldCheck,
+    'auto' => LucideIcons.shieldOff,
+    _ => LucideIcons.shield,
+  };
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    // The button is the 48 dp box, so a screen reader's focus is that size too.
-    return Semantics(
-      button: true,
-      container: true,
-      child: TapTarget(
-        onTap: onTap,
-        child: Material(
-          color: p.raised,
-          borderRadius: BorderRadius.circular(Radii.pill),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(Radii.pill),
-            child: Container(
-              height: 34,
-              padding: EdgeInsets.fromLTRB(leading == null ? 12 : 6, 0, 10, 0),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (leading != null) ...[leading!, const SizedBox(width: 6)],
-                  Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.text),
-                    ),
-                  ),
-                  if (icon != null) ...[const SizedBox(width: 4), Icon(icon, size: 13, color: p.faint)],
-                ],
-              ),
+    final mode = agent.approvalMode;
+    return PopupMenuButton<String>(
+      tooltip: tr('Approvals'),
+      initialValue: mode,
+      position: PopupMenuPosition.over,
+      elevation: 0,
+      onSelected: (v) async {
+        if (v == mode) return;
+        if (v == 'auto' && !await confirmBypass(context)) return;
+        if (!context.mounted) return;
+        await tellFailure(context, () => agent.setApprovalMode(v));
+      },
+      itemBuilder: (context) => [
+        for (final m in _modes)
+          PopupMenuItem(
+            value: m,
+            height: 44,
+            child: Row(
+              children: [
+                Icon(_icon(m), size: 16, color: m == 'auto' ? p.warning : p.muted),
+                const SizedBox(width: 8),
+                Text(_label(m)),
+              ],
             ),
           ),
+      ],
+      child: IgnorePointer(
+        child: AppChip(
+          icon: _icon(mode),
+          label: _label(mode),
+          selected: mode == 'auto',
+          color: p.warning,
+          onTap: () {},
         ),
       ),
     );
   }
-}
-
-class _RoundButton extends StatelessWidget {
-  const _RoundButton({
-    required this.icon,
-    required this.onTap,
-    required this.label,
-    this.filled = false,
-    this.onLongPress,
-    this.busy = false,
-  });
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
-  final bool filled;
-
-  /// A spinner in place of the icon (the button's work is on its way).
-  final bool busy;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final enabled = onTap != null;
-    final active = filled && enabled;
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      label: label,
-      child: TapTarget(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: AnimatedContainer(
-          duration: Motion.of(context, const Duration(milliseconds: 180)),
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: active ? p.accent : (filled ? p.raised : p.surface),
-            border: filled ? null : Border.all(color: p.border),
-            boxShadow: active
-                ? [
-                    BoxShadow(
-                      color: p.accent.withValues(alpha: 0.45),
-                      blurRadius: 14,
-                      spreadRadius: -4,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: onTap,
-              onLongPress: onLongPress,
-              child: busy
-                  // The button's own label says what it is busy with ("Sending…").
-                  ? Center(child: BusySpinner(color: p.muted, semanticsLabel: ''))
-                  : Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// An icon and a label, for a menu item.
-class _MenuLine extends StatelessWidget {
-  const _MenuLine(this.icon, this.label);
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Icon(icon, size: 18),
-      const SizedBox(width: 12),
-      Flexible(child: Text(label)),
-    ],
-  );
 }

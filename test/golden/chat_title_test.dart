@@ -1,5 +1,6 @@
-// UI-05: with a server set up, the chat's bar holds the back button, the title, the connection badge and three tools, and
-// on a narrow phone (or with large text) the title was squeezed to "N…" or nothing. The tools now go into one menu there.
+// UI-05: with a server set up, the chat's bar holds the back button, the title and the connection badge; the tools
+// (terminal, deploy, files, git, …) used to crowd the bar as separate buttons or a "More" menu and squeeze the title
+// to "N…" on a narrow phone. They now live behind the one Workspace button, in the project tools sheet's grid.
 import 'dart:convert';
 import 'dart:io';
 
@@ -72,26 +73,25 @@ void main() {
     testWidgets('the title keeps room, and the tools are one tap away ${look.name}', (tester) async {
       await open(tester, look);
       expect(titleWidth(tester), greaterThanOrEqualTo(90), reason: 'the chat is named in the bar');
-      expect(find.byTooltip(look.language == 'id' ? 'Lainnya' : 'More'), findsOneWidget);
-      await tester.tap(find.byTooltip(look.language == 'id' ? 'Lainnya' : 'More'));
+      expect(find.byTooltip(look.language == 'id' ? 'Lainnya' : 'More'), findsNothing);
+      await tester.tap(find.byTooltip(look.language == 'id' ? 'Alat proyek' : 'Project tools'));
       await tester.pumpAndSettle();
       expect(find.text('Terminal'), findsOneWidget);
-      expect(find.text(look.language == 'id' ? 'Alat proyek' : 'Project tools'), findsOneWidget);
+      expect(find.text('Deploy'), findsOneWidget);
     });
   }
 
-  testWidgets('a wide phone keeps the tools in the bar', (tester) async {
+  testWidgets('a wide phone has the same one Workspace button', (tester) async {
     await open(tester, const Look(width: 480));
     expect(find.byTooltip('More'), findsNothing);
-    expect(find.byTooltip('Terminal'), findsOneWidget);
-    expect(find.byTooltip('Deploy'), findsOneWidget);
+    expect(find.byTooltip('Project tools'), findsOneWidget);
   });
 
-  testWidgets('without a server the bar is as it was', (tester) async {
+  testWidgets('without a server the bar keeps the Workspace button', (tester) async {
     agent = AgentController(AgentClient(backend: FakeBackend()))..sessionName = 'Nota penjualan toko';
     await open(tester, const Look(width: 320));
     expect(find.byTooltip('More'), findsNothing);
-    expect(find.byTooltip('Terminal'), findsOneWidget);
+    expect(find.byTooltip('Project tools'), findsOneWidget);
   });
 
   testWidgets('UI-14: the connection badge is 48 dp to touch', (tester) async {

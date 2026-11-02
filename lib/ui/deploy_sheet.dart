@@ -352,22 +352,7 @@ class _DeploySheetState extends State<_DeploySheet> {
                 style: TextStyle(fontFamily: mono, fontSize: 12, color: p.muted),
               ),
               const SizedBox(height: 16),
-              // Chips wrap onto a second line on narrow screens, where four segments would not fit.
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final t in DeployTarget.values)
-                    ChoiceChip(
-                      // The selected chip is filled with the text color, so its icon flips like the label.
-                      avatar: Icon(t.icon, size: 16, color: target == t ? p.inverse : p.text),
-                      label: Text(t.label),
-                      showCheckmark: false,
-                      selected: target == t,
-                      onSelected: (_) => setState(() => _selectTarget(t)),
-                    ),
-                ],
-              ),
+              _TargetBar(value: target, onSelect: (t) => setState(() => _selectTarget(t))),
               const SizedBox(height: 16),
               if (!connected) ...[
                 Text(
@@ -552,6 +537,56 @@ class _Result extends StatelessWidget {
             onPressed: () => openUrl(url),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The deploy targets as one segmented bar: the chosen one is tinted with the accent, the rest stay quiet.
+class _TargetBar extends StatelessWidget {
+  const _TargetBar({required this.value, required this.onSelect});
+  final DeployTarget value;
+  final void Function(DeployTarget) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.md), border: Border.all(color: p.border)),
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (i, t) in DeployTarget.values.indexed) ...[
+              if (i > 0) VerticalDivider(width: 1, thickness: 1, color: p.border),
+              Expanded(
+                child: Material(
+                  color: value == t ? p.accent.withValues(alpha: 0.15) : Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onSelect(t),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(t.icon, size: 16, color: value == t ? p.accent : p.muted),
+                          const SizedBox(height: 3),
+                          Text(
+                            t.label,
+                            maxLines: 2,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: value == t ? p.accent : p.muted, height: 1.15),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

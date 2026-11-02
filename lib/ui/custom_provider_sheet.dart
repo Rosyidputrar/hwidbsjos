@@ -5,6 +5,7 @@ import '../agent/agent_controller.dart';
 import '../agent/models.dart';
 import 'errors.dart';
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// The API shapes the host can speak to a custom endpoint (agent/src/providers.ts APIS).
@@ -320,9 +321,7 @@ class _CustomProviderSheetState extends State<_CustomProviderSheet> {
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: fetching ? null : _fetch,
-                  icon: fetching
-                      ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 1.8))
-                      : const Icon(LucideIcons.download, size: 16),
+                  icon: fetching ? const BusySpinner(size: 14) : const Icon(LucideIcons.download, size: 16),
                   label: Text(fetching ? tr('Asking the server…') : tr('Fetch models from the server')),
                 ),
               ),
@@ -371,6 +370,5 @@ class _Busy extends StatelessWidget {
   const _Busy();
 
   @override
-  Widget build(BuildContext context) =>
-      const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2));
+  Widget build(BuildContext context) => const BusySpinner(size: 16);
 }

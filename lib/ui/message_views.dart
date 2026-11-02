@@ -224,14 +224,14 @@ class UserBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: p.raised,
+        color: p.accent.withValues(alpha: 0.12),
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(Radii.lg),
           topRight: Radius.circular(Radii.lg),
           bottomLeft: Radius.circular(Radii.lg),
-          bottomRight: Radius.circular(Radii.sm),
+          bottomRight: Radius.circular(6),
         ),
-        border: Border.all(color: p.accent.withValues(alpha: 0.18)),
+        border: Border.all(color: p.accent.withValues(alpha: 0.22)),
       ),
       // Plain text so the long-press menu wins over text selection ("Select text" in the menu covers that).
       // Links are tappable; the rest stays plain so the long-press menu wins.
@@ -1239,9 +1239,11 @@ class _ToolCallViewState extends State<ToolCallView> {
     });
 
     return Container(
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
+        color: p.surface,
         borderRadius: BorderRadius.circular(Radii.md),
-        border: Border.all(color: p.border),
+        border: Border.all(color: status == ToolStatus.failed ? p.danger.withValues(alpha: 0.4) : p.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

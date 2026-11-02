@@ -87,12 +87,14 @@ class _ModelSheetState extends State<_ModelSheet> {
                 child: Row(
                   children: [
                     Expanded(child: Text(tr('Model'), style: text.titleLarge)),
-                    TextButton(
+                    TextButton.icon(
                       onPressed: () {
                         final nav = Navigator.of(context)..pop();
                         nav.push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
                       },
-                      child: Text(tr('Providers')),
+                      style: TextButton.styleFrom(foregroundColor: p.accent),
+                      icon: const Icon(LucideIcons.plugZap, size: 16),
+                      label: Text(tr('Providers')),
                     ),
                   ],
                 ),
@@ -144,7 +146,13 @@ class _ModelSheetState extends State<_ModelSheet> {
                           for (final entry in byProvider.entries) ...[
                             Padding(
                               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-                              child: Text((names[entry.key] ?? entry.key).toUpperCase(), style: text.labelSmall),
+                              child: Row(
+                                children: [
+                                  BrandTile(id: entry.key, size: 20),
+                                  const SizedBox(width: 8),
+                                  Flexible(child: Text((names[entry.key] ?? entry.key).toUpperCase(), style: text.labelSmall)),
+                                ],
+                              ),
                             ),
                             for (final m in entry.value)
                               _ModelTile(model: m, agent: agent, saving: _saving, onPick: _pick),
@@ -181,36 +189,40 @@ class _ModelTile extends StatelessWidget {
       if (model.reasoning) tr('reasoning'),
       if (model.acceptsImages) tr('vision'),
     ].join('  ·  ');
-    return ListTile(
-      onTap: saving != null ? null : () => onPick(model),
-      title: Text(model.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (details.isNotEmpty) Text(details),
-          if (details.isNotEmpty) Text(details),
-        ],
-      ),
-      // The star is its own button, so tapping it never selects the model.
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            onPressed: () => Appearance.instance.toggleFavorite(model.key),
-            tooltip: isFav ? tr('Remove from favorites') : tr('Add to favorites'),
-            icon: Icon(LucideIcons.star, size: 18, color: isFav ? p.warning : p.muted),
-          ),
-          // The check keeps its slot on every row, so the stars line up down the list.
-          SizedBox(
-            width: 22,
-            child: saving == model.key
-                ? const Center(child: BusySpinner())
-                : selected
-                ? Icon(LucideIcons.check, size: 18, color: p.text)
-                : null,
-          ),
-        ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: ListTile(
+        onTap: saving != null ? null : () => onPick(model),
+        selected: selected,
+        selectedTileColor: p.accent.withValues(alpha: 0.12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
+        title: Text(
+          model.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: p.text),
+        ),
+        subtitle: details.isEmpty ? null : Text(details),
+        // The star is its own button, so tapping it never selects the model.
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: () => Appearance.instance.toggleFavorite(model.key),
+              tooltip: isFav ? tr('Remove from favorites') : tr('Add to favorites'),
+              icon: Icon(LucideIcons.star, size: 18, color: isFav ? p.warning : p.muted),
+            ),
+            // The check keeps its slot on every row, so the stars line up down the list.
+            SizedBox(
+              width: 22,
+              child: saving == model.key
+                  ? const Center(child: BusySpinner())
+                  : selected
+                  ? Icon(LucideIcons.circleCheck, size: 20, color: p.accent)
+                  : null,
+            ),
+          ],
+        ),
       ),
     );
   }

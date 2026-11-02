@@ -16,6 +16,7 @@ const _allowed = {
   'network_screen.dart:Search1API',
   'network_screen.dart:TinyFish',
   'chat_export.dart:Download/Rynex',
+  'chat_screen.dart:pi', // the agent's name, over each of its turns
   'mcp_screen.dart:memory',
   'mcp_screen.dart:npx -y @modelcontextprotocol/server-memory',
   'mcp_screen.dart:URL',

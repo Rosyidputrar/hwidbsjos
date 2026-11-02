@@ -21,13 +21,16 @@ import 'editor_screen.dart';
 import 'chat_export.dart';
 import 'diff_view.dart';
 import 'errors.dart';
+import 'deploy_sheet.dart';
 import 'files_screen.dart';
+import 'folder_picker.dart';
 import 'git_screen.dart';
 import 'kit.dart';
 import 'preview_open.dart';
 import 'review_screen.dart';
 import 'search_screen.dart';
 import 'tasks_screen.dart';
+import 'terminal_screen.dart';
 import 'theme.dart';
 import 'usage_screen.dart';
 
@@ -1214,6 +1217,8 @@ class MentionMenu extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // Project tools menu
 
+/// The project tools: everything that acts on this chat's folder, behind the chat header's one button — a grid of
+/// tiles, with sharing the chat first and the project's web-search switch last.
 Future<void> showProjectTools(
   BuildContext context,
   AgentController agent, {
@@ -1230,21 +1235,59 @@ Future<void> showProjectTools(
         push(w);
       }
 
+      // The folder's agent memory, created from the seed on first open.
+      Future<void> openMemory() async {
+        try {
+          if (!await agent.fs.exists(memory)) {
+            await agent.fs.writeString(memory, '# Project notes for the agent\n\n- Stack:\n- How to run:\n- Conventions:\n');
+          }
+        } catch (e) {
+          if (sheet.mounted) {
+            ScaffoldMessenger.of(sheet).showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: ${friendlyError(e)}')));
+          }
+          return;
+        }
+        if (sheet.mounted) go(EditorScreen(agent: agent, path: memory));
+      }
+
+      final p = sheet.palette;
+      final folder = sessionFolder(agent.cwd, agent.info['workspace'] as String? ?? '');
+      final inProject = folder != null;
       return SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(tr('Project'), style: Theme.of(sheet).textTheme.titleLarge),
-              const SizedBox(height: 12),
+              Row(
+                children: [
+                  IconTile(icon: inProject ? LucideIcons.folderGit2 : LucideIcons.messageSquare, color: p.accent, size: 40),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          folder ?? tr('Workspace'),
+                          style: Theme.of(sheet).textTheme.titleMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(agent.cwd, style: TextStyle(fontFamily: mono, fontSize: 12, color: p.faint), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
               // The chat itself, once there is something in it to share.
               if (agent.entries.isNotEmpty) ...[
+                const SizedBox(height: 16),
                 SettingsGroup(
                   children: [
                     SettingsRow(
                       icon: LucideIcons.share2,
-                      color: context.palette.accent,
+                      color: p.accent,
                       title: tr('Share this chat'),
                       subtitle: tr('As text or a Markdown file'),
                       onTap: () async {
@@ -1254,71 +1297,54 @@ Future<void> showProjectTools(
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
               ],
-              SettingsGroup(
-                children: [
-                  SettingsRow(
-                    icon: LucideIcons.folderOpen,
-                    color: const Color(0xFFF76B15),
-                    title: tr('Files'),
-                    subtitle: tr('Browse and edit the project'),
-                    onTap: () => go(FilesScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.search,
-                    color: context.palette.accentAlt,
-                    title: tr('Search'),
-                    subtitle: tr('Find text across every file'),
-                    onTap: () => go(SearchScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.history,
-                    color: const Color(0xFF7C5CFC),
-                    title: tr('Changes & undo'),
-                    subtitle: tr('What the agent changed, and roll it back'),
-                    onTap: () => go(ChangesScreen(agent: agent)),
-                  ),
-                  // The agent's changes in one place: read every diff, then commit them with a message it writes.
-                  SettingsRow(
-                    icon: LucideIcons.gitCommitHorizontal,
-                    color: const Color(0xFF18794E),
-                    title: tr('Review & commit'),
-                    subtitle: tr('Every changed file with its diff, and a commit message the agent writes'),
-                    onTap: () => go(ReviewScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.gitBranch,
-                    color: const Color(0xFF111113),
-                    title: tr('Git'),
-                    subtitle: tr('Commit, push, branches, issues and PRs'),
-                    onTap: () => go(GitScreen(agent: agent, onWork: onPrompt)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.brain,
-                    color: const Color(0xFFEC4899),
-                    title: tr('Project memory'),
-                    subtitle: tr('AGENTS.md: rules the agent follows in this folder'),
-                    onTap: () async {
-                      try {
-                        if (!await agent.fs.exists(memory)) {
-                          await agent.fs.writeString(
-                            memory,
-                            '# Project notes for the agent\n\n- Stack:\n- How to run:\n- Conventions:\n',
-                          );
-                        }
-                      } catch (e) {
-                        if (sheet.mounted) {
-                          ScaffoldMessenger.of(sheet)
-                              .showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: ${friendlyError(e)}')));
-                        }
-                        return;
-                      }
-                      if (sheet.mounted) go(EditorScreen(agent: agent, path: memory));
-                    },
-                  ),
-                ],
+              const SizedBox(height: 16),
+              ValueListenableBuilder<bool>(
+                valueListenable: deployPreparing,
+                builder: (sheet, preparing, _) {
+                  // While the agent works (or a deploy is being prepared), the Deploy tile waits.
+                  final deployOff = agent.busy || preparing;
+                  return GridView.count(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 1.15,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      ActionTile(icon: LucideIcons.folderOpen, color: const Color(0xFFF97316), label: tr('Files'), onTap: () => go(FilesScreen(agent: agent))),
+                      ActionTile(icon: LucideIcons.gitBranch, color: const Color(0xFFEF4444), label: tr('Git'), onTap: () => go(GitScreen(agent: agent, onWork: onPrompt))),
+                      ActionTile(icon: LucideIcons.squareTerminal, color: const Color(0xFF64748B), label: tr('Terminal'), onTap: () => go(TerminalScreen(agent: agent))),
+                      ActionTile(
+                        icon: LucideIcons.rocket,
+                        color: const Color(0xFFEC4899),
+                        label: tr('Deploy'),
+                        onTap: deployOff
+                            ? null
+                            : () {
+                                Navigator.pop(sheet);
+                                showDeploySheet(context, agent);
+                              },
+                      ),
+                      ActionTile(icon: LucideIcons.search, color: const Color(0xFF3B82F6), label: tr('Search'), onTap: () => go(SearchScreen(agent: agent))),
+                      ActionTile(icon: LucideIcons.history, color: const Color(0xFF8B5CF6), label: tr('Changes'), onTap: () => go(ChangesScreen(agent: agent))),
+                      ActionTile(icon: LucideIcons.brain, color: const Color(0xFFD946EF), label: tr('Memory'), onTap: openMemory),
+                      ActionTile(icon: LucideIcons.listTodo, color: const Color(0xFF14B8A6), label: tr('Tasks'), onTap: () => go(TasksScreen(agent: agent))),
+                      ActionTile(icon: LucideIcons.chartColumn, color: const Color(0xFFEAB308), label: tr('Usage'), onTap: () => go(UsageScreen(agent: agent))),
+                      ActionTile(
+                        icon: LucideIcons.gitCommitHorizontal,
+                        color: const Color(0xFF18794E),
+                        label: tr('Review & commit'),
+                        onTap: () => go(ReviewScreen(agent: agent)),
+                      ),
+                    ],
+                  );
+                },
               ),
+              if (agent.busy) ...[
+                const SizedBox(height: 10),
+                Text(tr('Deploy is available once the agent finishes.'), style: TextStyle(fontSize: 12.5, color: p.faint)),
+              ],
               const SizedBox(height: 12),
               ListenableBuilder(
                 listenable: agent.integrations,
@@ -1343,25 +1369,6 @@ Future<void> showProjectTools(
                     ],
                   );
                 },
-              ),
-              const SizedBox(height: 12),
-              SettingsGroup(
-                children: [
-                  SettingsRow(
-                    icon: LucideIcons.listTodo,
-                    color: const Color(0xFF14B8A6),
-                    title: tr('Background tasks'),
-                    subtitle: tr('Queue, parallel agents and schedules'),
-                    onTap: () => go(TasksScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.chartColumn,
-                    color: const Color(0xFFF59E0B),
-                    title: tr('Usage'),
-                    subtitle: tr('Tokens and cost'),
-                    onTap: () => go(UsageScreen(agent: agent)),
-                  ),
-                ],
               ),
             ],
           ),

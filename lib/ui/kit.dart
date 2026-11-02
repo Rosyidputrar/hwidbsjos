@@ -798,6 +798,242 @@ Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilde
 ButtonStyle dangerButtonStyle(BuildContext context) =>
     FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: context.palette.onDanger);
 
+/// A small status dot, optionally pulsing.
+class StatusDot extends StatefulWidget {
+  const StatusDot({super.key, required this.color, this.size = 8, this.pulse = false});
+
+  final Color color;
+  final double size;
+  final bool pulse;
+
+  @override
+  State<StatusDot> createState() => _StatusDotState();
+}
+
+class _StatusDotState extends State<StatusDot> with SingleTickerProviderStateMixin {
+  late final AnimationController controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.pulse) controller.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(StatusDot old) {
+    super.didUpdateWidget(old);
+    if (widget.pulse && !controller.isAnimating) controller.repeat(reverse: true);
+    if (!widget.pulse && controller.isAnimating) controller.stop();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dot = Container(
+      width: widget.size,
+      height: widget.size,
+      decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+    );
+    if (!widget.pulse) return dot;
+    return FadeTransition(opacity: Tween(begin: 1.0, end: 0.35).animate(controller), child: dot);
+  }
+}
+
+/// A square icon button: the app's one small-button shape, filled or plain. Named for what it does — the visible square
+/// can be smaller than a finger, so a [TapTarget] carries the tap and the [Semantics] node out to 48 dp.
+class AppIconButton extends StatelessWidget {
+  const AppIconButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.onLongPress,
+    this.size = 40,
+    this.iconSize,
+    this.filled = false,
+    this.badge = false,
+    this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final double size;
+  final double? iconSize;
+  final bool filled;
+  final bool badge;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final fg = filled ? p.onAccent : (color ?? p.muted);
+    return Semantics(
+      button: true,
+      enabled: onTap != null,
+      label: label,
+      child: TapTarget(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            AnimatedContainer(
+              duration: Motion.of(context, const Duration(milliseconds: 180)),
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                color: filled ? p.accent : p.surface,
+                borderRadius: BorderRadius.circular(size * 0.32),
+                border: filled ? null : Border.all(color: p.border),
+              ),
+              child: Icon(icon, size: iconSize ?? size * 0.46, color: fg),
+            ),
+            if (badge)
+              Positioned(
+                top: size * 0.18,
+                right: size * 0.18,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(color: p.danger, shape: BoxShape.circle, border: Border.all(color: p.bg, width: 1.5)),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A pill chip: bordered, or tinted when [selected]. Its tap target is a finger-sized 48 dp (see [TapTarget]);
+/// [semanticsLabel] says something other than the visible text when the two differ ("Plan" the chip, "Plan mode" the control).
+class AppChip extends StatelessWidget {
+  const AppChip({
+    super.key,
+    this.icon,
+    this.leading,
+    required this.label,
+    this.trailingIcon,
+    this.selected = false,
+    this.color,
+    this.semanticsLabel,
+    this.maxWidth,
+    required this.onTap,
+  });
+
+  final IconData? icon;
+  final Widget? leading;
+  final String label;
+  final IconData? trailingIcon;
+  final bool selected;
+  final Color? color;
+  final String? semanticsLabel;
+  final double? maxWidth;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final c = color ?? p.accent;
+    final label0 = ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth ?? 200),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? c : p.text),
+      ),
+    );
+    final pill = Material(
+      color: selected ? c.withValues(alpha: 0.13) : p.surface,
+      shape: StadiumBorder(side: BorderSide(color: selected ? c.withValues(alpha: 0.4) : p.border)),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Container(
+          height: 34,
+          padding: EdgeInsets.fromLTRB(leading != null ? 6 : 12, 0, 12, 0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (leading != null) ...[leading!, const SizedBox(width: 6)],
+              if (icon != null) ...[Icon(icon, size: 15, color: selected ? c : p.muted), const SizedBox(width: 6)],
+              Flexible(child: label0),
+              if (trailingIcon != null) ...[const SizedBox(width: 4), Icon(trailingIcon, size: 13, color: p.faint)],
+            ],
+          ),
+        ),
+      ),
+    );
+    // With its own label the chip says exactly that (its shorter visible text stays for the eye only); without one the
+    // visible text is the label, merged into this one node.
+    if (semanticsLabel != null) {
+      return Semantics(
+        button: true,
+        selected: selected,
+        label: semanticsLabel,
+        child: TapTarget(onTap: onTap, child: ExcludeSemantics(child: pill)),
+      );
+    }
+    return Semantics(button: true, container: true, selected: selected, child: TapTarget(onTap: onTap, child: pill));
+  }
+}
+
+/// A labelled square for grids of actions: a tinted icon over a short label.
+class ActionTile extends StatelessWidget {
+  const ActionTile({super.key, required this.icon, required this.color, required this.label, this.onTap});
+
+  final IconData icon;
+  final Color color;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Opacity(
+      opacity: onTap == null ? 0.45 : 1,
+      child: Material(
+        color: p.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.lg), side: BorderSide(color: p.border)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(Radii.lg),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconTile(icon: icon, color: color, size: 38),
+                const SizedBox(height: 8),
+                // On a narrow phone with large text the label shrinks to its tile instead of overflowing it.
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.text),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Keeps content to a readable width on a tablet, a foldable or a phone on its side (lists and the chat used the whole
 /// width: an 880 dp line of text, 430 dp project tiles). Below [max] it changes nothing.
 class ContentWidth extends StatelessWidget {

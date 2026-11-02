@@ -287,6 +287,9 @@ const _id = <String, String>{
   'Queue a follow-up…': 'Antrekan pesan berikutnya…',
   'Ask the agent to build, fix or deploy…': 'Minta agent bikin, perbaiki, atau deploy…',
   'Plan mode': 'Mode rencana',
+  'Plan': 'Rencana',
+  'Try one of these': 'Coba salah satu ini',
+  'Deploy is available once the agent finishes.': 'Deploy tersedia setelah agent selesai.',
   // Chat extras
   'Allow': 'Izinkan',
   'Always': 'Selalu',
