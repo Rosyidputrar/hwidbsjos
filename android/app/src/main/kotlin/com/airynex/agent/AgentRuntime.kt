@@ -73,6 +73,8 @@ object AgentRuntime {
         linkBinaries(nativeDir, bin, gitExec)
         val caFile = File(context.filesDir, "cacerts.pem")
         exportTrustedCerts(caFile)
+        val sslConfig = File(context.filesDir, "openssl.cnf")
+        writeOpenSslConfig(sslConfig)
 
         val env = linkedMapOf(
             "HOME" to home.path,
@@ -102,6 +104,14 @@ object AgentRuntime {
             "RYNEX_PROOT" to File(nativeDir, "libproot.so").path,
             "RYNEX_PROOT_LOADER" to File(nativeDir, "libproot_loader.so").path,
         )
+        // OpenSSL (inside node, curl, ssh and git) reads its configuration from /data/data/com.termux/files/usr/etc/tls/
+        // openssl.cnf unless told otherwise. On a phone that also has Termux that file exists but belongs to another
+        // app, so reading it fails with "Permission denied", and OpenSSL treats a configuration it cannot read as
+        // fatal: node exits with code 13 before the agent says anything ("The agent could not start"). On a phone
+        // without Termux the file is simply missing, which OpenSSL ignores. A file of our own that is always readable
+        // makes both phones behave the same. Only set when the file is really there: pointing OpenSSL at a missing
+        // file is its own error on some builds.
+        if (sslConfig.length() > 0) env["OPENSSL_CONF"] = sslConfig.path
         if (caFile.length() > 0) {
             env["NODE_EXTRA_CA_CERTS"] = caFile.path
             env["SSL_CERT_FILE"] = caFile.path
@@ -109,6 +119,19 @@ object AgentRuntime {
             env["CURL_CA_BUNDLE"] = caFile.path
         }
         return env
+    }
+
+    /**
+     * The OpenSSL configuration the app's processes run with (OPENSSL_CONF): empty on purpose, so no configuration of
+     * another app is read. Rewritten only when it differs, so it is cheap to call on every start.
+     */
+    private fun writeOpenSslConfig(file: File) {
+        val text = "# Rynex: intentionally empty. Keeps OpenSSL from reading another app's openssl.cnf (see AgentRuntime).\n"
+        try {
+            if (!file.exists() || file.readText() != text) file.writeText(text)
+        } catch (_: java.io.IOException) {
+            // A full disk must not keep the agent from starting; without the file the environment is as it was.
+        }
     }
 
     @Synchronized
